@@ -40,12 +40,12 @@ Key design rules:
 
 | # | Name | Role | GitHub | Contact |
 |---|---|---|---|---|
-| 1 | | | [@username](https://github.com/) | |
-| 2 | | | [@username](https://github.com/) | |
-| 3 | | | [@username](https://github.com/) | |
-| 4 | | | [@username](https://github.com/) | |
-| 5 | | | [@username](https://github.com/) | |
-| 6 | | | [@username](https://github.com/) | |
+| 1 | Suarez Balam Brandon Emanuel| Networking, Security & Concurrency Lead | [@BS435](https://github.com/BS435) | |
+| 2 | Contreras Gamboa Emiliano | Backend Architect | [@EmiCG](https://github.com/EmiCG) | |
+| 3 | Dzib Pech Luis Gilberto| V&V/QA Lead | [@LuisGilDzib](https://github.com/LuisGilDzib) | |
+| 4 | Martínez Martínez José Pablo | Scrum Master | [@Jose-Pablo-Martinez](https://github.com/Jose-Pablo-Martinez) | |
+| 5 | Matu Aguayo Leonardo Daniel | Frontend Architect | [@leonardodanielmaguayo-hub](https://github.com/leonardodanielmaguayo-hub) | |
+| 6 | Vega Nolasco Erick Ricardo| Database Lead | [@eriveingsoft](https://github.com/eriveingsoft) | |
 
 ---
 
@@ -296,6 +296,7 @@ Full documentation is in the [`docs/`](docs/) folder:
 | [`ordenes-kds-diagramas-secuencia.md`](docs/ordenes-kds-diagramas-secuencia.md) | Sequence diagrams of every event flow |
 | [`DEVELOPMENT_GUIDELINES.md`](docs/DEVELOPMENT_GUIDELINES.md) | Coding standards and rules for humans and AI agents |
 | [`VyV_OrdenesKDS.md`](docs/VyV_OrdenesKDS.md) | Verification & Validation plan |
+| [`CONTRIBUTING.md`](docs/CONTRIBUTING.md) | Contribution guidelines and workflow |
 
 ---
 
@@ -348,12 +349,12 @@ Reglas de diseño clave:
 
 | # | Nombre | Rol | GitHub | Contacto |
 |---|---|---|---|---|
-| 1 | | | [@usuario](https://github.com/) | |
-| 2 | | | [@usuario](https://github.com/) | |
-| 3 | | | [@usuario](https://github.com/) | |
-| 4 | | | [@usuario](https://github.com/) | |
-| 5 | | | [@usuario](https://github.com/) | |
-| 6 | | | [@usuario](https://github.com/) | |
+| 1 | Suarez Balam Brandon Emanuel| Líder de redes, seguridad y concurrencia | [@BS435](https://github.com/BS435) | |
+| 2 | Contreras Gamboa Emiliano | Arquitecto backend | [@EmiCG](https://github.com/EmiCG) | |
+| 3 | Dzib Pech Luis Gilberto| Responsable VyV-QA| [@LuisGilDzib](https://github.com/LuisGilDzib) | |
+| 4 | Martínez Martínez José Pablo | Scrum master | [@Jose-Pablo-Martinez](https://github.com/Jose-Pablo-Martinez) | |
+| 5 | Matu Aguayo Leonardo Daniel | Arquitecto Frontend | [@leonardodanielmaguayo-hub](https://github.com/leonardodanielmaguayo-hub) | |
+| 6 | Vega Nolasco Erick Ricardo| Líder de base de datos | [@eriveingsoft](https://github.com/eriveingsoft) | |
 
 ---
 
@@ -604,6 +605,7 @@ La documentación completa se encuentra en la carpeta [`docs/`](docs/):
 | [`ordenes-kds-diagramas-secuencia.md`](docs/ordenes-kds-diagramas-secuencia.md) | Diagramas de secuencia de cada flujo de eventos |
 | [`DEVELOPMENT_GUIDELINES.md`](docs/DEVELOPMENT_GUIDELINES.md) | Estándares de código y reglas para humanos y agentes IA |
 | [`VyV_OrdenesKDS.md`](docs/VyV_OrdenesKDS.md) | Plan de Verificación y Validación |
+| [`CONTRIBUTING.md`](docs/CONTRIBUTING.md) | Guías de contribución y flujo de trabajo |
 
 ---
 
