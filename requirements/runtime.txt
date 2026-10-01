@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pydantic
+sqlalchemy
+alembic
+aio-pika
+asyncpg
+redis

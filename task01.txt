@@ -1,0 +1,38 @@
+Descripción: 
+
+.github/workflows/ci.yml con jobs paralelos: ruff, mypy --strict, pytest unit (JUnit + cobertura de ramas), Testcontainers, ZAP API scan y Newman. Base obligatoria: el estándar de CI/CD que propuso otro equipo y que pidió el profe: template.yml (comentado línea por línea; ci.yml es la misma lógica sin comentarios), más dockerfile.txt, sonar-project.properties y QUICKSTART.md. Se parte de ese archivo y solo se cambia lo que este microservicio necesita distinto. La guía de diagnóstico cuando un job falla es el QUICKSTART §4 (Checks → Run en rojo → job fallido → Artifacts, donde se abre htmlcov/index.html).
+Se toma tal cual del estándar:
+concurrency con group: ${{ github.workflow }}-${{ github.ref }} y cancel-in-progress solo en PR; workflow_dispatch para disparo manual.
+permissions de mínimo privilegio por job (contents: read, pull-requests: read; packages: write solo en el job de publicación).
+actions/checkout@v4 con fetch-depth: 0 (Sonar necesita el historial) y actions/setup-python@v5 con cache: 'pip'.
+Subida de artefactos con if: always(), retention-days: 14 e if-no-files-found: warn (coverage.xml, junit.xml, htmlcov/).
+Análisis Sonar con SonarSource/sonarqube-scan-action@v8.2.2, SONAR_TOKEN y GITHUB_TOKEN, y sonar.qualitygate.wait=true: es lo que hace fallar el job si el Quality Gate falla (y, con él, la condición de cobertura de código nuevo < 85 % del DoD). En el estándar la bandera está duplicada (properties y args); basta una.
+Aviso de fallo a Discord con Ilshidur/action-discord@0.4.0 y el secreto DISCORD_WEBHOOK. Donde la subtarea de webhook dice ALERT_WEBHOOK_URL, se usa este secreto (nombre del estándar).
+Job de CD build-and-push: needs de todos los jobs de verificación y if: github.ref == 'refs/heads/main' && github.event_name == 'push'; docker/setup-buildx-action@v3, docker/login-action@v4 a ghcr.io con GITHUB_TOKEN, paso que pasa github.repository a minúsculas (GHCR lo exige), docker/build-push-action@v7 con tags latest y ${{ github.sha }}, caché type=gha,mode=max y aviso final a Discord con if: always(). Como main solo recibe la promoción develop → main, la imagen se publica únicamente en releases (primer candidato al cierre de S6; INT-12 al final).
+
+Se adapta a este microservicio:
+Disparadores push y pull_request hacia develop y main (el estándar solo main; nuestro flujo integra primero en develop).
+Sin matriz de Python: solo 3.12 (README y Guidelines; StrEnum exige ≥ 3.11 y el tipado estricto se verifica en 3.12). Por eso los checks se llaman por job (unit-tests, …) y no test (3.x).
+
+Rutas y comandos: código en app/, pruebas en tests/, dependencias en requirements/dev.txt (ahí apunta cache-dependency-path); el estándar usa src/, src/tests.py y PYTHONPATH=src, que aquí no aplican. Lint y tipos: ruff check . && ruff format --check . && mypy app. Pruebas: pytest tests/unit --cov=app --cov-branch --cov-report=xml:coverage.xml --cov-report=html:htmlcov --junitxml=junit.xml.
+
+Jobs separados por etapa (lint-and-types → unit-tests → sonarcloud / integration-tests → api-and-contract / zap-api-scan) en lugar del job único test del estándar; sonarcloud descarga los artefactos de unit-tests. Como el aviso a Discord ya no comparte job con lo que puede fallar, va en un job notify-on-failure con needs de los demás y if: failure(). El proyecto Sonar y su sonar-project.properties del backend los crea TASK-02 (H-M); aquí solo se deja el job y se publica coverage.xml.
+
+schedule (cron semanal del estándar: domingos 00:00 UTC): se conserva para las corridas lentas (k6 completo de TASK-24, ZAP); los jobs rápidos no dependen de él. Los schedule corren sobre la rama por defecto del repo: confirmar cuál es.
+
+Dockerfile del backend (base dockerfile.txt, se conserva la idea de copiar e instalar dependencias antes del código para aprovechar la caché de capas): python:3.12-slim (el estándar usa 3.11); instalar el archivo de dependencias de runtime (no dev.txt); copiar app/, alembic.ini y contracts/events/ (el Outbox Worker valida sus payloads contra esos JSON Schemas, TASK-05); CMD con uvicorn app.main:app --host 0.0.0.0 en lugar de python main.py. La API y los workers usan la misma imagen con distinto comando (python -m app.workers.run_all para los workers, definido en compose). .dockerignore para .env, tests/ y .git. Puerto del contenedor por alinear con el Gateway (el README del frontend menciona :3003; el del backend usa :8000 en local).
+
+
+Sin equivalente en el estándar (se mantiene lo ya planeado): mypy --strict, Testcontainers, ZAP API scan, Newman, gitleaks y validación de nombre de rama / Conventional Commits.
+Subtareas:
+
+Jobs lint-and-types y unit-tests con artefactos (unit.xml, coverage.xml).
+
+Job integration-tests (Testcontainers) con una prueba smoke.
+
+Jobs api-and-contract (Newman, vacío hasta TASK-34) y zap-api-scan con .zap/rules.tsv (Alto = FAIL).
+
+notify-on-failure por webhook (ALERT_WEBHOOK_URL en GitHub Secrets); gitleaks.
+
+Validación de nombre de rama ^[a-z0-9]+-[a-z]+$ y de título Conventional Commits.
+DoD (PDF): el pipeline falla si un test falla o la cobertura de código nuevo es < 85 %; publica XML/HTML; notificación de fallos configurada.
