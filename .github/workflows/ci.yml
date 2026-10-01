@@ -216,6 +216,7 @@ jobs:
           target: http://127.0.0.1:8000/openapi.json
           rules_file_name: .zap/rules.tsv
           fail_action: true
+          artifact_name: zap-scan
 
   notify-on-failure:
     name: Notify on Failure
