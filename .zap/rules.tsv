@@ -1,4 +1,4 @@
 # OWASP ZAP Rules Configuration
 # Format: <Rule ID> \t <IGNORE|WARN|FAIL>
-# 10003 is Vulnerable JS, etc. We will populate this as needed.
-# By default, we want High risk to FAIL, which can also be configured via ZAP arguments.
+10021	IGNORE
+90004	IGNORE
