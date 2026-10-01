@@ -1,0 +1,9 @@
+-r runtime.txt
+pytest
+pytest-cov
+pytest-asyncio
+pytest-bdd
+testcontainers
+ruff
+mypy
+httpx
