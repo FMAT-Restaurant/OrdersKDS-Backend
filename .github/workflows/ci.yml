@@ -210,7 +210,7 @@ jobs:
           exit 1
         
       - name: ZAP API Scan
-        uses: zaproxy/action-api-scan@v0.8.0
+        uses: zaproxy/action-api-scan@v0.10.0
         with:
           format: openapi
           target: http://127.0.0.1:8000/openapi.json
