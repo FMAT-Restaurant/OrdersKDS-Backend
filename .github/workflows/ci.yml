@@ -178,16 +178,38 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements/dev.txt
 
-      - name: Start FastAPI server in background
+      - name: Start FastAPI server
+        shell: bash
         run: |
-          uvicorn app.main:app --host 127.0.0.1 --port 8000 &
-          sleep 5
+          set -euo pipefail
+          uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/uvicorn.log 2>&1 &
+          echo $! > /tmp/uvicorn.pid
+
+      - name: Wait for FastAPI
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:8000/openapi.json > /tmp/openapi.json; then
+              echo "FastAPI is ready"
+              exit 0
+            fi
+            if ! kill -0 "$(cat /tmp/uvicorn.pid)" 2>/dev/null; then
+              echo "FastAPI exited unexpectedly:"
+              cat /tmp/uvicorn.log
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "FastAPI did not become ready:"
+          cat /tmp/uvicorn.log
+          exit 1
         
       - name: ZAP API Scan
         uses: zaproxy/action-api-scan@v0.8.0
         with:
           format: openapi
-          target: http://localhost:8000/openapi.json
+          target: http://127.0.0.1:8000/openapi.json
           rules_file_name: .zap/rules.tsv
           fail_action: true
 
