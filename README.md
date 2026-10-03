@@ -157,9 +157,12 @@ stateDiagram-v2
 #### Prerequisites
 
 - **Python** 3.12+ — [python.org](https://www.python.org)
-- **Docker** + **Docker Compose** — [docker.com](https://www.docker.com)
+- **Docker Desktop** (includes Docker Compose v2; WSL 2 on Windows) — [docker.com](https://www.docker.com)
 - **Git** 2.40+
+- *(Recommended)* a PostgreSQL client such as **DBeaver** or **pgAdmin** to browse the database. A local PostgreSQL *server* is **not** needed: the database runs in a container.
 - *(Optional, for the full test suite)* **k6**, **Newman** (`npm i -g newman`)
+
+> Step-by-step installation, verification commands, ports, troubleshooting and how to connect a visual DB client: [QUICKSTART.md §5–§7](QUICKSTART.md).
 
 #### Installation
 
