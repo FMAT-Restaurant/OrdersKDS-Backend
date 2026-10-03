@@ -163,6 +163,8 @@ stateDiagram-v2
 - *(Optional, for the full test suite)* **k6**, **Newman** (`npm i -g newman`)
 
 > Step-by-step installation, verification commands, ports, troubleshooting and how to connect a visual DB client: [QUICKSTART.md §5–§7](QUICKSTART.md).
+>
+> New to Docker? Read the basic team guide (in Spanish) on how Docker works locally and the cloud scope (TASK-38): [docs/GUIA_DOCKER.md](docs/GUIA_DOCKER.md).
 
 #### Installation
 
@@ -488,9 +490,14 @@ stateDiagram-v2
 #### Prerrequisitos
 
 - **Python** 3.12+ — [python.org](https://www.python.org)
-- **Docker** + **Docker Compose** — [docker.com](https://www.docker.com)
+- **Docker Desktop** (incluye Docker Compose v2; WSL 2 en Windows) — [docker.com](https://www.docker.com)
 - **Git** 2.40+
+- *(Recomendado)* un cliente de PostgreSQL como **DBeaver** o **pgAdmin** para explorar la base de datos. **No** se necesita un *servidor* PostgreSQL local: la base de datos corre en un contenedor.
 - *(Opcional, para la suite completa de pruebas)* **k6**, **Newman** (`npm i -g newman`)
+
+> Instalación paso a paso, comandos de verificación, puertos, solución de problemas y cómo conectar un cliente visual de BD: [QUICKSTART.md §5–§7](QUICKSTART.md).
+>
+> ¿Primera vez con Docker? Lee la guía básica del equipo sobre cómo funciona Docker en local y el alcance en la nube (TASK-38): [docs/GUIA_DOCKER.md](docs/GUIA_DOCKER.md).
 
 #### Pasos
 
@@ -647,6 +654,7 @@ La documentación completa se encuentra en la carpeta [`docs/`](docs/):
 | [`DEVELOPMENT_GUIDELINES.md`](docs/DEVELOPMENT_GUIDELINES.md) | Estándares de código y reglas para humanos y agentes IA |
 | [`VyV_OrdenesKDS.md`](docs/VyV_OrdenesKDS.md) | Plan de Verificación y Validación |
 | [`CONTRIBUTING.md`](docs/CONTRIBUTING.md) | Guías de contribución y flujo de trabajo |
+| [`GUIA_DOCKER.md`](docs/GUIA_DOCKER.md) | Guía básica de uso de Docker en local y alcance en la nube (TASK-38) |
 
 ---
 
