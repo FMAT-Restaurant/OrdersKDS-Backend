@@ -163,6 +163,24 @@ stateDiagram-v2
 
 #### Installation
 
+**Option A — automated bootstrap (recommended for a clean machine):**
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/your-org/ordenes-kds-backend.git
+cd ordenes-kds-backend
+
+# 2. Run the bootstrap script — creates .venv, installs deps, generates .env
+# Windows PowerShell:
+.\scripts\bootstrap.ps1
+# macOS / Linux:
+bash scripts/bootstrap.sh
+```
+
+The script prints every next step (edit `.env`, start Docker, run migrations).
+
+**Option B — manual steps:**
+
 ```bash
 # 1. Clone the repository
 git clone https://github.com/your-org/ordenes-kds-backend.git
@@ -176,11 +194,11 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements/dev.txt
 
 # 4. Set up environment variables
-cp .env.example .env
-# Edit .env with your values (see CONTRIBUTING.md, section "Environment Variables")
+python scripts/setup_env.py        # generates .env with local defaults
+# Edit .env and set SAGA_TIMEOUT_SECONDS (agree value with team)
 
 # 5. Start the infrastructure (PostgreSQL, Redis, RabbitMQ)
-docker compose up -d postgres redis rabbitmq
+docker compose -f docker/docker-compose.yml up -d postgres redis rabbitmq
 
 # 6. Apply database migrations
 alembic upgrade head
@@ -241,7 +259,7 @@ ordenes-kds-backend/
 │
 ├── scripts/                          # dev_token.py, seed data, helpers
 ├── docs/                             # Full project documentation
-├── docker-compose.yml
+├── docker/                           # docker-compose.yml & docker-compose.ci.yml
 ├── Dockerfile
 ├── alembic.ini
 ├── pyproject.toml                    # ruff, mypy, pytest and coverage configuration
@@ -472,6 +490,24 @@ stateDiagram-v2
 
 #### Pasos
 
+**Opción A — bootstrap automatizado (recomendado en máquina limpia):**
+
+```bash
+# 1. Clonar el repositorio
+git clone https://github.com/tu-org/ordenes-kds-backend.git
+cd ordenes-kds-backend
+
+# 2. Ejecutar el script de bootstrap — crea .venv, instala dependencias y genera .env
+# Windows PowerShell:
+.\scripts\bootstrap.ps1
+# macOS / Linux:
+bash scripts/bootstrap.sh
+```
+
+El script imprime cada siguiente paso (editar `.env`, levantar Docker, correr migraciones).
+
+**Opción B — pasos manuales:**
+
 ```bash
 # 1. Clonar el repositorio
 git clone https://github.com/tu-org/ordenes-kds-backend.git
@@ -485,11 +521,11 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements/dev.txt
 
 # 4. Configurar variables de entorno
-cp .env.example .env
-# Editar .env con tus valores (ver CONTRIBUTING.md, sección "Variables de Entorno")
+python scripts/setup_env.py        # genera .env con valores locales por defecto
+# Editar .env y establecer SAGA_TIMEOUT_SECONDS (acordar con el equipo)
 
 # 5. Levantar la infraestructura (PostgreSQL, Redis, RabbitMQ)
-docker compose up -d postgres redis rabbitmq
+docker compose -f docker/docker-compose.yml up -d postgres redis rabbitmq
 
 # 6. Aplicar las migraciones de base de datos
 alembic upgrade head
@@ -550,7 +586,7 @@ ordenes-kds-backend/
 │
 ├── scripts/                          # dev_token.py, datos semilla, utilidades
 ├── docs/                             # Documentación completa del proyecto
-├── docker-compose.yml
+├── docker/                           # docker-compose.yml & docker-compose.ci.yml
 ├── Dockerfile
 ├── alembic.ini
 ├── pyproject.toml                    # Configuración de ruff, mypy, pytest y cobertura

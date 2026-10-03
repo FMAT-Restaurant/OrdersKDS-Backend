@@ -7,3 +7,4 @@ testcontainers
 ruff
 mypy
 httpx
+pyjwt  # required by scripts/dev_token.py for local JWT generation

@@ -342,8 +342,88 @@ Marca cada punto en el PR (guía §11.6):
 
 ## 7. Entorno local y variables de entorno
 
+### 7.0 Entorno virtual de Python (venv)
+
+El venv es el contenedor local de todos los paquetes del proyecto.  
+Hay que hacerlo **una vez por clon** (creación) y **una vez por terminal** (activación).
+
+#### Creación (una sola vez tras clonar)
+
+Usa el script de bootstrap, que hace todo automáticamente:
+
+```powershell
+# Windows PowerShell
+.\scripts\bootstrap.ps1
+```
+
 ```bash
-cp .env.example .env      # .env NUNCA se versiona; solo .env.example (sin valores reales)
+# macOS / Linux
+bash scripts/bootstrap.sh
+```
+
+O manualmente si prefieres:
+
+```bash
+python -m venv .venv
+pip install -r requirements/dev.txt
+```
+
+#### Activación (una vez por terminal que abras)
+
+**¿Por qué hace falta activar?**  
+La activación modifica las variables de entorno de la sesión actual (`PATH`, `VIRTUAL_ENV`) para que `python`, `pytest`, `alembic`, `ruff`, `mypy` y `uvicorn` apunten al venv del proyecto en lugar del Python del sistema.  
+El script de bootstrap **no** puede activarlo por ti porque la activación no se hereda entre procesos: cada terminal nueva parte desde cero.
+
+```powershell
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+
+# Windows CMD (si no usas PowerShell)
+.venv\Scripts\activate.bat
+```
+
+```bash
+# macOS / Linux
+source .venv/bin/activate
+```
+
+Cuando el venv está activo, el prompt cambia y muestra `(.venv)` al inicio:
+
+```
+(.venv) PS C:\...\orders-backend>
+```
+
+Para desactivarlo (opcional, al terminar la sesión):
+
+```bash
+deactivate
+```
+
+#### Configuración en el IDE (una sola vez)
+
+El IDE (VS Code) también necesita saber qué intérprete usar para el analizador de tipos (Pyrefly/Pylance) y el debugger:
+
+1. `Ctrl+Shift+P` → escribe **"Python: Select Interpreter"**
+2. Selecciona la opción que diga:  
+   `Python 3.x.x ('.venv': venv)  .\.venv\Scripts\python.exe`
+
+Una vez configurado, los errores de import de Pyrefly desaparecen porque el IDE usa el mismo intérprete con todos los paquetes instalados.
+
+#### Resumen rápido
+
+| Acción | Cuándo | Cómo |
+|---|---|---|
+| Crear el venv e instalar paquetes | Una vez por clon | `.\scripts\bootstrap.ps1` |
+| Activar el venv | Cada vez que abres una terminal nueva | `.venv\Scripts\Activate.ps1` |
+| Seleccionar el intérprete en el IDE | Una vez por clon | `Ctrl+Shift+P → Python: Select Interpreter` |
+| Actualizar paquetes (cuando cambia `requirements/`) | Cuando alguien cambia requirements | `pip install -r requirements/dev.txt` (con venv activo) |
+
+---
+
+```bash
+# Genera .env con valores locales por defecto (requiere venv activo)
+python scripts/setup_env.py
+# .env NUNCA se versiona; solo .env.example (sin valores reales)
 ```
 
 Reglas: las claves están en inglés y en `UPPER_SNAKE_CASE`; ningún secreto va en código, tests, logs ni imágenes Docker; en CI los secretos viven en *GitHub Secrets* (guía §10.2).

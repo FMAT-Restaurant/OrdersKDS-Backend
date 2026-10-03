@@ -1,0 +1,65 @@
+# docker/docker-compose.ci.yml -- CI/CD override for Orders & KDS Backend
+#
+# Extends docker-compose.yml to add the API service built from the Dockerfile.
+# Used by the integration-tests and zap-api-scan jobs in .github/workflows/ci.yml.
+#
+# The Dockerfile is delivered by TASK-01 (backend); this file does nothing
+# until that Dockerfile exists and builds successfully.
+#
+# Usage (CI -- always relative to the repository root):
+#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.ci.yml up -d
+#
+# The API service depends_on postgres, redis and rabbitmq with a healthy
+# condition so that it starts only after infrastructure is ready.  This avoids
+# race conditions that would make integration tests flaky.
+#
+# Environment variables are injected from GitHub Secrets (see QUICKSTART.md §2)
+# and do NOT appear as literal values in this file.
+
+services:
+  api:
+    build:
+      context: ..       # repo root — Dockerfile lives there, not in docker/
+      dockerfile: Dockerfile
+    container_name: ordenes-api-ci
+    # All required variables come from the CI environment (GitHub Secrets).
+    # The variable names must match .env.example exactly.
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      SAGA_TIMEOUT_SECONDS: ${SAGA_TIMEOUT_SECONDS}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:8000/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  # Workers run the same image with a different command.
+  # Uncomment once app.workers.run_all is implemented (TASK-05).
+  # workers:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: ordenes-workers-ci
+  #   command: ["python", "-m", "app.workers.run_all"]
+  #   environment:
+  #     DATABASE_URL: ${DATABASE_URL}
+  #     REDIS_URL: ${REDIS_URL}
+  #     RABBITMQ_URL: ${RABBITMQ_URL}
+  #     SAGA_TIMEOUT_SECONDS: ${SAGA_TIMEOUT_SECONDS}
+  #     LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  #   depends_on:
+  #     api:
+  #       condition: service_healthy

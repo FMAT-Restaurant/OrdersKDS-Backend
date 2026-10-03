@@ -357,7 +357,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker compose -f docker-compose.ci.yml up -d --build --wait
+      - run: docker compose -f docker/docker-compose.yml -f docker/docker-compose.ci.yml up -d --build --wait
       - run: |
           npx --yes newman run tests/api/postman/orders-kds.postman_collection.json \
             -e tests/api/postman/ci.postman_environment.json \
@@ -372,7 +372,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker compose -f docker-compose.ci.yml up -d --build --wait
+      - run: docker compose -f docker/docker-compose.yml -f docker/docker-compose.ci.yml up -d --build --wait
       - uses: grafana/setup-k6-action@v1
       - run: k6 run tests/performance/smoke.js --summary-export=reports/k6-summary.json
       - uses: actions/upload-artifact@v4
@@ -384,7 +384,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker compose -f docker-compose.ci.yml up -d --build --wait
+      - run: docker compose -f docker/docker-compose.yml -f docker/docker-compose.ci.yml up -d --build --wait
       - uses: zaproxy/action-api-scan@v0.9.0          # pin the latest release in the real workflow
         with:
           target: http://localhost:8000/openapi.json
@@ -1019,8 +1019,8 @@ export default function () {
 
 | Entorno | Propósito | Infraestructura | Datos |
 |---|---|---|---|
-| **Local (dev)** | Desarrollo y pruebas unitarias/integración | `docker compose up -d postgres redis rabbitmq` | Semilla local (`scripts/seed`) |
-| **CI (efímero)** | Todas las pruebas automáticas | *Service containers* / `docker-compose.ci.yml` | Semilla mínima por prueba |
+| **Local (dev)** | Desarrollo y pruebas unitarias/integración | `docker compose -f docker/docker-compose.yml up -d postgres redis rabbitmq` | Semilla local (`scripts/seed`) |
+| **CI (efímero)** | Todas las pruebas automáticas | *Service containers* / `docker/docker-compose.ci.yml` | Semilla mínima por prueba |
 | **Staging** | E2E, rendimiento *smoke*, ZAP, UAT | Despliegue equivalente a producción | Datos sintéticos representativos |
 | **Producción** | Solo *smoke tests* de **solo lectura** tras un despliegue | — | Reales; **nunca** se ejecutan pruebas destructivas ni de carga |
 

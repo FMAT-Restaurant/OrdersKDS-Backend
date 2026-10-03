@@ -1,0 +1,16 @@
+# Alembic migration versions
+#
+# This directory holds the generated migration scripts.
+# Each file is named  <revision_id>_<description>.py  and is created by:
+#
+#   alembic revision --autogenerate -m "describe the change"
+#
+# IMPORTANT: Review every auto-generated migration before committing it.
+# Alembic does not detect every change (e.g. server_default, partial indexes,
+# CHECK constraints) — add those manually.
+#
+# Apply pending migrations:
+#   alembic upgrade head
+#
+# Roll back the last migration:
+#   alembic downgrade -1
