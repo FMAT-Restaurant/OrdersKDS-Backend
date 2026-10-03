@@ -9,7 +9,7 @@
 # ---------------------------------------------------------------------------
 [build-system]
 requires = ["setuptools>=68"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 # ---------------------------------------------------------------------------
 # Ruff — linter and formatter
@@ -39,12 +39,20 @@ ignore = [
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
 
+[tool.ruff.format]
+# Docs contain illustrative code fragments that are not meant to be formatted.
+exclude = ["*.md"]
+
 # ---------------------------------------------------------------------------
 # Mypy — strict static type checking (DEVELOPMENT_GUIDELINES §5.3)
 # ---------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.12"
 strict = true
+# app/ is a namespace package (no __init__.py); resolve modules from the repo root
+# so e.g. app/db/base.py is `app.db.base`, not a second module called `base`.
+explicit_package_bases = true
+mypy_path = "."
 # Exclude Alembic migrations (auto-generated; checked separately if needed).
 exclude = ["app/alembic/versions/"]
 

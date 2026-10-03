@@ -39,11 +39,11 @@ if the package is not installed; it prints a friendly error instead.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
-
 
 # ---------------------------------------------------------------------------
 # Allowed roles match the Auth microservice contract (GUIDELINES §2.4).
@@ -51,9 +51,9 @@ from typing import Any
 _VALID_ROLES: frozenset[str] = frozenset({"waiter", "kitchen", "chef", "admin"})
 
 # Default signing secret for local development ONLY.
-# This value must never be used in any environment beyond localhost.
-# Replace it with the value agreed by your team or pass --secret explicitly.
-_DEFAULT_DEV_SECRET = "dev-secret-change-me"
+# Override it with the DEV_JWT_SECRET environment variable or --secret.
+# The fallback must never be used in any environment beyond localhost.
+_DEFAULT_DEV_SECRET = os.environ.get("DEV_JWT_SECRET", "dev-secret-change-me")
 
 # Default token lifetime in seconds (1 hour is enough for a dev session).
 _DEFAULT_TTL_SECONDS = 3600
@@ -145,10 +145,7 @@ def _parse_args() -> argparse.Namespace:
         "--user-id",
         default=None,
         metavar="UUID",
-        help=(
-            "UUID to use as user_id / sub.  "
-            "A random UUID is generated if omitted."
-        ),
+        help=("UUID to use as user_id / sub.  A random UUID is generated if omitted."),
     )
     parser.add_argument(
         "--ttl",
@@ -188,8 +185,7 @@ def main() -> None:
     print(f"expires  : {expiry.strftime('%Y-%m-%d %H:%M:%S UTC')}")
     print(f"\nBearer {token}")
     print(
-        "\nUsage example:\n"
-        f"  curl -H 'Authorization: Bearer {token}' http://localhost:8000/orders"
+        f"\nUsage example:\n  curl -H 'Authorization: Bearer {token}' http://localhost:8000/orders"
     )
 
 

@@ -11,24 +11,29 @@ SQLAlchemy 2 + asyncpg require running migrations through an async engine.
 Alembic provides ``run_sync`` inside an async context for this purpose.
 See: https://alembic.sqlalchemy.org/en/latest/cookbook.html#using-asyncio-with-alembic
 
-NOTE: ORM models are not imported here yet because the schema has not been
-defined.  When you add the first model in ``app/db/models.py``, uncomment the
-import below and point ``target_metadata`` at ``Base.metadata`` so that
-``alembic revision --autogenerate`` can detect changes automatically.
-
-TODO(RF-12, RF-13): Import Base once app/db/models.py defines the orders table.
+Models
+------
+``target_metadata`` points at ``app.db.base.Base.metadata``.  Models must live in
+``app/db/models.py`` (or the ``app.db.models`` package): this module imports it
+so every table registers itself on ``Base.metadata`` and
+``alembic revision --autogenerate`` can detect changes.  Until that module
+exists (TASK-03) the import is skipped.
 """
 
 from __future__ import annotations
 
 import asyncio
+import importlib
 import os
 from logging.config import fileConfig
+from pathlib import Path
 
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
+
+from app.db.base import Base
 
 # ---------------------------------------------------------------------------
 # Alembic Config object — gives access to values in alembic.ini.
@@ -39,28 +44,56 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+
+# ---------------------------------------------------------------------------
+# Load ``.env`` (repository root) for local runs.
+# Variables already present in the process environment always win, so CI and
+# containers (which inject DATABASE_URL) are never overridden by a file.
+# ---------------------------------------------------------------------------
+def _load_dotenv() -> None:
+    """Populate ``os.environ`` from ``.env`` without overriding existing values."""
+    env_file = Path(__file__).resolve().parents[2] / ".env"
+    if not env_file.is_file():
+        return
+    for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+
+
+_load_dotenv()
+
 # ---------------------------------------------------------------------------
 # Override the database URL from the environment.
 # This is the only place credentials may appear at runtime; they never live
 # in alembic.ini or in committed files (DEVELOPMENT_GUIDELINES §10.2).
 # ---------------------------------------------------------------------------
 _database_url = os.environ.get("DATABASE_URL")
-if not _database_url:
+if not _database_url or "<" in _database_url:
     raise RuntimeError(
-        "DATABASE_URL environment variable is not set.\n"
-        "Run 'python scripts/setup_env.py' to create .env, then load it:\n"
-        "  export $(grep -v '^#' .env | xargs)\n"
-        "or use 'python-dotenv' to load it automatically."
+        "DATABASE_URL is not set (or still contains <placeholders>).\n"
+        "Run 'python scripts/setup_env.py' to create .env with the local defaults, "
+        "or export DATABASE_URL in your shell."
     )
-config.set_main_option("sqlalchemy.url", _database_url)
+# configparser treats '%' as interpolation syntax; escape it so URL-encoded
+# passwords (e.g. 'p%40ss') do not break Alembic.
+config.set_main_option("sqlalchemy.url", _database_url.replace("%", "%%"))
 
 # ---------------------------------------------------------------------------
 # Target metadata for --autogenerate support.
-# Uncomment the import below once app/db/models.py exists and Base is defined.
+# Importing the models module registers every table on Base.metadata.  Only a
+# missing ``app.db.models`` itself is tolerated (TASK-03 creates it); any other
+# ImportError inside the models is a real bug and must surface.
 # ---------------------------------------------------------------------------
-# from app.db.models import Base  # noqa: E402
-# target_metadata = Base.metadata
-target_metadata = None  # Replace with Base.metadata when models are defined.
+try:
+    importlib.import_module("app.db.models")
+except ModuleNotFoundError as exc:
+    if exc.name != "app.db.models":
+        raise
+
+target_metadata = Base.metadata
 
 
 # ---------------------------------------------------------------------------
@@ -78,8 +111,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        # Use batch mode for SQLite compatibility in tests (no-op on Postgres).
-        render_as_batch=False,
+        compare_type=True,
     )
 
     with context.begin_transaction():

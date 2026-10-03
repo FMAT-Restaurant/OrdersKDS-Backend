@@ -77,10 +77,7 @@ def _build_env_content() -> str:
 
     example_path = Path(".env.example")
     if not example_path.exists():
-        sys.exit(
-            "ERROR: .env.example not found.  Run this script from the "
-            "repository root."
-        )
+        sys.exit("ERROR: .env.example not found.  Run this script from the repository root.")
 
     lines = _parse_example(example_path)
     result: list[str] = []
@@ -110,9 +107,7 @@ def _warn_about_placeholders(content: str) -> None:
     unset = [
         line.split("=", 1)[0]
         for line in content.splitlines()
-        if "=" in line
-        and not line.strip().startswith("#")
-        and "<" in line.split("=", 1)[1]
+        if "=" in line and not line.strip().startswith("#") and "<" in line.split("=", 1)[1]
     ]
     if unset:
         print("\n The following variables still need a real value in .env:")
@@ -136,10 +131,7 @@ def main() -> None:
     env_path = Path(".env")
 
     if env_path.exists() and not args.force:
-        print(
-            f"INFO: {env_path} already exists.  "
-            "Pass --force to overwrite it."
-        )
+        print(f"INFO: {env_path} already exists.  Pass --force to overwrite it.")
         sys.exit(0)
 
     content = _build_env_content()
@@ -163,7 +155,6 @@ if __name__ == "__main__":
     # Guard: never run in a CI environment to avoid leaking secrets.
     if os.getenv("CI") or os.getenv("GITHUB_ACTIONS"):
         sys.exit(
-            "ERROR: setup_env.py must not run in CI.  "
-            "Use GitHub Secrets for CI/CD configuration."
+            "ERROR: setup_env.py must not run in CI.  Use GitHub Secrets for CI/CD configuration."
         )
     main()
