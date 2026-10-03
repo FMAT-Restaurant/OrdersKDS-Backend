@@ -27,7 +27,7 @@ from pathlib import Path
 # Defaults that are safe for the local docker-compose.yml setup.
 # Every value here matches the service definitions in docker-compose.yml so
 # that a fresh clone works with a single command sequence:
-#   docker compose -f docker/docker-compose.yml up -d && python scripts/setup_env.py && alembic upgrade head
+#   docker compose up -d && python scripts/setup_env.py && alembic upgrade head
 #
 # IMPORTANT: These defaults contain the docker-compose default credentials.
 #            They are intentionally weak and must NEVER be used in production.
@@ -153,7 +153,7 @@ def main() -> None:
     print(
         "Next steps:\n"
         "  1. Set SAGA_TIMEOUT_SECONDS in .env (agree the value with the team).\n"
-        "  2. docker compose -f docker/docker-compose.yml up -d postgres redis rabbitmq\n"
+        "  2. docker compose up -d postgres redis rabbitmq\n"
         "  3. alembic upgrade head\n"
         "  4. uvicorn app.main:app --reload --port 8000\n"
     )

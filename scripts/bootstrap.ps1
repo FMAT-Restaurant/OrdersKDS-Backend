@@ -132,7 +132,7 @@ Write-Host ""
 Write-Host "  3. Edit .env -- set SAGA_TIMEOUT_SECONDS (agree with team, OP-01)." -ForegroundColor White
 Write-Host ""
 Write-Host "  4. Start infrastructure:" -ForegroundColor White
-Write-Host "       docker compose -f docker\docker-compose.yml up -d postgres redis rabbitmq" -ForegroundColor DarkYellow
+Write-Host "       docker compose up -d postgres redis rabbitmq" -ForegroundColor DarkYellow
 Write-Host ""
 Write-Host "  5. Apply database migrations:" -ForegroundColor White
 Write-Host "       alembic upgrade head" -ForegroundColor DarkYellow

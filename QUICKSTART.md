@@ -170,7 +170,7 @@ After the script finishes:
 # Edit .env — set SAGA_TIMEOUT_SECONDS before starting the service
 # (open point OP-01: agree the value with the team)
 
-docker compose -f docker/docker-compose.yml up -d postgres redis rabbitmq
+docker compose up -d postgres redis rabbitmq
 alembic upgrade head
 
 # Terminal 1 — API with hot reload

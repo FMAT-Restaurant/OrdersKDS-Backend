@@ -198,7 +198,7 @@ python scripts/setup_env.py        # generates .env with local defaults
 # Edit .env and set SAGA_TIMEOUT_SECONDS (agree value with team)
 
 # 5. Start the infrastructure (PostgreSQL, Redis, RabbitMQ)
-docker compose -f docker/docker-compose.yml up -d postgres redis rabbitmq
+docker compose up -d postgres redis rabbitmq
 
 # 6. Apply database migrations
 alembic upgrade head
@@ -259,7 +259,8 @@ ordenes-kds-backend/
 │
 ├── scripts/                          # dev_token.py, seed data, helpers
 ├── docs/                             # Full project documentation
-├── docker/                           # docker-compose.yml & docker-compose.ci.yml
+├── docker-compose.yml
+├── docker-compose.ci.yml
 ├── Dockerfile
 ├── alembic.ini
 ├── pyproject.toml                    # ruff, mypy, pytest and coverage configuration
@@ -525,7 +526,7 @@ python scripts/setup_env.py        # genera .env con valores locales por defecto
 # Editar .env y establecer SAGA_TIMEOUT_SECONDS (acordar con el equipo)
 
 # 5. Levantar la infraestructura (PostgreSQL, Redis, RabbitMQ)
-docker compose -f docker/docker-compose.yml up -d postgres redis rabbitmq
+docker compose up -d postgres redis rabbitmq
 
 # 6. Aplicar las migraciones de base de datos
 alembic upgrade head
@@ -586,7 +587,8 @@ ordenes-kds-backend/
 │
 ├── scripts/                          # dev_token.py, datos semilla, utilidades
 ├── docs/                             # Documentación completa del proyecto
-├── docker/                           # docker-compose.yml & docker-compose.ci.yml
+├── docker-compose.yml
+├── docker-compose.ci.yml
 ├── Dockerfile
 ├── alembic.ini
 ├── pyproject.toml                    # Configuración de ruff, mypy, pytest y cobertura

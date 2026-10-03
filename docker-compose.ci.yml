@@ -1,4 +1,4 @@
-# docker/docker-compose.ci.yml -- CI/CD override for Orders & KDS Backend
+# docker-compose.ci.yml -- CI/CD override for Orders & KDS Backend
 #
 # Extends docker-compose.yml to add the API service built from the Dockerfile.
 # Used by the integration-tests and zap-api-scan jobs in .github/workflows/ci.yml.
@@ -6,8 +6,8 @@
 # The Dockerfile is delivered by TASK-01 (backend); this file does nothing
 # until that Dockerfile exists and builds successfully.
 #
-# Usage (CI -- always relative to the repository root):
-#   docker compose -f docker/docker-compose.yml -f docker/docker-compose.ci.yml up -d
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d
 #
 # The API service depends_on postgres, redis and rabbitmq with a healthy
 # condition so that it starts only after infrastructure is ready.  This avoids
@@ -19,7 +19,7 @@
 services:
   api:
     build:
-      context: ..       # repo root — Dockerfile lives there, not in docker/
+      context: .
       dockerfile: Dockerfile
     container_name: ordenes-api-ci
     # All required variables come from the CI environment (GitHub Secrets).

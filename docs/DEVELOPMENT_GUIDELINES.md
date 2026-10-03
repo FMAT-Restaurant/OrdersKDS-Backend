@@ -1235,7 +1235,7 @@ En una emergencia: `npx pnpm <comando>`.
 
 | Síntoma | Causa probable | Solución |
 |---|---|---|
-| `connection refused` a PostgreSQL/RabbitMQ/Redis | Contenedores no levantados | `docker compose -f docker/docker-compose.yml up -d postgres redis rabbitmq` y `docker compose ps` |
+| `connection refused` a PostgreSQL/RabbitMQ/Redis | Contenedores no levantados | `docker compose up -d postgres redis rabbitmq` y `docker compose ps` |
 | `alembic` no encuentra la BD | `DATABASE_URL` incorrecta o BD sin iniciar | Revisa `.env`; espera al *healthcheck* de Postgres |
 | Testcontainers falla al arrancar | Docker no está corriendo / sin permisos | Inicia Docker Desktop; en Linux añade tu usuario al grupo `docker` |
 | Los consumers no reciben mensajes | *Exchange*/colas no declaradas | Levanta los workers (`python -m app.workers.run_all`) y revisa `http://localhost:15672` |

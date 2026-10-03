@@ -1,15 +1,15 @@
-# docker/docker-compose.yml -- Local infrastructure for Orders & KDS Backend
+# docker-compose.yml -- Local infrastructure for Orders & KDS Backend
 #
 # Starts the three external services the application depends on:
 #   - postgres  : PostgreSQL 16 (primary store + outbox table)
 #   - redis     : Redis 7 (materialized view of tables and menu catalog)
 #   - rabbitmq  : RabbitMQ 3.x with management UI (event broker)
 #
-# Usage (run from the REPOSITORY ROOT):
-#   docker compose -f docker/docker-compose.yml up -d postgres redis rabbitmq
-#   docker compose -f docker/docker-compose.yml up -d
-#   docker compose -f docker/docker-compose.yml logs -f rabbitmq
-#   docker compose -f docker/docker-compose.yml down -v
+# Usage:
+#   docker compose up -d postgres redis rabbitmq
+#   docker compose up -d
+#   docker compose logs -f rabbitmq
+#   docker compose down -v
 #
 # The API and workers are intentionally NOT defined here; run them directly
 # with uvicorn/python so that code reloading (--reload) works without
