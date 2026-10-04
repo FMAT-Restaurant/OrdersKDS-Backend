@@ -132,7 +132,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-<<<<<<< HEAD
 
       - name: SonarCloud Quality Gate Check
         if: github.ref == 'refs/heads/main'
@@ -140,11 +139,6 @@ jobs:
         timeout-minutes: 5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-=======
-        with:
-          args: >
-            ${{ github.ref == 'refs/heads/main' && '-Dsonar.qualitygate.wait=true' || '' }}
->>>>>>> develop
 
   integration-tests:
     name: Integration Tests
