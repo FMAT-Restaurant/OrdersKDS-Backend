@@ -1,0 +1,78 @@
+# docker-compose.yml -- Local infrastructure for Orders & KDS Backend
+#
+# Starts the three external services the application depends on:
+#   - postgres  : PostgreSQL 16 (primary store + outbox table)
+#   - redis     : Redis 7 (materialized view of tables and menu catalog)
+#   - rabbitmq  : RabbitMQ 3.x with management UI (event broker)
+#
+# Usage:
+#   docker compose up -d postgres redis rabbitmq
+#   docker compose up -d
+#   docker compose logs -f rabbitmq
+#   docker compose down -v
+#
+# The API and workers are intentionally NOT defined here; run them directly
+# with uvicorn/python so that code reloading (--reload) works without
+# rebuilding the image on every change.
+#
+# Credentials below are intentionally weak defaults for local development
+# only.  They match the DATABASE_URL / RABBITMQ_URL defaults in
+# scripts/setup_env.py.  NEVER use these values in production.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ordenes-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ordenes
+      POSTGRES_PASSWORD: ordenes
+      POSTGRES_DB: ordenes
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ordenes -d ordenes"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: ordenes-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: ordenes-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ordenes
+      RABBITMQ_DEFAULT_PASS: ordenes
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # Management UI — http://localhost:15672
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
