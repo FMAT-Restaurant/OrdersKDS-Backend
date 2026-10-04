@@ -190,7 +190,9 @@ class StockInsufficientMessage(BaseModel):
 
     event_id: str = Field(alias="eventId")
     order_id: str = Field(alias="orderId")
-    missing_ingredients: list[str] = Field(alias="faltantes")  # Spanish is confined to the alias
+    missing_ingredients: list[str] = Field(
+        alias="faltantes"
+    )  # Spanish is confined to the alias
 ```
 
 El resto del código (services, domain, repositories) solo ve `missing_ingredients`.
@@ -333,9 +335,11 @@ export function useOrderEvents(onChange: (event: OrderEvent) => void): Connectio
 # Increment the retry counter
 retries += 1
 
+
 # ❌ Redundant — obvious from the signature
 def get_status(self) -> OrderStatus:
     """Return the status."""
+
 
 # ✅ Necessary — explains a non-obvious business constraint
 # A VOIDED order must never emit a charge event: the kitchen error is the
@@ -421,6 +425,7 @@ La **única** forma de cambiar el estado de una orden es a través de la tabla d
 
 Satisfies: RF-18, RF-24, RF-26, RF-28, RF-33, RF-34, RF-35 (ERS §1.3)
 """
+
 from enum import StrEnum
 
 
@@ -437,13 +442,21 @@ class OrderStatus(StrEnum):
 
 
 _ALLOWED_TRANSITIONS: dict[OrderStatus, frozenset[OrderStatus]] = {
-    OrderStatus.CREATED: frozenset({
-        OrderStatus.IN_PREPARATION, OrderStatus.REJECTED,
-        OrderStatus.CANCELLED, OrderStatus.EXPIRED,
-    }),
-    OrderStatus.IN_PREPARATION: frozenset({
-        OrderStatus.DELIVERED, OrderStatus.WASTED, OrderStatus.VOIDED,
-    }),
+    OrderStatus.CREATED: frozenset(
+        {
+            OrderStatus.IN_PREPARATION,
+            OrderStatus.REJECTED,
+            OrderStatus.CANCELLED,
+            OrderStatus.EXPIRED,
+        }
+    ),
+    OrderStatus.IN_PREPARATION: frozenset(
+        {
+            OrderStatus.DELIVERED,
+            OrderStatus.WASTED,
+            OrderStatus.VOIDED,
+        }
+    ),
     OrderStatus.DELIVERED: frozenset({OrderStatus.PAID}),
     OrderStatus.WASTED: frozenset({OrderStatus.PAID}),
     # Final states: no outgoing transitions.
@@ -476,7 +489,9 @@ async def confirm_order(self, order_id: UUID, actor: AuthContext) -> Order:
     async with self._unit_of_work() as uow:
         order = await uow.orders.get_for_update(order_id)
         order.confirm(confirmed_by=actor.user_id)  # domain rule; idempotent (see OP-05)
-        uow.outbox.add(OrderCreatedEvent.from_order(order))  # same transaction as the state change
+        uow.outbox.add(
+            OrderCreatedEvent.from_order(order)
+        )  # same transaction as the state change
         await uow.commit()
     return order
 ```
@@ -495,9 +510,13 @@ class InvalidStateTransitionError(DomainError):
     code = ErrorCode.INVALID_STATE_TRANSITION
     http_status = 409
 
+
 # ✅ Detailed error to logs, generic error to the client
 logger.error("cancel_order failed", extra={"order_id": str(order_id)}, exc_info=True)
-raise HTTPException(status_code=500, detail={"code": ErrorCode.INTERNAL_ERROR, "message": "Internal error"})
+raise HTTPException(
+    status_code=500,
+    detail={"code": ErrorCode.INTERNAL_ERROR, "message": "Internal error"},
+)
 
 # ❌ Never leak internals to the client
 raise HTTPException(status_code=500, detail=str(exc))  # violates RNF-03
@@ -570,7 +589,9 @@ async def handle_stock_reserved(message: StockReservedMessage, uow: UnitOfWork) 
     """
     async with uow:
         if await uow.processed_events.exists(message.event_id, message.order_id):
-            logger.info("duplicate stock_reserved ignored", extra={"event_id": message.event_id})
+            logger.info(
+                "duplicate stock_reserved ignored", extra={"event_id": message.event_id}
+            )
             return  # redelivery: already applied
 
         order = await uow.orders.get_for_update(message.order_id)
@@ -898,7 +919,9 @@ def test_void_kitchen_error_does_not_request_charge(order_in_preparation, chef_a
     service = build_order_service()
 
     # Act
-    order = await service.void_for_kitchen_error(order_in_preparation.id, chef_actor, note="Burnt dish")
+    order = await service.void_for_kitchen_error(
+        order_in_preparation.id, chef_actor, note="Burnt dish"
+    )
 
     # Assert — RF-31: the restaurant, not the customer, bears the cost
     assert order.status is OrderStatus.VOIDED

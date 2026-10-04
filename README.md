@@ -157,11 +157,34 @@ stateDiagram-v2
 #### Prerequisites
 
 - **Python** 3.12+ — [python.org](https://www.python.org)
-- **Docker** + **Docker Compose** — [docker.com](https://www.docker.com)
+- **Docker Desktop** (includes Docker Compose v2; WSL 2 on Windows) — [docker.com](https://www.docker.com)
 - **Git** 2.40+
+- *(Recommended)* a PostgreSQL client such as **DBeaver** or **pgAdmin** to browse the database. A local PostgreSQL *server* is **not** needed: the database runs in a container.
 - *(Optional, for the full test suite)* **k6**, **Newman** (`npm i -g newman`)
 
+> Step-by-step installation, verification commands, ports, troubleshooting and how to connect a visual DB client: [QUICKSTART.md §5–§7](QUICKSTART.md).
+>
+> New to Docker? Read the basic team guide (in Spanish) on how Docker works locally and the cloud scope (TASK-38): [docs/GUIA_DOCKER.md](docs/GUIA_DOCKER.md).
+
 #### Installation
+
+**Option A — automated bootstrap (recommended for a clean machine):**
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/your-org/ordenes-kds-backend.git
+cd ordenes-kds-backend
+
+# 2. Run the bootstrap script — creates .venv, installs deps, generates .env
+# Windows PowerShell:
+.\scripts\bootstrap.ps1
+# macOS / Linux:
+bash scripts/bootstrap.sh
+```
+
+The script prints every next step (edit `.env`, start Docker, run migrations).
+
+**Option B — manual steps:**
 
 ```bash
 # 1. Clone the repository
@@ -176,8 +199,8 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements/dev.txt
 
 # 4. Set up environment variables
-cp .env.example .env
-# Edit .env with your values (see CONTRIBUTING.md, section "Environment Variables")
+python scripts/setup_env.py        # generates .env with local defaults
+# Edit .env and set SAGA_TIMEOUT_SECONDS (agree value with team)
 
 # 5. Start the infrastructure (PostgreSQL, Redis, RabbitMQ)
 docker compose up -d postgres redis rabbitmq
@@ -242,6 +265,7 @@ ordenes-kds-backend/
 ├── scripts/                          # dev_token.py, seed data, helpers
 ├── docs/                             # Full project documentation
 ├── docker-compose.yml
+├── docker-compose.ci.yml
 ├── Dockerfile
 ├── alembic.ini
 ├── pyproject.toml                    # ruff, mypy, pytest and coverage configuration
@@ -466,11 +490,34 @@ stateDiagram-v2
 #### Prerrequisitos
 
 - **Python** 3.12+ — [python.org](https://www.python.org)
-- **Docker** + **Docker Compose** — [docker.com](https://www.docker.com)
+- **Docker Desktop** (incluye Docker Compose v2; WSL 2 en Windows) — [docker.com](https://www.docker.com)
 - **Git** 2.40+
+- *(Recomendado)* un cliente de PostgreSQL como **DBeaver** o **pgAdmin** para explorar la base de datos. **No** se necesita un *servidor* PostgreSQL local: la base de datos corre en un contenedor.
 - *(Opcional, para la suite completa de pruebas)* **k6**, **Newman** (`npm i -g newman`)
 
+> Instalación paso a paso, comandos de verificación, puertos, solución de problemas y cómo conectar un cliente visual de BD: [QUICKSTART.md §5–§7](QUICKSTART.md).
+>
+> ¿Primera vez con Docker? Lee la guía básica del equipo sobre cómo funciona Docker en local y el alcance en la nube (TASK-38): [docs/GUIA_DOCKER.md](docs/GUIA_DOCKER.md).
+
 #### Pasos
+
+**Opción A — bootstrap automatizado (recomendado en máquina limpia):**
+
+```bash
+# 1. Clonar el repositorio
+git clone https://github.com/tu-org/ordenes-kds-backend.git
+cd ordenes-kds-backend
+
+# 2. Ejecutar el script de bootstrap — crea .venv, instala dependencias y genera .env
+# Windows PowerShell:
+.\scripts\bootstrap.ps1
+# macOS / Linux:
+bash scripts/bootstrap.sh
+```
+
+El script imprime cada siguiente paso (editar `.env`, levantar Docker, correr migraciones).
+
+**Opción B — pasos manuales:**
 
 ```bash
 # 1. Clonar el repositorio
@@ -485,8 +532,8 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements/dev.txt
 
 # 4. Configurar variables de entorno
-cp .env.example .env
-# Editar .env con tus valores (ver CONTRIBUTING.md, sección "Variables de Entorno")
+python scripts/setup_env.py        # genera .env con valores locales por defecto
+# Editar .env y establecer SAGA_TIMEOUT_SECONDS (acordar con el equipo)
 
 # 5. Levantar la infraestructura (PostgreSQL, Redis, RabbitMQ)
 docker compose up -d postgres redis rabbitmq
@@ -551,6 +598,7 @@ ordenes-kds-backend/
 ├── scripts/                          # dev_token.py, datos semilla, utilidades
 ├── docs/                             # Documentación completa del proyecto
 ├── docker-compose.yml
+├── docker-compose.ci.yml
 ├── Dockerfile
 ├── alembic.ini
 ├── pyproject.toml                    # Configuración de ruff, mypy, pytest y cobertura
@@ -606,6 +654,7 @@ La documentación completa se encuentra en la carpeta [`docs/`](docs/):
 | [`DEVELOPMENT_GUIDELINES.md`](docs/DEVELOPMENT_GUIDELINES.md) | Estándares de código y reglas para humanos y agentes IA |
 | [`VyV_OrdenesKDS.md`](docs/VyV_OrdenesKDS.md) | Plan de Verificación y Validación |
 | [`CONTRIBUTING.md`](docs/CONTRIBUTING.md) | Guías de contribución y flujo de trabajo |
+| [`GUIA_DOCKER.md`](docs/GUIA_DOCKER.md) | Guía básica de uso de Docker en local y alcance en la nube (TASK-38) |
 
 ---
 

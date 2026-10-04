@@ -1,0 +1,109 @@
+# pyproject.toml — build and tooling configuration for Orders & KDS Backend
+#
+# This file configures ruff, mypy, pytest and coverage so that every
+# developer (and the CI pipeline) uses identical settings.
+# See DEVELOPMENT_GUIDELINES §5.3 for the full rationale.
+
+# ---------------------------------------------------------------------------
+# Build system — required by PEP 517; not used for packaging in this service.
+# ---------------------------------------------------------------------------
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# ---------------------------------------------------------------------------
+# Ruff — linter and formatter
+# Rules enforced: E, F (pycodestyle + pyflakes), I (isort), B (bugbear),
+# UP (pyupgrade), N (pep8-naming), S (bandit security), ASYNC (async checks),
+# C90 (complexity), SIM (simplify) — as required by DEVELOPMENT_GUIDELINES §5.3.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py312"
+line-length = 99
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "S", "ASYNC", "C90", "SIM"]
+ignore = [
+    # S101: use of assert — needed in tests; suppressed project-wide because
+    # ruff S rules flag pytest assertions.  Only suppress in tests directory
+    # via per-file ignores below.
+    "S101",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may use assert, print, and hardcoded credentials for fixtures.
+"tests/**" = ["S101", "S105", "S106"]
+# Migration scripts are auto-generated; relax naming and complexity rules.
+"app/alembic/**" = ["N999", "C901"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.ruff.format]
+# Docs contain illustrative code fragments that are not meant to be formatted.
+exclude = ["*.md"]
+
+# ---------------------------------------------------------------------------
+# Mypy — strict static type checking (DEVELOPMENT_GUIDELINES §5.3)
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+# app/ is a namespace package (no __init__.py); resolve modules from the repo root
+# so e.g. app/db/base.py is `app.db.base`, not a second module called `base`.
+explicit_package_bases = true
+mypy_path = "."
+# Exclude Alembic migrations (auto-generated; checked separately if needed).
+exclude = ["app/alembic/versions/"]
+
+# Third-party libraries without bundled stubs: ignore missing stubs rather
+# than failing the check.  Add an entry when a new untyped dependency is added
+# and justify it in the PR.
+[[tool.mypy.overrides]]
+module = [
+    "aio_pika.*",
+    "testcontainers.*",
+]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
+# Markers used in the test suite so that pytest does not warn about unknown marks.
+markers = [
+    "unit: fast tests with no I/O (mocks only)",
+    "integration: tests that require running containers (Testcontainers)",
+    "contract: event / REST contract validation tests",
+    "bdd: Gherkin acceptance scenarios",
+    "performance: k6 / load tests (not run in normal CI)",
+    "security: OWASP ZAP / security scans",
+]
+
+# ---------------------------------------------------------------------------
+# Coverage — mirrors the thresholds in DEVELOPMENT_GUIDELINES §11.4
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+source = ["app"]
+branch = true
+omit = [
+    "app/alembic/*",
+    "app/main.py",   # Application factory; covered by integration tests.
+]
+
+[tool.coverage.report]
+# CI fails if total coverage falls below 85 % (DoD requirement).
+fail_under = 85
+show_missing = true
+exclude_lines = [
+    # Standard pragmas
+    "pragma: no cover",
+    # Abstract methods have no implementation to cover.
+    "raise NotImplementedError",
+    # Type-checking blocks are not executed at runtime.
+    "if TYPE_CHECKING:",
+    # Protocol stubs
+    "\\.\\.\\.\\s*$",
+]

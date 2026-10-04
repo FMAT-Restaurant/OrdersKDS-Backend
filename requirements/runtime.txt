@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+pydantic
+sqlalchemy[asyncio]  # [asyncio] instala 'greenlet', el cual es requerido para migraciones asíncronas con Alembic
+alembic
+aio-pika
+asyncpg
+redis
