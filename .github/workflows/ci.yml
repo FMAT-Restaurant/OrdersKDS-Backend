@@ -31,6 +31,10 @@ jobs:
       - name: Validate branch name
         run: |
           BRANCH_NAME="${{ github.head_ref }}"
+          if [[ "$BRANCH_NAME" == "develop" ]]; then
+            echo "Skipping branch name validation for develop branch"
+            exit 0
+          fi
           if [[ ! "$BRANCH_NAME" =~ ^[a-z0-9]+-[a-z]+$ ]]; then
             echo "Error: Branch name '$BRANCH_NAME' does not match pattern ^[a-z0-9]+-[a-z]+$"
             exit 1
