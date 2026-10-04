@@ -1,7 +1,10 @@
 {
-
     "files.exclude": {
         "**/.venv": true,
         "**/venv": true
+    },
+    "sonarlint.connectedMode.project": {
+        "connectionId": "fmat-restaurant",
+        "projectKey": "FMAT-Restaurant_OrdersKDS-Backend"
     }
 }
