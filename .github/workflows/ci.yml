@@ -20,6 +20,14 @@ concurrency:
 permissions:
   contents: read
 
+# Global pipeline environment variables and architectural feature flags
+env:
+  # Feature flag governance (TASK-27 NO-GO / ADR-0011 / V&V §13.5):
+  # Optional intermediate dishes (chef batch registration, RF-36..38) are excluded
+  # for the 7-sprint horizon (code and tests live or die together).
+  # Kept directly in workflow env to avoid committing standalone .env files into Git.
+  INTERMEDIATE_DISHES_ENABLED: 'false'
+
 jobs:
   validate-pr:
     name: Validate PR
