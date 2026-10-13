@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # Maintain GitHub Actions dependencies pinned to immutable commit hashes
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+    target-branch: "develop"
+    commit-message:
+      prefix: "build(deps)"
+    open-pull-requests-limit: 10
+    labels:
+      - "ci"
+      - "dependencies"
+    groups:
+      # Group all GitHub Actions updates into a single PR to minimize noise
+      github-actions:
+        patterns:
+          - "*"
