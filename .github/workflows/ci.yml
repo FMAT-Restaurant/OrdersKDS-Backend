@@ -193,9 +193,10 @@ jobs:
     needs: [sonarcloud, integration-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Least privilege: no `issues: write`. The ZAP report must never be published
+    # as a public issue (the repository is public); it stays in the run artifact.
     permissions:
       contents: read
-      issues: write
       pull-requests: read
     steps:
       - name: Checkout repository
@@ -245,7 +246,54 @@ jobs:
           target: http://127.0.0.1:8000/openapi.json
           rules_file_name: .zap/rules.tsv
           fail_action: true
+          # Security (TASK-39): never open a public issue with scan findings.
+          allow_issue_writing: false
           artifact_name: zap
+
+      - name: Send ZAP Report to Discord
+        if: always()
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          SERVER_URL: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          SCAN_STATUS: ${{ job.status }}
+        shell: bash
+        run: |
+          if [ -z "$DISCORD_WEBHOOK" ]; then
+            echo "DISCORD_WEBHOOK is not set; skipping notification."
+            exit 0
+          fi
+
+          REPORT_FILE=""
+          if [ -f "report_html.html" ]; then
+            REPORT_FILE="report_html.html"
+          elif [ -f "report_md.md" ]; then
+            REPORT_FILE="report_md.md"
+          fi
+
+          STATUS_TEXT="Success"
+          if [ "$SCAN_STATUS" != "success" ]; then
+            STATUS_TEXT="Warnings or Errors Detected"
+          fi
+
+          MESSAGE="**OWASP ZAP API Scan Report ($STATUS_TEXT)**"$'\n'"**Branch:** \`$REF_NAME\` | **Commit:** \`$SHA\`"$'\n'"**Run:** $SERVER_URL/$REPO/actions/runs/$RUN_ID"
+
+          if [ -n "$REPORT_FILE" ]; then
+            curl -s -S -X POST \
+              -F "content=$MESSAGE" \
+              -F "file=@$REPORT_FILE" \
+              "$DISCORD_WEBHOOK" > /dev/null || echo "Warning: Failed to deliver Discord notification."
+            echo "ZAP report sent to Discord with attachment: $REPORT_FILE"
+          else
+            curl -s -S -X POST \
+              -H "Content-Type: application/json" \
+              -d "{\"content\": \"$MESSAGE\n*(No report file found on runner)*\"}" \
+              "$DISCORD_WEBHOOK" > /dev/null || echo "Warning: Failed to deliver Discord notification."
+            echo "ZAP notification sent to Discord without attachment."
+          fi
 
   notify-on-failure:
     name: Notify on Failure
