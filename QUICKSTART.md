@@ -49,7 +49,7 @@ zap-api-scan jobs to use a real database:
 | `DATABASE_URL` | `postgresql+asyncpg://ordenes:ordenes@postgres:5432/ordenes` |
 | `REDIS_URL` | `redis://redis:6379/0` |
 | `RABBITMQ_URL` | `amqp://ordenes:ordenes@rabbitmq:5672/` |
-| `SAGA_TIMEOUT_SECONDS` | `60` (agree with the team — OP-01) |
+| `SAGA_TIMEOUT_SECONDS` | `60` (agreed in OP-01 / ADR-0001) |
 
 ---
 
@@ -245,8 +245,7 @@ After the script finishes:
 # Windows:   .venv\Scripts\Activate.ps1
 # macOS/Linux: source .venv/bin/activate
 
-# Edit .env — set SAGA_TIMEOUT_SECONDS before starting the service
-# (open point OP-01: agree the value with the team)
+# Verify .env — ensure SAGA_TIMEOUT_SECONDS=60 (OP-01 / ADR-0001)
 
 docker compose up -d postgres redis rabbitmq
 alembic upgrade head
@@ -376,7 +375,7 @@ Añade estas también como **Actions secrets** si quieres que los jobs `integrat
 | `DATABASE_URL` | `postgresql+asyncpg://ordenes:ordenes@postgres:5432/ordenes` |
 | `REDIS_URL` | `redis://redis:6379/0` |
 | `RABBITMQ_URL` | `amqp://ordenes:ordenes@rabbitmq:5672/` |
-| `SAGA_TIMEOUT_SECONDS` | `60` (acordar con el equipo — OP-01) |
+| `SAGA_TIMEOUT_SECONDS` | `60` (acordado en OP-01 / ADR-0001) |
 
 ---
 
@@ -556,8 +555,7 @@ Después de que el script termine:
 # Windows:   .venv\Scripts\Activate.ps1
 # macOS/Linux: source .venv/bin/activate
 
-# Edita .env — define SAGA_TIMEOUT_SECONDS antes de iniciar el servicio
-# (punto abierto OP-01: acordar el valor con el equipo)
+# Verifica .env — asegura SAGA_TIMEOUT_SECONDS=60 (OP-01 / ADR-0001)
 
 docker compose up -d postgres redis rabbitmq
 alembic upgrade head

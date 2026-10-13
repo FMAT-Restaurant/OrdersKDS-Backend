@@ -32,9 +32,9 @@ Antes de listar los requisitos funcionales, se fija aquí el vocabulario de esta
 
 | Estado | Se alcanza cuando... | Evento asociado |
 |---|---|---|
-| **Creada** | El mesero crea la comanda (vinculada a mesa o para llevar) y agrega/edita platillos. Incluye el tiempo en que la comanda ya fue confirmada y está esperando la reserva de stock de Inventario. | — (confirmación dispara `ordenes.orden.creada`) |
+| **Creada** | El mesero crea la comanda (vinculada a mesa o para llevar) y agrega/edita platillos. La confirmación fija `confirmed_at`; `Creada` incluye "borrador" y "confirmada esperando stock". | — (confirmación dispara `ordenes.orden.creada` y fija `confirmed_at`) |
 | **EnPreparacion** | Inventario confirmó la reserva de insumos; la comanda entra a la cola del KDS y cocina la está elaborando. | consume `inventario.stock.reservado` |
-| **Entregada** | Todos los platillos de la comanda fueron marcados "Listo" en cocina y el mesero los entregó en mesa. | — |
+| **Entregada** | Cocina marcó todos los platillos como listos; el mesero la recoge y la lleva a la mesa (el sistema no registra ese paso). | — |
 | **Pagada** *(fin del ciclo de vida)* | Se confirma el pago de la cuenta. | consume `pagos.pago.completado` |
 
 ### 1.2 Estados alternativos
@@ -45,11 +45,11 @@ Antes de listar los requisitos funcionales, se fija aquí el vocabulario de esta
 | **Rechazada** | Inventario responde con stock insuficiente tras la confirmación — en la práctica, esto ocurre por una condición de carrera entre pedidos casi simultáneos del mismo platillo, ya que el platillo en sí ya pasó el filtro de disponibilidad de Catálogo y Menú (ver nota abajo). Es el paso extra de verificar si el stock exacto sigue disponible al momento de confirmar. | consume `inventario.stock.insuficiente` | No |
 | **Mermada** | Un **administrador** anula una comanda completa o platillos individuales ya en **EnPreparacion**, por una razón administrativa o de negocio ajena a la cocina (p. ej., el cliente cambia de opinión). | publica `ordenes.comanda.mermada` + `ordenes.cobro.solicitado` | **Sí** — **[MODIFICADO]** se trata y se cobra exactamente igual que una comanda entregada correctamente; los insumos se consumen de forma normal |
 | **Anulada** *(antes "Anulada por Error de Cocina")* | Un **administrador o el chef** anulan un platillo ya en **EnPreparacion** por una falla atribuible a cocina (platillo mal preparado, error de elaboración, etc.). **[MODIFICADO]** A diferencia de "Mermada", esta anulación cancela **la comanda completa de inmediato**, no solo el platillo afectado. | publica `ordenes.comanda.mermada` (los insumos ya consumidos no se liberan) — **no** publica ningún evento de cobro | **No** — el error es responsabilidad del restaurante |
-| **Expirada** *(nuevo)* | La comanda permanece en **Creada** más allá de un tiempo límite sin que Inventario responda ni con `inventario.stock.reservado` ni con `inventario.stock.insuficiente`. Previene que una falla de Inventario la deje bloqueada indefinidamente. Duración exacta del tiempo límite: pendiente de definir (ver sección 10). | — (vencimiento de un temporizador interno) | No |
+| **Expirada** *(nuevo)* | La comanda permanece en **Creada** 60 s contados desde `confirmed_at` sin que Inventario responda ni con `inventario.stock.reservado` ni con `inventario.stock.insuficiente`. Previene que una falla de Inventario la deje bloqueada indefinidamente (OP-01). | — (vencimiento de temporizador interno de 60 s desde `confirmed_at`) | No |
 
 > **[NUEVO] Nota — dos capas de validación de disponibilidad, y por qué "Rechazada" sigue siendo necesaria:** el mesero **nunca** puede llegar a intentar pedir un platillo marcado como no disponible, porque la vista local de disponibilidad (alimentada por los eventos `menu.catalogo.actualizado`/`menu.platillo.precio_actualizado` de Catálogo y Menú — ver `Comunicaciones API ordenes y KDS.md`, sección 2.2) es la que filtra qué platillos puede siquiera seleccionar en la interfaz. Sin embargo, esa disponibilidad indica "el platillo existe y está activo en el menú", no una garantía de cantidad exacta en tiempo real. Si 3 meseros piden casi al mismo tiempo el mismo platillo y el insumo solo alcanza para uno, las otras dos comandas deben terminar en "Rechazada" aunque el platillo se veía disponible al momento de pedir. Este caso ya queda resuelto por el flujo existente de la sección 8, sin necesidad de un mecanismo adicional en Órdenes: Inventario es la única fuente de verdad sobre la cantidad exacta, y debe procesar cada `ordenes.orden.creada` de forma atómica al reservar stock, de modo que solo una de las solicitudes concurrentes reciba `inventario.stock.reservado` y las demás reciban `inventario.stock.insuficiente`. **Punto a validar con Inventario:** confirmar que su mecanismo de reserva sea atómico (p. ej. un decremento condicionado a nivel de base de datos) y no una simple verificación de disponibilidad seguida de un descuento separado, ya que solo así se sostiene esta garantía bajo concurrencia.
 
-> **Nota / punto a validar:** los estados por ítem ("Pendiente" → "Listo" → "Entregado" a nivel de platillo, usados en el Req. de la sección 4 para el flujo de "rehacer" un platillo) son sub-estados internos dentro del estado de orden "EnPreparacion"/"Entregada", y no deben confundirse con los 4 estados principales de la orden definidos arriba. Se deja así por ahora; conviene que el equipo confirme si esta distinción entre estado-de-orden y estado-de-ítem debe formalizarse en el modelo de datos.
+> **Nota de estados por ítem:** el ciclo de vida por ítem es `PENDING → READY → DELIVERED` (transición automática a `DELIVERED` en la misma transacción en que la orden pasa a `Entregada`) `→ PENDING` (rehacer). Al rehacer un platillo, la orden conserva `DELIVERED` (OP-12, propuesto), mientras que únicamente el ítem afectado pasa a `PENDING` para su reelaboración en cocina.
 
 ### 1.3 Diagrama de estados (orden)
 
@@ -60,7 +60,7 @@ stateDiagram-v2
     Creada --> Rechazada: inventario.stock.insuficiente
     Creada --> Cancelada: mesero cancela (solo en Creada)
     Creada --> Expirada: Inventario no responde dentro del tiempo límite
-    EnPreparacion --> Entregada: todos los platillos entregados en mesa
+    EnPreparacion --> Entregada: cocina marca todos los platillos listos (mesero recoge)
     EnPreparacion --> Mermada: admin anula (razón administrativa) — SÍ se cobra
     EnPreparacion --> Anulada: admin o chef anulan por error de cocina — cancela la comanda completa, NO se cobra
     Entregada --> Pagada: pagos.pago.completado
@@ -77,16 +77,16 @@ stateDiagram-v2
 ## 2. Visualización de comandas en tiempo real
 
 - El sistema deberá agrupar las comandas entrantes en la pantalla de cocina según su estado actual de elaboración.
-- El sistema deberá ordenar las comandas en la pantalla de cocina basándose en su prioridad, calculada a partir del tiempo de preparación de los platillos.
-- El sistema deberá ordenar cronológicamente por la hora de ingreso aquellas comandas que compartan el mismo nivel de prioridad.
+- El sistema deberá ordenar las comandas en la pantalla de cocina según mayor tiempo en cocina primero (OP-11, propuesto; medido desde `in_preparation_at`), en lugar de prioridad por tiempo de preparación.
+- El sistema deberá ordenar cronológicamente por la hora de ingreso (y por identificador de orden) aquellas comandas que compartan el mismo tiempo en cocina.
 - **[NUEVO]** El sistema deberá remover la comanda de la pantalla de cocina (KDS) en cuanto su estado transite a **"Pagada"** — información que llega de forma asíncrona desde el microservicio de Pagos y Facturación (ver sección 6).
 
 ## 3. Validación y cola KDS
 
-- El sistema debe mostrar los detalles de los platillos, los modificadores aplicados y las notas especiales en cada tarjeta de comanda activa en la cocina.
+- El sistema debe mostrar los detalles de los platillos, los modificadores aplicados y las notas especiales en cada tarjeta de comanda activa en la cocina, presentando la estación y el tiempo de preparación como texto de referencia (OP-09).
 - El sistema deberá mostrar el identificador de la mesa asignada de forma visible en cada tarjeta de comanda.
-- El sistema deberá mostrar un contador de tiempo que indique el tiempo exacto transcurrido desde la creación del pedido.
-- El sistema deberá filtrar los platillos visibles en la pantalla de cocina basándose en las categorías definidas en el catálogo para direccionar los pedidos a sus estaciones de preparación correspondientes (Categorías del módulo externo de Catálogo y Menú).
+- El sistema deberá mostrar un contador de tiempo (cronómetro: pendiente de decisión final; hoy opera desde la creación del pedido).
+- El sistema deberá filtrar los platillos visibles en la pantalla de cocina basándose en la estación definida en el catálogo (estación y tiempo de preparación como texto de referencia, OP-09) para direccionar los pedidos a sus estaciones de preparación correspondientes.
 
 ## 4. Control del estado de una comanda en su flujo de vida
 
@@ -133,7 +133,7 @@ stateDiagram-v2
 - El sistema deberá publicar el evento `ordenes.orden.creada` en el broker de mensajería inmediatamente después de que el mesero confirme la orden en la interfaz (comanda en estado "Creada"), para solicitar la reserva de los ingredientes.
 - El sistema deberá enviar la comanda a la cola de la pantalla de cocina (KDS) y transicionarla a **"EnPreparacion"** únicamente tras consumir el evento asíncrono `inventario.stock.reservado` proveniente del microservicio de Inventario.
 - El sistema deberá actualizar el estado de la comanda a **"Rechazada"** y emitir una alerta visual en la interfaz del mesero si consume el evento asíncrono `inventario.stock.insuficiente` (ver sección 1.2 — este es el mecanismo que resuelve la condición de carrera entre pedidos casi simultáneos del mismo platillo).
-- **[NUEVO]** El sistema deberá transicionar la comanda al estado **"Expirada"** si, transcurrido un tiempo límite definido por el equipo (ver sección 10), Inventario no ha respondido a `ordenes.orden.creada` ni con `inventario.stock.reservado` ni con `inventario.stock.insuficiente` — esto evita que una comanda quede bloqueada indefinidamente en "Creada" ante una falla de Inventario.
+- **[NUEVO]** El sistema deberá transicionar la comanda al estado **"Expirada"** si, transcurridos 60 s contados desde `confirmed_at` (OP-01), Inventario no ha respondido a `ordenes.orden.creada` ni con `inventario.stock.reservado` ni con `inventario.stock.insuficiente` — esto evita que una comanda quede bloqueada indefinidamente en "Creada" ante una falla de Inventario.
 
 ---
 
@@ -155,9 +155,9 @@ stateDiagram-v2
 
 1. ~~**Autorización de la anulación por error de cocina (sección 7.1)**~~ — **[RESUELTO]** la confirma un administrador o el chef (rol validado contra Auth).
 2. ~~**Caso borde — comanda con mezcla de estados**~~ — **[RESUELTO]** ya no aplica: una anulación por error de cocina siempre cancela la comanda completa (sección 7.1), por lo que no puede quedar una mezcla de platillos "Mermados" y "Anulados" dentro de la misma comanda.
-3. **Timeout de Saga** — **[RESUELTO en parte]**: se agrega el estado "Expirada" (secciones 1.2 y 8) para este caso. Sigue pendiente acordar con el equipo la duración exacta del tiempo límite (ver punto 7).
+3. ~~**Timeout de Saga**~~ — **[RESUELTO]**: fijado en 60 s como máximo desde `confirmed_at` con un intervalo del watcher de 5 s (OP-01 / ADR-0001).
 4. **Contrato del evento `ordenes.platillo_intermedio.preparado` (sección 9):** la propiedad de la entidad "platillo intermedio" queda **[RESUELTA]** (Inventario). Sigue pendiente confirmar con ese equipo el nombre exacto y el payload del evento.
 5. ~~**Interfaz para platillos intermedios (sección 9)**~~ — **[RESUELTO]** sí requiere una vista nueva, dirigida al rol chef.
 6. **Atomicidad de la reserva de stock en Inventario (sección 1.2):** confirmar con el equipo de Inventario que su reserva de stock ante `ordenes.orden.creada` sea atómica, para garantizar que ante pedidos casi simultáneos del mismo platillo solo uno reciba `inventario.stock.reservado` y el resto `inventario.stock.insuficiente`. Es responsabilidad de Inventario, no de Órdenes, pero condiciona si "Rechazada" cubre correctamente este caso.
-7. **[NUEVO] Duración del tiempo límite para "Expirada":** se pidió agregar el estado tras "una puerta de tiempo considerable", sin un valor definido. Falta acordar el umbral exacto (p. ej. minutos) con el equipo, considerando cuánto tarda normalmente Inventario en responder.
-8. **[NUEVO] Estado "Expirada" fuera del listado final de esta corrección:** la lista final de nombres de estados de esta ronda no mencionó "Expirada" junto con Mermada/Anulada/Cancelada/Rechazada, aunque sí se pidió explícitamente agregarlo en el punto 3. Se incluyó en el documento asumiendo que fue una omisión al resumir; confirmar si debe excluirse o renombrarse.
+7. ~~**[NUEVO] Duración del tiempo límite para "Expirada":**~~ — **[RESUELTO]** El tiempo límite de la saga se acordó en 60 s contados desde `confirmed_at` (OP-01 / ADR-0001).
+8. ~~**[NUEVO] Estado "Expirada" fuera del listado final de esta corrección:**~~ — **[RESUELTO]** El estado Expirada queda confirmado como estado final del ciclo alternativo (OP-01 / ADR-0001).

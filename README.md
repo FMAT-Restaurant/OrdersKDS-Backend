@@ -200,7 +200,7 @@ pip install -r requirements/dev.txt
 
 # 4. Set up environment variables
 python scripts/setup_env.py        # generates .env with local defaults
-# Edit .env and set SAGA_TIMEOUT_SECONDS (agree value with team)
+# Verify .env: SAGA_TIMEOUT_SECONDS=60 (agreed in OP-01 / ADR-0001)
 
 # 5. Start the infrastructure (PostgreSQL, Redis, RabbitMQ)
 docker compose up -d postgres redis rabbitmq
@@ -533,7 +533,7 @@ pip install -r requirements/dev.txt
 
 # 4. Configurar variables de entorno
 python scripts/setup_env.py        # genera .env con valores locales por defecto
-# Editar .env y establecer SAGA_TIMEOUT_SECONDS (acordar con el equipo)
+# Verificar .env: SAGA_TIMEOUT_SECONDS=60 (acordado en OP-01 / ADR-0001)
 
 # 5. Levantar la infraestructura (PostgreSQL, Redis, RabbitMQ)
 docker compose up -d postgres redis rabbitmq
