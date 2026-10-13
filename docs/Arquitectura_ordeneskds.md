@@ -63,23 +63,23 @@ Esta API no comunica microservicios entre sí — comunica los dispositivos del 
 **Endpoints consumidos por el Microfrontend de Sala**
 | Método | Ruta | Nota |
 |---|---|---|
-| `GET` | `/orders?estado=` | Estado por color de cada mesa/comanda |
+| `GET` | `/orders?status=` | Estado por color de cada mesa/comanda |
 | `POST` | `/orders` | Crea comanda (mesa o para llevar) → estado "Creada" |
 
 **Endpoints consumidos por el Microfrontend de Menú**
 | Método | Ruta | Nota |
 |---|---|---|
-| `PATCH` | `/orders/{orderId}/items` | Agrega platillos — solo si "Creada"; valida disponibilidad contra la vista local de Catálogo y Menú |
+| `PATCH` | `/orders/{orderId}/items` | Agrega platillos — solo si "Creada" y sin `confirmed_at`; valida disponibilidad contra la vista local de Catálogo y Menú |
 | `PATCH` | `/orders/{orderId}/transfer` | Cambia la mesa asociada |
-| `POST` | `/orders/{orderId}/confirm` | Publica `ordenes.orden.creada` |
+| `POST` | `/orders/{orderId}/confirm` | Idempotente: fija `confirmed_at` y publica `ordenes.orden.creada` solo en la primera invocación (OP-05) |
 | `PATCH` | `/orders/{orderId}/cancel` | Solo si "Creada" → publica `ordenes.orden.cancelada` → "Cancelada" |
-| `PATCH` | `/orders/{orderId}/items/{itemId}/redo` | Regresa un ítem "Entregado" a "Pendiente"; `nota` obligatoria |
+| `PATCH` | `/orders/{orderId}/items/{itemId}/redo` | Regresa un ítem "Entregado" a "Pendiente"; cuerpo `{ "note": "..." }` obligatorio (la orden conserva "Entregada", OP-12) |
 | `POST` | `/orders/{orderId}/request-bill` | Publica `ordenes.cuenta.solicitada` |
 
 **Vista 3 — Pantalla KDS (cocina)**
 | Método | Ruta | Nota |
 |---|---|---|
-| `GET` | `/kds/queue?estacion=` | Comandas por prioridad y estación; deja de listar comandas en "Pagada" |
+| `GET` | `/kds/queue?station=` | Comandas por mayor tiempo en cocina primero (OP-11) y filtro por estación; deja de listar comandas en "Pagada" |
 | `PATCH` | `/orders/{orderId}/items/{itemId}/ready` | Publica `ordenes.platillo.preparado` |
 | `PATCH` | `/orders/{orderId}/ready` | Marca la comanda completa como "Listo" |
 
@@ -87,17 +87,28 @@ Esta API no comunica microservicios entre sí — comunica los dispositivos del 
 | Método | Ruta | Rol | Nota |
 |---|---|---|---|
 | `PATCH` | `/orders/{orderId}/void` | Administrador | Anula comanda completa o platillos individuales ya "EnPreparacion" por razón administrativa → **"Mermada"**. Publica `ordenes.comanda.mermada` + `ordenes.cobro.solicitado` (tratado igual que una comanda entregada). |
-| `PATCH` | `/orders/{orderId}/void-error-cocina` | Administrador **o Chef** | Anula la comanda **completa** ya "EnPreparacion" por error de cocina → **"Anulada"**. `nota` obligatoria. Publica `ordenes.comanda.mermada`; **no** publica ningún evento de cobro. |
+| `PATCH` | `/orders/{orderId}/void-kitchen-error` | Administrador **o Chef** | Anula la comanda **completa** ya "EnPreparacion" por error de cocina → **"Anulada"**. Cuerpo `{ "note": "..." }` obligatorio. Publica `ordenes.comanda.mermada`; **no** publica ningún evento de cobro. |
 
 **Vista 4 — Preparación de Platillos Intermedios (chef) — `[Opcional]`**
 | Método | Ruta | Rol | Nota |
 |---|---|---|---|
-| `POST` | `/platillos-intermedios` | **Chef** | Registra un lote preparado por adelantado, fuera de cualquier comanda de cliente. Publica `ordenes.platillo_intermedio.preparado`. Requiere una vista nueva y dedicada (no se integra a una vista existente). |
+| `POST` | `/intermediate-dishes` | **Chef** | Registra un lote preparado por adelantado, fuera de cualquier comanda de cliente. Publica `ordenes.platillo_intermedio.preparado`. Requiere una vista nueva y dedicada (no se integra a una vista existente). |
 
 > Estos endpoints son una propuesta a validar con el equipo de frontend, igual que en la versión anterior de este documento.
 
-### 3.3 Notificación al cliente: WebSocket (sin cambios)
-Conexión persistente por sesión (mesero/KDS/chef), autenticada por JWT. Cualquier actualización de estado —venga de un request REST entrante o de un evento del broker— se empuja por este canal, sin que el cliente tenga que hacer polling.
+### 3.3 Notificación al cliente: WebSocket (OP-02 / ADR-0002)
+Una conexión persistente por sesión de cliente, autenticada por JWT, distribuida en dos endpoints según el rol:
+
+| Canal | Endpoint | Roles permitidos | Modo de suscripción | Contenido recibido |
+|---|---|---|---|---|
+| `kds:station:{station}` | `/ws/kds` | `kitchen`, `chef`, `admin` | Solicitado por el cliente vía mensaje de suscripción; cambio de estación sin reconectar | Cambios de estado de órdenes con ítems de esa estación y de sus platillos |
+| `kds:all` | `/ws/kds` | `kitchen`, `chef`, `admin` | Solicitado por el cliente (vista global de cocina) | Todas las órdenes activas en cocina |
+| `floor` | `/ws/waiter` | `waiter`, `admin` | Automático al conectar | Cambios de estado de todas las órdenes activas (para monitor de Sala y Menú) |
+| `user:{userId}` | `/ws/waiter` | `waiter`, `admin` | Automático al conectar (`userId` extraído del JWT) | Alertas de órdenes del usuario: `REJECTED`, `EXPIRED` y `DELIVERED` ("lista para recoger") |
+
+- Tipos de mensaje empujados: `order.status_changed` e `item.status_changed` en formato camelCase con `version` monótona para descarte de mensajes fuera de orden.
+- El cliente no hace polling.
+- El token no viaja en la URL; token inválido o vencido cierra con código `4401`; rol no permitido en endpoint cierra con `4403`; solicitud de canal no autorizado responde con error `FORBIDDEN_CHANNEL`.
 
 ### 3.4 Excepción documentada: sincronización con Catálogo y Menú (sin cambios)
 Única llamada síncrona saliente permitida en todo el microservicio, acotada a la rutina de arranque y a un job de reconciliación periódico contra `GET /menu/catalogo/completo` — nunca en el camino de una request de usuario. El detalle de tolerancia a fallos y comparación por `updated_at` se mantiene igual que en la versión anterior de este documento.
@@ -116,11 +127,11 @@ Ningún endpoint publica directamente al broker: escribe en la tabla `outbox` de
 | `ordenes.orden.creada` | `POST /orders/{id}/confirm` (en "Creada") | `{orderId, items[]}` | Inventario | Confirmado |
 | `ordenes.orden.cancelada` | `PATCH /orders/{id}/cancel` ("Creada" → "Cancelada") | `{orderId, itemsCancelados[]}` | Inventario | Confirmado |
 | `ordenes.platillo.preparado` | `PATCH /orders/{id}/items/{itemId}/ready` | `{orderId, itemId}` | Inventario | Confirmado |
-| `ordenes.comanda.mermada` | `PATCH /orders/{id}/void` **o** `/void-error-cocina` ("EnPreparacion" → "Mermada" **o** "Anulada") | `{orderId, itemsAfectados[], motivo: "administrativo" \| "error_cocina"}` | Inventario | Propuesto — pendiente de que Inventario documente su suscripción |
+| `ordenes.comanda.mermada` | `PATCH /orders/{id}/void` **o** `/void-kitchen-error` ("EnPreparacion" → "Mermada" **o** "Anulada") | `{orderId, itemsAfectados[], motivo: "administrativo" \| "error_cocina"}` | Inventario | Propuesto — pendiente de que Inventario documente su suscripción |
 | `ordenes.cobro.solicitado` | `PATCH /orders/{id}/void` (**solo** para "Mermada") | `{orderId, detalleOrden}` — tratado de forma **idéntica** a la cuenta de una comanda entregada normalmente | Pagos | Propuesto — **no** se publica para "Anulada" |
 | `ordenes.cuenta.solicitada` | `POST /orders/{id}/request-bill` (en "Entregada") | `{orderId, sessionId, detalleOrden}` | Pagos | Propuesto |
-| `ordenes.orden.expirada` **(nuevo)** | Vencimiento del temporizador de Saga (comanda en "Creada" sin respuesta de Inventario) | `{orderId, tiempoEsperaMs}` | Inventario | Propuesto — nombre ya anticipado en `ordenes-kds-diagramas-secuencia.md`; pendiente validar el umbral de tiempo (sección 5) |
-| `ordenes.platillo_intermedio.preparado` **(nuevo, opcional)** | `POST /platillos-intermedios` (chef, fuera del flujo de comandas) | `{platilloIntermedioId, cantidadProducida, insumosUtilizados[]}` | Inventario | Propuesto — pendiente validar nombre/payload con Inventario |
+| `ordenes.orden.expirada` **(nuevo)** | Vencimiento del temporizador de Saga (comanda en "Creada" sin respuesta de Inventario) | `{orderId, tiempoEsperaMs}` | Inventario | Propuesto (OP-04) — nombre/payload y campo motivo pendientes de confirmación con Inventario |
+| `ordenes.platillo_intermedio.preparado` **(nuevo, opcional)** | `POST /intermediate-dishes` (chef, fuera del flujo de comandas) | `{platilloIntermedioId, cantidadProducida, insumosUtilizados[]}` | Inventario | Propuesto — pendiente validar nombre/payload con Inventario |
 
 > **Por qué `ordenes.comanda.mermada` es un solo evento con un campo `motivo`, y no dos eventos distintos:** tanto "Mermada" como "Anulada" significan lo mismo para Inventario — insumos que ya se consumieron y no se recuperan —, así que reutilizan el mismo evento. Lo único que cambia según el motivo es si además se dispara un cobro (`ordenes.cobro.solicitado`) o no.
 >
@@ -144,14 +155,13 @@ Ningún endpoint publica directamente al broker: escribe en la tabla `outbox` de
 
 ---
 
-## 5. Mecanismo del estado "Expirada" (Saga Timeout Watcher)
+## 5. Mecanismo del estado "Expirada" (Saga Timeout Watcher — OP-01 / ADR-0001)
 
 *(Detalle de implementación — el ERS solo exige el comportamiento resultante, no cómo se logra.)*
 
-- Un proceso programado (análogo al job de reconciliación con Catálogo, sección 3.4) revisa periódicamente las comandas en "Creada" cuya antigüedad supere un umbral configurable.
-- Al vencer el umbral sin haber recibido `inventario.stock.reservado` ni `inventario.stock.insuficiente`, transiciona la comanda a **"Expirada"** y publica `ordenes.orden.expirada`.
-- Si Inventario responde **después** del timeout (una reserva "huérfana"), debe poder identificar — al consumir `ordenes.orden.expirada` — que tiene que liberar cualquier reserva hecha tardíamente, para no dejar insumo fantasma reservado para una comanda que el mesero ya no puede ver.
-- **Pendiente de validar con el equipo:** el valor exacto del umbral (ver `ERS_ordeneskds.md`, sección 10, punto 7).
+- Un proceso en segundo plano (Saga Timeout Watcher) revisa periódicamente cada 5 s (`SAGA_WATCHER_INTERVAL_SECONDS=5`) las comandas en "Creada" que cuenten con confirmación (`confirmed_at` no nulo).
+- Al transcurrir ≥ 60 s (`SAGA_TIMEOUT_SECONDS=60`) contados desde `confirmed_at` sin haber recibido `inventario.stock.reservado` ni `inventario.stock.insuficiente`, transiciona la comanda a **"Expirada"** y publica `ordenes.orden.expirada` (OP-04, propuesto).
+- Si Inventario responde **después** del timeout (una reserva tardía/huérfana), Inventario consume `ordenes.orden.expirada` y libera cualquier reserva realizada tardíamente, evitando stock fantasma bloqueado.
 
 ---
 
@@ -270,7 +280,7 @@ flowchart TB
 ## 8. Puntos abiertos relevantes a esta arquitectura
 
 1. Validar con Inventario que su reserva de stock sea atómica (condición de carrera detrás de "Rechazada").
-2. Definir el umbral exacto de tiempo para "Expirada" (sección 5).
-3. Validar con Inventario el nombre y payload exactos de `ordenes.orden.expirada` y de `ordenes.platillo_intermedio.preparado`.
-4. Confirmar con el equipo de frontend los endpoints de la sección 3.2, en especial los dos nuevos (`/void-error-cocina` y `/platillos-intermedios`).
+2. ~~Definir el umbral exacto de tiempo para "Expirada" (sección 5).~~ — **[RESUELTO]** Acordado en 60 s como máximo desde `confirmed_at` con watcher cada 5 s (OP-01 / ADR-0001).
+3. Validar con Inventario el nombre y payload exactos de `ordenes.orden.expirada` (OP-04, propuesto) y de `ordenes.platillo_intermedio.preparado`.
+4. ~~Confirmar con el equipo de frontend los endpoints de la sección 3.2, en especial los dos nuevos (`/void-kitchen-error` y `/intermediate-dishes`).~~ — **[RESUELTO]** Rutas REST y parámetros en inglés (`/void-kitchen-error`, `/intermediate-dishes`, `?status=`, `?station=`, OP-07 / ADR-0006).
 5. Confirmar con Inventario si prefiere el campo `motivo` explícito en `ordenes.comanda.mermada` (propuesto aquí) o inferirlo de otra forma.

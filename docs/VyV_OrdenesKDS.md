@@ -138,7 +138,7 @@ Feature: Void an order because of a kitchen error
 | Adecuación funcional | RF-01…RF-41 | Unitarias, integración, BDD, E2E |
 | Eficiencia de desempeño | RNF-06 | k6 (PT-xx), métricas del outbox |
 | Compatibilidad | RNF-08, RNF-13 | Contratos de eventos/REST, Federation en *host stub* |
-| Usabilidad / accesibilidad | RNF-07, RNF-11 | E2E con teclado, axe-core, UAT con Bump Bar real |
+| Usabilidad / accesibilidad | RNF-07, RNF-11 | E2E táctil y con teclado, axe-core, UAT con monitor táctil y Bump Bar real |
 | Fiabilidad | RNF-01, RNF-02, RNF-05, RNF-09 | Integración con broker real, DLQ, reconciliación |
 | Seguridad | RNF-03 | ZAP, matriz de roles, pruebas de JWT/WebSocket |
 | Mantenibilidad | RNF-10, RNF-12 | SonarCloud (Quality Gate), complejidad, logs |
@@ -155,7 +155,7 @@ Fuente: ERS v4 (§2–§9) y Arquitectura/Comunicaciones (marcados *Arq.*). Los 
 | ID | Requisito | Fuente |
 |---|---|---|
 | RF-01 | Agrupar comandas en el KDS según su estado | ERS §2 |
-| RF-02 | Ordenar comandas por prioridad (tiempo de preparación) | ERS §2 |
+| RF-02 | Ordenar comandas por mayor tiempo en cocina primero (OP-11, propuesto) | ERS §2 |
 | RF-03 | Desempatar cronológicamente a igual prioridad | ERS §2 |
 | RF-04 | Remover la comanda del KDS al pasar a `PAID` | ERS §2 |
 | RF-05 | Mostrar platillos, modificadores y notas en cada tarjeta | ERS §3 |
@@ -206,7 +206,7 @@ Fuente: ERS v4 (§2–§9) y Arquitectura/Comunicaciones (marcados *Arq.*). Los 
 | RNF-04 | **Tiempo real por WebSocket**, sin *polling*; recuperación tras reconexión | Comunicaciones §1.3 |
 | RNF-05 | **Resiliencia** ante caída de Menú (seguir con la última copia local) | Arq. §3.4 |
 | RNF-06 | **Rendimiento:** `p95 < 500 ms`, errores `< 1 %`; latencia de push y de outbox acotadas *(propuesto)* | Curso (k6) |
-| RNF-07 | **Operabilidad de cocina:** KDS landscape, **solo teclado** (Bump Bar), sin puntero | UI Spec §1 |
+| RNF-07 | **Operabilidad de cocina:** KDS landscape en monitor táctil; entrada principal táctil, secundaria por teclado, con paridad total (OP-06) | UI Spec §1 / ERS |
 | RNF-08 | **Consistencia visual y aislamiento de estilos** (FMAT, sin CSS global) | README FE / FMAT |
 | RNF-09 | **Concurrencia optimista** (columna `version`, `409` ante conflicto) | README BE |
 | RNF-10 | **Mantenibilidad / calidad estática** (Quality Gate de SonarCloud) | Guidelines / Curso |
@@ -679,7 +679,7 @@ Verifican unidades aisladas; solo las **fronteras** (broker, HTTP externo, reloj
 |---|---|---|---|---|
 | UT-BE-48 | `test_outbox_worker_publishes_pending_rows_and_marks_them_published` | Filas pendientes | Publicadas en orden y marcadas | RNF-01 |
 | UT-BE-49 | `test_outbox_worker_keeps_row_pending_when_publish_fails` | Falla del *publisher confirm* | La fila **no** se marca; se reintenta | RNF-01 |
-| UT-BE-50 | `test_saga_watcher_expires_only_orders_older_than_threshold` | BVA: umbral −1 s / +1 s (reloj congelado) | Solo la de +1 s expira *(comportamiento exacto en umbral: OP-01)* | RF-35 |
+| UT-BE-50 | `test_saga_watcher_expires_only_orders_older_than_threshold` | BVA con valores 59 s (no expira), 60 s (límite exacto) y 61 s (expira) desde `confirmed_at` con reloj inyectable (OP-01 / ADR-0001) | Solo órdenes con tiempo transcurrido ≥ 60 s expiran | RF-35 |
 | UT-BE-51 | `test_saga_watcher_publishes_order_expired_exactly_once` | Watcher corre dos veces | Un solo `ORDER_EXPIRED` | RF-35, RNF-02 |
 | UT-BE-52 | `test_reconciliation_does_not_overwrite_newer_updated_at` | Evento más reciente que el snapshot | Se conserva el dato más nuevo | RF-41 |
 | UT-BE-53 | `test_reconciliation_logs_discrepancies_and_alerts_above_threshold` | Muchas discrepancias | Se registran y se alerta | RF-41 |
@@ -704,7 +704,7 @@ Verifican unidades aisladas; solo las **fronteras** (broker, HTTP externo, reloj
 | UT-FE-01 | `maps Enter to MARK_FOCUSED_READY` | Mapeador Bump Bar | Comando correcto | RF-09, RNF-07 |
 | UT-FE-02 | `arrow keys move focus and clamp at the first and last card` | Mapeador Bump Bar | BVA primera/última tarjeta | RNF-07 |
 | UT-FE-03 | `ignores unmapped keys` | Mapeador Bump Bar | Sin efecto | RNF-07 |
-| UT-FE-04 | `is fully operable without pointer events` | `KdsBoard` | Ninguna acción requiere `mouse*`/`click` | RNF-07 |
+| UT-FE-04 | `is operable by touch and keyboard with full functional parity` | `KdsBoard` | Operable por táctil (pointer events/tap) y por teclado (paridad funcional total, OP-06) | RNF-07 |
 | UT-FE-05 | `groups orders into status columns` | `KdsBoard` | Columnas por estado | RF-01 |
 | UT-FE-06 | `sorts by priority then by created time` | `sortOrders` | Orden correcto y estable | RF-02, RF-03 |
 | UT-FE-07 | `formats elapsed time at 59s, 60s, 59m59s and 1h` | `useElapsedTime` (*fake timers*) | BVA de formato | RF-07 |
@@ -758,7 +758,7 @@ Verifican la interacción entre módulos **reales**. Solo se sustituye lo que pe
 | IT-14 | `test_catalog_reconciliation_with_stubbed_menu` | Snapshot HTTP simulado; Menú caído | *Upsert* con `updated_at`; con Menú caído conserva la copia | RF-41, RNF-05 |
 | IT-15 | `test_poison_message_goes_to_dlq_and_consumer_stays_healthy` | Mensaje inválido N veces | A la DLQ; el consumer sigue vivo | RNF-02 |
 | IT-16 | `test_jwt_signature_and_role_validation` | JWT válido/expirado/manipulado (`dev_token`) | `200` / `401` / `401` | RNF-03, RF-15 |
-| IT-17 | `test_websocket_auth_and_role_scoped_messages` | Con/sin token; distintos roles | Sin token rechazado; solo canales autorizados *(alcance: OP-02)* | RNF-03, RNF-04, RF-18 |
+| IT-17 | `test_websocket_channels_and_auth_matrix` | Matriz de canales (`/ws/kds`, `/ws/waiter`, `station`, `all`, `floor`, `user`) por rol | Conexión sin token cierra con `4401`; rol incorrecto cierra con `4403`; suscripción a canal no permitido responde `FORBIDDEN_CHANNEL` (OP-02 / ADR-0002) | RNF-03, RNF-04, RF-18 |
 | IT-18 | `test_bill_request_payload_matches_schema` | Solicitar cuenta | Payload con precios congelados, modificadores y `sessionId` válido contra el esquema | RF-20 |
 | IT-19 | `test_alembic_upgrade_and_downgrade_on_empty_database` | `upgrade head` / `downgrade base` | Sin errores | RNF-10 |
 
@@ -772,7 +772,7 @@ Verifican la interacción entre módulos **reales**. Solo se sustituye lo que pe
 | IT-FE-04 | `401 and 403 are handled` | Respuestas de auth | Aviso de sesión/permiso; sin fuga de detalle | RNF-03 |
 | IT-FE-05 | `409 conflict refetches and informs the user` | `VERSION_CONFLICT` | Datos frescos + mensaje | RNF-09 |
 | IT-FE-06 | `federation smoke: remote loads inside a host stub without style leakage` | Build → host stub carga `./KdsApp` y `./OrderTicketWidget` | Los elementos del host **no** cambian de estilo computado | RNF-08 |
-| IT-FE-07 | `keyboard-only flow marks an item ready` | Solo `keyboard` | Se dispara `PATCH …/ready` | RF-09, RNF-07 |
+| IT-FE-07 | `touch and keyboard flows mark an item ready` | Variante táctil con `tap()` y variante de teclado con `KeyboardEvent` | En ambos modos se dispara `PATCH …/items/{itemId}/ready` (paridad total, OP-06) | RF-09, RNF-07 |
 
 ---
 
@@ -836,10 +836,10 @@ Validan el sistema completo levantado con `docker compose` + *stubs de contrato*
 | ID | Caso | Pasos clave | Resultado esperado | Req. |
 |---|---|---|---|---|
 | ST-01 | El KDS muestra la cola (landscape 1920×1080) | Abrir KDS con comandas sembradas | Tarjetas con mesa, cronómetro, platillos, modificadores y notas | RF-05, RF-06, RF-07, RF-01 |
-| ST-02 | Marcar un ítem "Listo" solo con teclado | Flechas para enfocar; `Enter` | El ítem pasa a listo; sin usar el mouse | RF-09, RNF-07 |
-| ST-03 | Marcar la comanda completa "Listo" con teclado | Atajo de comanda completa | Comanda lista | RF-11, RNF-07 |
+| ST-02 | Marcar un ítem "Listo" por táctil y teclado | Variante táctil con `locator.tap()` y variante de teclado con `page.keyboard` (flechas + `Enter`) | En ambas variantes el ítem transita a `READY` y dispara `PATCH …/items/{itemId}/ready` (paridad total, OP-06) | RF-09, RNF-07 |
+| ST-03 | Marcar comanda completa "Listo" por táctil y teclado | Variante táctil (botón grande "Orden lista") y variante de teclado (`NumpadEnter`) | La comanda completa pasa a `READY` / `DELIVERED` en ambos modos (OP-06) | RF-11, RNF-07 |
 | ST-04 | Orden por prioridad y cronológico | Comandas con prioridades iguales y distintas | Orden visual correcto | RF-02, RF-03 |
-| ST-05 | Filtro por estación | Cambiar de estación con teclado | Solo platillos de la estación | RF-08 |
+| ST-05 | Filtro por estación | Cambiar de estación por teclado o táctil | Muestra solo los platillos de la estación seleccionada | RF-08 |
 | ST-06 | La comanda desaparece al pagarse | *Stub* de Pagos publica `PAYMENT_COMPLETED` | Desaparece del KDS sin recargar | RF-04, RF-21 |
 | ST-07 | Widget del mesero: crear y confirmar | Crear → agregar → confirmar → *stub* reserva stock | "Pendiente" → aparece en el KDS | RF-12…RF-14, RF-32, RF-33 |
 | ST-08 | Alerta de rechazo | *Stub* responde `STOCK_INSUFFICIENT` | Alerta visible y anunciada (`aria-live`) | RF-34 |
@@ -852,7 +852,7 @@ Validan el sistema completo levantado con `docker compose` + *stubs de contrato*
 | ST-15 | Regresión visual | `toHaveScreenshot()` de tarjeta KDS y ticket | Sin diferencias no aprobadas | RNF-08 |
 | ST-16 | Convivencia en el *host* | Montar el remoto en un *host stub* con estilos propios | Los estilos del host no cambian; tokens acotados | RNF-08 |
 | ST-17 | Accesibilidad | axe-core en KDS, ticket y vista del chef | 0 violaciones críticas; foco visible; contraste AA | RNF-11 |
-| ST-18 | Responsivo por dispositivo | Handheld portrait (360×640), tablet 8" (800×1280), KDS 1920×1080 | Layout correcto; botones ≥ 44/48 px | RNF-07, RNF-11 |
+| ST-18 | Responsivo por dispositivo | Handheld portrait (360×640), tablet 8" (800×1280), KDS landscape 1920×1080 | Layout correcto; botones del mesero ≥ 44/48 px; objetivos táctiles en el KDS ≥ 64 px con separación ≥ 16 px (ST-18a; OP-06) | RNF-07, RNF-11 |
 | ST-19 | XSS en notas | Nota `<script>alert(1)</script>` | Se muestra como texto | RF-05, RNF-03 |
 | ST-20 | Expiración de sesión | Token vencido durante el uso | Se notifica al Shell; sin pantalla rota | RNF-03 |
 
@@ -868,13 +868,13 @@ Los `.feature` describen el **comportamiento de negocio** (sin URLs ni selectore
 
 | ID | Feature (`tests/bdd/features/`) | Escenarios principales | Req. |
 |---|---|---|---|
-| AT-01 | `order_lifecycle.feature` | Camino feliz `CREATED → IN_PREPARATION → DELIVERED → PAID`; la sesión de Sala crea la orden base | RF-09…RF-15, RF-19, RF-32, RF-39 |
+| AT-01 | `order_lifecycle.feature` | Camino feliz `CREATED → IN_PREPARATION → DELIVERED → PAID` (cocina marca último platillo listo; orden y platillos pasan a `DELIVERED` en misma transacción; mesero recoge y lleva sin registro en sistema; OP-08); sesión de Sala crea la orden base | RF-09…RF-15, RF-19, RF-32, RF-39 |
 | AT-02 | `cancellation.feature` | Cancelar en `CREATED` ✔; cancelar/editar en `IN_PREPARATION` ✘ | RF-23, RF-24, RF-25 |
 | AT-03 | `inventory_saga.feature` | Stock reservado; stock insuficiente → `REJECTED`; sin respuesta → `EXPIRED`; reserva tardía ignorada | RF-32…RF-35 |
 | AT-04 | `admin_void.feature` | Admin anula → `WASTED` **y se cobra** como entrega normal; mesero no puede | RF-26, RF-27 |
 | AT-05 | `kitchen_error_void.feature` | Chef/admin anulan por error de cocina → `VOIDED`, **comanda completa**, **no se cobra**, nota obligatoria | RF-28…RF-31 |
-| AT-06 | `kds_queue.feature` | Prioridad, desempate cronológico, filtro por estación, campos de la tarjeta, se retira al pagarse | RF-01…RF-08, RF-11 |
-| AT-07 | `redo_dish.feature` | Rehacer un platillo entregado exige nota | RF-22 |
+| AT-06 | `kds_queue.feature` | Mayor tiempo en cocina primero (OP-11, propuesto), desempate cronológico, filtro por estación (texto de referencia, OP-09), campos de la tarjeta, se retira al pagarse | RF-01…RF-08, RF-11 |
+| AT-07 | `redo_dish.feature` | Rehacer un platillo con nota obligatoria: la orden conserva `DELIVERED` y únicamente el platillo pasa a `PENDING` (OP-12, propuesto) | RF-22 |
 | AT-08 | `table_transfer.feature` | Transferir comanda de mesa | RF-16 |
 | AT-09 | `unavailable_dish.feature` | Platillo no disponible no se puede pedir; la vista se actualiza por eventos de Menú | RF-17, RF-40, RF-41 |
 | AT-10 | `payment_close.feature` | Cuenta con precios congelados; `PAID` solo tras el pago | RF-20, RF-21 |
@@ -923,7 +923,7 @@ Scenario: An administrative void is charged like a normal delivery
 
 | ID | Criterio de aceptación | Cómo se verifica | Automatizable |
 |---|---|---|---|
-| UAT-01 | Un cocinero opera el KDS **solo con el Bump Bar físico** (atajos numéricos, flechas, `Enter`) sin tocar mouse ni pantalla | Sesión con el hardware real | ❌ |
+| UAT-01 | Un cocinero opera el KDS mediante pantalla táctil real con manos sucias (toques grandes, marcar ítem u orden lista sin arrastre ni doble toque); el Bump Bar físico se valida como entrada secundaria | Sesión con monitor táctil real y manos sucias en entorno de cocina (OP-06) | No |
 | UAT-02 | Un mesero opera el ticket con **una sola mano** en el handheld/tablet 8" en vertical | Sesión con dispositivo real | ❌ |
 | UAT-03 | El KDS es legible **a distancia** (alto contraste, tipografía expansiva) en el monitor de pared | Prueba en sitio | ❌ |
 | UAT-04 | Simulación de **hora pico** con personal: varias comandas simultáneas fluyen sin confusión | Ensayo cronometrado | Parcial (k6 + Playwright) |
@@ -1002,7 +1002,7 @@ export default function () {
 | SEC-06 | Errores sin información interna | Provocar excepciones | Sin trazas, rutas, nombres de tablas ni versiones | RNF-03 |
 | SEC-07 | *Mass assignment* | Body con `userId`, `status`, `version` | No se aceptan | RF-15, RNF-03 |
 | SEC-08 | XSS almacenado en notas/modificadores | Nota con `<script>` / `<img onerror>` | Escapado en KDS y ticket | RF-05, RNF-03 |
-| SEC-09 | Autenticación de WebSocket | Conexión sin token / con token vencido / rol no autorizado | Rechazada; sin datos de otros canales | RNF-03, RNF-04 |
+| SEC-09 | Autenticación y matriz de canales WebSocket | Matriz de canales por rol; conexión sin token (cierre `4401`); rol no autorizado en endpoint (cierre `4403`); suscripción a canal ajeno responde `FORBIDDEN_CHANNEL` (OP-02 / ADR-0002) | Rechazada con código adecuado; sin fuga de datos entre roles ni estaciones | RNF-03, RNF-04 |
 | SEC-10 | Secretos | `gitleaks` sobre el historial; búsqueda en `dist/` del frontend | 0 secretos | RNF-03 |
 | SEC-11 | Dependencias | `pip-audit` (backend) y `pnpm audit` (frontend) | 0 vulnerabilidades críticas | RNF-03, RNF-10 |
 | SEC-12 | Mensajes envenenados | Eventos malformados, tipos erróneos, campos enormes | A la DLQ; ningún cambio de estado | RNF-02, RNF-03 |
@@ -1091,7 +1091,7 @@ Como Inventario, Pagos, Sala y Menú son de otros equipos, sus respuestas se sim
 | `messaging/consumers/`, `workers/` | Crítico | ≥ 90 % | Ramas | Idempotencia, *timeout*, publicación fiable |
 | `api/routers/` | Alto | ≥ 85 % | Ramas | Puerta de entrada pública |
 | `repositories/` | Alto | Integración (Testcontainers) | — | SQL real, no mocks |
-| FE: mapeador Bump Bar, cliente WS, ordenamiento | Alto | ≥ 90 % | Ramas | Cocina depende solo del teclado y del push |
+| FE: mapeador Bump Bar, cliente WS, ordenamiento | Alto | ≥ 90 % | Ramas | Cocina depende de la interacción táctil/teclado y del push |
 | FE: hooks | Medio | ≥ 75 % | Sentencias | Lógica con dependencias externas |
 | FE: componentes de presentación | Bajo | ≥ 50 % | Sentencias | UI declarativa |
 
@@ -1121,7 +1121,7 @@ Como Inventario, Pagos, Sala y Menú son de otros equipos, sus respuestas se sim
 | R-07 | Reserva "huérfana" tras `EXPIRED` | 3 | 4 | **12** | UT-BE-43; IT-07 | RF-35 |
 | R-08 | El KDS pierde actualizaciones tras una caída de red | 4 | 4 | **16** | UT-FE-13…16; IT-FE-03; ST-13; PT-05 | RNF-04 |
 | R-09 | Vista de catálogo desalineada (*drift*) | 3 | 3 | 9 | UT-BE-52…54; IT-13, IT-14 | RF-40, RF-41, RNF-05 |
-| R-10 | Cocina no puede operar solo con teclado | 3 | 5 | **15** | UT-FE-01…04; IT-FE-07; ST-02, ST-03; UAT-01 | RNF-07 |
+| R-10 | Ruptura o pérdida de paridad funcional entre interfaz táctil y teclado en KDS | 3 | 5 | **15** | UT-FE-01…04; IT-FE-07; ST-02, ST-03; UAT-01 | RNF-07 |
 | R-11 | Falsificación de JWT / rol | 2 | 5 | 10 | IT-16; SEC-03 | RNF-03 |
 | R-12 | Estilos globales del remoto rompen otros micro frontends | 3 | 4 | **12** | UT-FE-27; IT-FE-06; ST-16 | RNF-08 |
 | R-13 | Pérdida de actualización por concurrencia (dos meseros editan) | 3 | 3 | 9 | UT-BE-37; IT-04; IT-FE-05 | RNF-09 |

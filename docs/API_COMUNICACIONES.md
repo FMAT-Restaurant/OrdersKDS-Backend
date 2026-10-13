@@ -26,7 +26,7 @@ Lo que sí existe — y es el tema central de este documento — son tres superf
 
 ## 1. Capa síncrona: API REST expuesta por Órdenes y Cocina
 
-Esta es la única superficie síncrona real del microservicio. No comunica microservicios entre sí — comunica a los **dispositivos físicos del restaurante** (handhelds Android del mesero, monitores industriales con Bump Bar en cocina) con el backend de Órdenes.
+Esta es la única superficie síncrona real del microservicio. No comunica microservicios entre sí — comunica a los **dispositivos físicos del restaurante** (handhelds Android del mesero, monitores táctiles con teclado/Bump Bar secundario en cocina) con el backend de Órdenes.
 
 ### 1.1 Principios de diseño de esta capa
 
@@ -42,41 +42,54 @@ Los documentos fuente describen las capacidades funcionales y las vistas de UI, 
 **Vista 1 — Monitor de Mesas Activas (mesero)**
 | Método | Ruta propuesta | Requisito | Nota |
 |---|---|---|---|
-| `GET` | `/orders?estado=` | 5 | Estado por color de cada mesa/comanda |
+| `GET` | `/orders?status=` | 5 | Estado por color de cada mesa/comanda |
 | `POST` | `/orders` | 4 | Crea comanda vinculada a mesa, o `tipo: "para_llevar"` sin mesa física |
 
 **Vista 2 — Gestor de Comanda (mesero)**
 | Método | Ruta propuesta | Requisito | Nota |
 |---|---|---|---|
-| `PATCH` | `/orders/{orderId}/items` | 4 | Agrega platillos, modificadores, notas — solo si `estado = Pendiente` |
+| `PATCH` | `/orders/{orderId}/items` | 4 | Agrega platillos, modificadores, notas — solo si `estado = Creada` y sin `confirmed_at` |
 | `PATCH` | `/orders/{orderId}/transfer` | 4 | Cambia la mesa asociada a la comanda |
-| `POST` | `/orders/{orderId}/confirm` | 7 | Dispara la publicación de `ordenes.orden.creada` vía outbox |
-| `PATCH` | `/orders/{orderId}/cancel` | 6 | Solo permitido si `estado = Pendiente`; dispara `ordenes.orden.cancelada` |
-| `PATCH` | `/orders/{orderId}/items/{itemId}/redo` | 5 | Regresa un ítem de "Entregado" a "Pendiente"; requiere `nota` obligatoria en el body |
+| `POST` | `/orders/{orderId}/confirm` | 7 | Idempotente: fija `confirmed_at` y dispara la publicación de `ordenes.orden.creada` vía outbox (OP-05) |
+| `PATCH` | `/orders/{orderId}/cancel` | 6 | Solo permitido si `estado = Creada`; dispara `ordenes.orden.cancelada` |
+| `PATCH` | `/orders/{orderId}/items/{itemId}/redo` | 5 | Regresa un ítem de "Entregado" a "Pendiente"; requiere cuerpo `{ "note": "..." }` obligatorio (la orden conserva "Entregada", OP-12) |
 | `POST` | `/orders/{orderId}/request-bill` | — | Dispara `ordenes.cuenta.solicitada` |
 
-**Vista 3 — Pantalla KDS (cocina, vía Bump Bar)**
+**Vista 3 — Pantalla KDS (cocina: monitor táctil principal, teclado/Bump Bar secundario)**
 | Método | Ruta propuesta | Requisito | Nota |
 |---|---|---|---|
-| `GET` | `/kds/queue?estacion=` | 1, 2 | Comandas ordenadas por prioridad y luego cronológicamente; filtradas por estación de Catálogo |
+| `GET` | `/kds/queue?station=` | 1, 2 | Comandas ordenadas por mayor tiempo en cocina primero (OP-11); filtradas por estación de Catálogo (OP-09) |
 | `PATCH` | `/orders/{orderId}/items/{itemId}/ready` | 3 | Marca un platillo como "Listo"; dispara `ordenes.platillo.preparado` |
 | `PATCH` | `/orders/{orderId}/ready` | 3 | Marca la comanda completa como "Listo" |
 
 **Acciones administrativas**
 | Método | Ruta propuesta | Requisito | Nota |
 |---|---|---|---|
-| `PATCH` | `/orders/{orderId}/void` (o `/items/{itemId}/void`) | 6 | Solo rol admin, sobre comandas ya en "En preparación"/"Listo"; dispara `ordenes.comanda.mermada` + `ordenes.cobro.solicitado` |
+| `PATCH` | `/orders/{orderId}/void` (o `/items/{itemId}/void`) | 6 | Solo rol admin, sobre comandas ya en "EnPreparacion"; dispara `ordenes.comanda.mermada` + `ordenes.cobro.solicitado` (Mermada) |
+| `PATCH` | `/orders/{orderId}/void-kitchen-error` | — | Rol admin o chef; cuerpo `{ "note": "..." }` obligatorio; cancela la comanda completa por error de cocina (Anulada); dispara `ordenes.comanda.mermada` sin cobro (OP-07) |
+
+**Vista 4 — Preparación de Platillos Intermedios (chef) — [Opcional]**
+| Método | Ruta propuesta | Requisito | Nota |
+|---|---|---|---|
+| `POST` | `/intermediate-dishes` | — | Rol chef; registra lote de platillo intermedio fuera del flujo de comanda; publica `ordenes.platillo_intermedio.preparado` (OP-07) |
 
 > Cualquier endpoint de esta tabla que no coincida exactamente con lo que finalmente implemente el equipo de frontend debe corregirse aquí — esta tabla es la propuesta de contrato, no el contrato firmado.
 
-### 1.3 Notificación de vuelta al cliente: WebSocket, no polling
+### 1.3 Notificación de vuelta al cliente: canales WebSocket (OP-02 / ADR-0002)
 
-Cuando un cambio de estado ocurre por reacción a un evento del broker (por ejemplo, `inventario.stock.reservado` llega y la comanda pasa a la cola del KDS), no hay ninguna petición HTTP en curso a la cual responder — el mesero ya recibió su `200 OK` hace rato. Por eso la especificación de UI indica que Órdenes informa al frontend **vía WebSockets** para que la pantalla se redibuje sola, sin que el cliente tenga que hacer polling.
+Cuando un cambio de estado ocurre por reacción a un evento del broker (por ejemplo, `inventario.stock.reservado` llega y la comanda pasa a la cola del KDS), no hay ninguna petición HTTP en curso a la cual responder. Por eso la especificación indica que Órdenes informa al frontend **vía WebSocket** para que la pantalla se redibuje sola, sin que el cliente tenga que hacer polling.
 
-En la práctica esto implica un canal adicional dentro de esta misma API:
-- Conexión WebSocket persistente por sesión de cliente (mesero o pantalla KDS), autenticada igual que el REST (JWT).
-- Cuando la lógica de negocio actualiza el estado de una orden (ya sea por una petición REST entrante o por el consumo de un evento del broker), publica un mensaje al canal WebSocket correspondiente a esa mesa/comanda/estación.
-- Esto separa claramente dos rutas de entrada a la misma lógica de negocio: **HTTP entrante** (acción humana) y **evento de broker entrante** (reacción a otro microservicio) — ambas terminan escribiendo en PostgreSQL y ambas pueden terminar empujando una actualización por WebSocket.
+Se definen dos endpoints y canales estructurados por rol:
+
+| Canal | Endpoint | Roles | Modo de suscripción | Contenido recibido |
+|---|---|---|---|---|
+| `kds:station:{station}` | `/ws/kds` | `kitchen`, `chef`, `admin` | Solicitado por el cliente con mensaje `subscribe`; cambio de estación sin reconectar | Cambios de estado de órdenes con ítems de esa estación y de sus platillos |
+| `kds:all` | `/ws/kds` | `kitchen`, `chef`, `admin` | Solicitado por el cliente (vista global) | Todas las órdenes activas en cocina |
+| `floor` | `/ws/waiter` | `waiter`, `admin` | Automático al conectar | Cambios de estado de todas las órdenes activas para monitores de Sala y Menú |
+| `user:{userId}` | `/ws/waiter` | `waiter`, `admin` | Automático al conectar (`userId` del JWT) | Alertas de órdenes del usuario: `REJECTED`, `EXPIRED` y `DELIVERED` ("lista para recoger") |
+
+- **Tipos de mensaje:** `order.status_changed` e `item.status_changed`, con sobre en formato camelCase y `version` monótona para descartar eventos fuera de orden.
+- **Seguridad:** el token JWT no viaja en la URL; cierre con código `4401` ante token inválido/vencido y `4403` si el rol no corresponde al endpoint; respuesta con error `FORBIDDEN_CHANNEL` ante canales no autorizados.
 
 ```mermaid
 sequenceDiagram
@@ -194,9 +207,9 @@ flowchart TB
 
 ## 3. Puntos abiertos a validar con el equipo
 
-1. **Contratos de los endpoints REST de la sección 1.2** son una propuesta derivada de requisitos y vistas de UI, no un contrato firmado — falta que el equipo de frontend los confirme o ajuste.
-2. **Timeout de Saga**: si Inventario nunca responde a `ordenes.orden.creada` (ni con `reservado` ni con `insuficiente`), no hay hoy un evento de compensación definido. El documento de diagramas ya lo señala como pendiente (`ordenes.orden.expirada` propuesto).
-3. **Alcance exacto del canal WebSocket** (¿un socket por mesero o por mesa? ¿el KDS se suscribe por estación o recibe todo y filtra en cliente?) no está definido en los documentos fuente — es una decisión de implementación que conviene fijar antes de construir el frontend.
+1. ~~**Contratos de los endpoints REST de la sección 1.2**~~ — **[RESUELTO]** Rutas y parámetros estandarizados en inglés (`?status=`, `?station=`, `/void-kitchen-error`, `/intermediate-dishes`, cuerpo `note`; OP-07 / ADR-0006).
+2. ~~**Timeout de Saga**~~ — **[RESUELTO]** Fijado en 60 s como máximo desde `confirmed_at` con watcher cada 5 s (OP-01 / ADR-0001); Inventario consume `ordenes.orden.expirada` (OP-04, propuesto) para liberar reservas tardías.
+3. ~~**Alcance exacto del canal WebSocket**~~ — **[RESUELTO]** Conexión en dos endpoints (`/ws/kds` y `/ws/waiter`) con canales `kds:station:{station}`, `kds:all`, `floor` y `user:{userId}` (OP-02 / ADR-0002).
 4. **Contrato del endpoint `GET /menu/catalogo/completo` (sección 1.4)** debe ser aprobado por el equipo de Catálogo y Menú — hoy es una propuesta de este documento, no un endpoint confirmado por ellos.
 5. **Frecuencia del job de reconciliación** (sección 1.4) no está definida — depende de qué tan seguido cambia el catálogo en producción y de qué tan tolerable es un drift temporal; sugiero acordarla con el equipo en vez de fijarla unilateralmente aquí.
 6. Si en algún momento surge una necesidad real de llamada síncrona hacia otro microservicio **distinta** a la de bootstrap/reconciliación de la sección 1.4, eso sigue siendo una excepción a la arquitectura acordada (ver sección 0) y debería documentarse y aprobarse explícitamente, no añadirse silenciosamente a este documento.

@@ -27,9 +27,9 @@ Antes de listar los requisitos funcionales, se fija aquí el vocabulario de esta
 
 | Estado | Se alcanza cuando... | Evento asociado |
 |---|---|---|
-| **Creada** | El mesero crea la comanda (vinculada a mesa o para llevar) y agrega/edita platillos. Incluye el tiempo en que la comanda ya fue confirmada y está esperando la reserva de stock de Inventario. | — (confirmación dispara `ordenes.orden.creada`) |
+| **Creada** | El mesero crea la comanda (vinculada a mesa o para llevar) y agrega/edita platillos. La confirmación fija `confirmed_at`; `Creada` incluye "borrador" y "confirmada esperando stock". | — (confirmación dispara `ordenes.orden.creada` y fija `confirmed_at`) |
 | **En preparación** | Inventario confirmó la reserva de insumos; la comanda entra a la cola del KDS y cocina la está elaborando. | consume `inventario.stock.reservado` |
-| **Entregada** | Todos los platillos de la comanda fueron marcados "Listo" en cocina y el mesero los entregó en mesa. | — |
+| **Entregada** | Cocina marcó todos los platillos como listos; el mesero la recoge y la lleva a la mesa (el sistema no registra ese paso). | — |
 | **Pagada** *(fin del ciclo de vida)* | Se confirma el pago de la cuenta. | consume `pagos.pago.completado` |
 
 ### 1.2 Estados alternativos
@@ -43,7 +43,7 @@ Antes de listar los requisitos funcionales, se fija aquí el vocabulario de esta
 
 > **[NUEVO] Nota — dos capas de validación de disponibilidad, y por qué "Rechazada" sigue siendo necesaria:** el mesero **nunca** puede llegar a intentar pedir un platillo marcado como no disponible, porque la vista local de disponibilidad (alimentada por los eventos `menu.catalogo.actualizado`/`menu.platillo.precio_actualizado` de Catálogo y Menú — ver `Comunicaciones API ordenes y KDS.md`, sección 2.2) es la que filtra qué platillos puede siquiera seleccionar en la interfaz. Sin embargo, esa disponibilidad indica "el platillo existe y está activo en el menú", no una garantía de cantidad exacta en tiempo real. Si 3 meseros piden casi al mismo tiempo el mismo platillo y el insumo solo alcanza para uno, las otras dos comandas deben terminar en "Rechazada" aunque el platillo se veía disponible al momento de pedir. Este caso ya queda resuelto por el flujo existente de la sección 8, sin necesidad de un mecanismo adicional en Órdenes: Inventario es la única fuente de verdad sobre la cantidad exacta, y debe procesar cada `ordenes.orden.creada` de forma atómica al reservar stock, de modo que solo una de las solicitudes concurrentes reciba `inventario.stock.reservado` y las demás reciban `inventario.stock.insuficiente`. **Punto a validar con Inventario:** confirmar que su mecanismo de reserva sea atómico (p. ej. un decremento condicionado a nivel de base de datos) y no una simple verificación de disponibilidad seguida de un descuento separado, ya que solo así se sostiene esta garantía bajo concurrencia.
 
-> **Nota / punto a validar:** los estados por ítem ("Pendiente" → "Listo" → "Entregado" a nivel de platillo, usados en el Req. de la sección 4 para el flujo de "rehacer" un platillo) son sub-estados internos dentro del estado de orden "En preparación"/"Entregada", y no deben confundirse con los 4 estados principales de la orden definidos arriba. Se deja así por ahora; conviene que el equipo confirme si esta distinción entre estado-de-orden y estado-de-ítem debe formalizarse en el modelo de datos.
+> **Nota de estados por ítem:** el ciclo de vida por ítem es `PENDING → READY → DELIVERED` (transición automática a `DELIVERED` en la misma transacción en que la orden pasa a `Entregada`) `→ PENDING` (rehacer). Al rehacer un platillo, la orden conserva `DELIVERED` (OP-12, propuesto), mientras que únicamente el ítem afectado pasa a `PENDING` para su reelaboración en cocina.
 
 ### 1.3 Diagrama de estados (orden)
 
@@ -53,7 +53,7 @@ stateDiagram-v2
     Creada --> EnPreparacion: inventario.stock.reservado
     Creada --> Rechazada: inventario.stock.insuficiente
     Creada --> Cancelada: mesero cancela (solo en Creada)
-    EnPreparacion --> Entregada: todos los platillos entregados en mesa
+    EnPreparacion --> Entregada: cocina marca todos los platillos listos (mesero recoge)
     EnPreparacion --> Mermada: admin anula (razón administrativa) — SÍ se cobra
     EnPreparacion --> AnuladaErrorCocina: se anula por error de cocina — NO se cobra
     Entregada --> Pagada: pagos.pago.completado
@@ -69,16 +69,16 @@ stateDiagram-v2
 ## 2. Visualización de comandas en tiempo real
 
 - El sistema deberá agrupar las comandas entrantes en la pantalla de cocina según su estado actual de elaboración.
-- El sistema deberá ordenar las comandas en la pantalla de cocina basándose en su prioridad, calculada a partir del tiempo de preparación de los platillos.
-- El sistema deberá ordenar cronológicamente por la hora de ingreso aquellas comandas que compartan el mismo nivel de prioridad.
+- El sistema deberá ordenar las comandas en la pantalla de cocina según mayor tiempo en cocina primero (OP-11, propuesto; medido desde `in_preparation_at`), en lugar de prioridad por tiempo de preparación.
+- El sistema deberá ordenar cronológicamente por la hora de ingreso (y por identificador de orden) aquellas comandas que compartan el mismo tiempo en cocina.
 - **[NUEVO]** El sistema deberá remover la comanda de la pantalla de cocina (KDS) en cuanto su estado transite a **"Pagada"** — información que llega de forma asíncrona desde el microservicio de Pagos y Facturación (ver sección 6).
 
 ## 3. Validación y cola KDS
 
-- El sistema debe mostrar los detalles de los platillos, los modificadores aplicados y las notas especiales en cada tarjeta de comanda activa en la cocina.
+- El sistema debe mostrar los detalles de los platillos, los modificadores aplicados y las notas especiales en cada tarjeta de comanda activa en la cocina, presentando la estación y el tiempo de preparación como texto de referencia (OP-09).
 - El sistema deberá mostrar el identificador de la mesa asignada de forma visible en cada tarjeta de comanda.
-- El sistema deberá mostrar un contador de tiempo que indique el tiempo exacto transcurrido desde la creación del pedido.
-- El sistema deberá filtrar los platillos visibles en la pantalla de cocina basándose en las categorías definidas en el catálogo para direccionar los pedidos a sus estaciones de preparación correspondientes (Categorías del módulo externo de Catálogo y Menú).
+- El sistema deberá mostrar un contador de tiempo (cronómetro: pendiente de decisión final; hoy opera desde la creación del pedido).
+- El sistema deberá filtrar los platillos visibles en la pantalla de cocina basándose en la estación definida en el catálogo (estación y tiempo de preparación como texto de referencia, OP-09) para direccionar los pedidos a sus estaciones de preparación correspondientes.
 
 ## 4. Control del estado de una comanda en su flujo de vida
 

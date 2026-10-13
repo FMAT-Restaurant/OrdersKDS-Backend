@@ -1,10 +1,10 @@
 -r runtime.txt
-pytest
-pytest-cov
-pytest-asyncio
-pytest-bdd
-testcontainers
-ruff
-mypy
-httpx
-pyjwt  # required by scripts/dev_token.py for local JWT generation
+pytest==9.1.1
+pytest-cov==7.1.0
+pytest-asyncio==1.4.0
+pytest-bdd==9.0.0
+testcontainers==4.15.0
+ruff==0.16.10
+mypy==2.4.0
+httpx==0.28.1
+pyjwt==2.15.1  # required by scripts/dev_token.py for local JWT generation
