@@ -35,7 +35,9 @@ Select **Read and write permissions** and save.  This is required by the
 | Secret name | Where to get it | Required by |
 |---|---|---|
 | `SONAR_TOKEN` | SonarCloud → My Account → Security → Generate Token (type: **User Token**) | `sonarcloud` job |
-| `DISCORD_WEBHOOK` | Discord → Channel Settings → Integrations → Webhooks → Copy URL | `notify-on-failure` and `build-and-push` jobs |
+| `DISCORD_WEBHOOK_ALERTS` | Discord → Channel Settings → Integrations → Webhooks → Copy URL (Alerts channel) | `notify-on-failure` job and release failure alerts |
+| `DISCORD_WEBHOOK_REPORTS` | Discord → Channel Settings → Integrations → Webhooks → Copy URL (Reports channel) | `zap-api-scan` job (ZAP report notifications) |
+| `DISCORD_WEBHOOK_RELEASES` | Discord → Channel Settings → Integrations → Webhooks → Copy URL (Releases channel) | `build-and-push` job (Docker image release notifications) |
 
 `GITHUB_TOKEN` is injected automatically by GitHub Actions — **do not create it**.
 
@@ -362,7 +364,9 @@ Selecciona **Read and write permissions** y guarda. Esto es requerido por el job
 | Nombre del secreto | Dónde obtenerlo | Requerido por |
 |---|---|---|
 | `SONAR_TOKEN` | SonarCloud → My Account → Security → Generate Token (tipo: **User Token**) | Job `sonarcloud` |
-| `DISCORD_WEBHOOK` | Discord → Ajustes del canal → Integraciones → Webhooks → Copiar URL | Jobs `notify-on-failure` y `build-and-push` |
+| `DISCORD_WEBHOOK_ALERTS` | Discord → Ajustes del canal → Integraciones → Webhooks → Copiar URL (Canal de Alertas) | Job `notify-on-failure` y alertas de fallo al empaquetar |
+| `DISCORD_WEBHOOK_REPORTS` | Discord → Ajustes del canal → Integraciones → Webhooks → Copiar URL (Canal de Reportes) | Job `zap-api-scan` (reportes de ZAP API Scan) |
+| `DISCORD_WEBHOOK_RELEASES` | Discord → Ajustes del canal → Integraciones → Webhooks → Copiar URL (Canal de Releases) | Job `build-and-push` (notificación de éxito al empaquetar Docker) |
 
 `GITHUB_TOKEN` es inyectado automáticamente por GitHub Actions — **no lo crees**.
 
