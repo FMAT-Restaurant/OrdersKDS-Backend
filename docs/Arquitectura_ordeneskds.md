@@ -79,7 +79,7 @@ Esta API no comunica microservicios entre sí — comunica los dispositivos del 
 **Vista 3 — Pantalla KDS (cocina)**
 | Método | Ruta | Nota |
 |---|---|---|
-| `GET` | `/kds/queue?station=` | Comandas por mayor tiempo en cocina primero (OP-11) y filtro por estación; deja de listar comandas en "Pagada" |
+| `GET` | `/kds/queue?station=&view=` | Comandas por mayor tiempo en cocina primero (OP-11) y filtro por estación; vista principal (`view=active`, por defecto) lista comandas activas en "EnPreparacion" (y "Entregada" con platillos por rehacer); apartado secundario (`view=delivered`) lista comandas entregadas pendientes de cobro; excluye definitivamente comandas en "Pagada" |
 | `PATCH` | `/orders/{orderId}/items/{itemId}/ready` | Publica `ordenes.platillo.preparado` |
 | `PATCH` | `/orders/{orderId}/ready` | Marca la comanda completa como "Listo" |
 
