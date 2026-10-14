@@ -58,7 +58,7 @@ Los documentos fuente describen las capacidades funcionales y las vistas de UI, 
 **Vista 3 — Pantalla KDS (cocina: monitor táctil principal, teclado/Bump Bar secundario)**
 | Método | Ruta propuesta | Requisito | Nota |
 |---|---|---|---|
-| `GET` | `/kds/queue?station=` | 1, 2 | Comandas ordenadas por mayor tiempo en cocina primero (OP-11); filtradas por estación de Catálogo (OP-09) |
+| `GET` | `/kds/queue?station=&view=` | 1, 2 | Comandas ordenadas por mayor tiempo en cocina primero (OP-11); filtradas por estación (OP-09); vista principal activa (`view=active`, por defecto) vs apartado de entregadas (`view=delivered`); excluye "Pagada" |
 | `PATCH` | `/orders/{orderId}/items/{itemId}/ready` | 3 | Marca un platillo como "Listo"; dispara `ordenes.platillo.preparado` |
 | `PATCH` | `/orders/{orderId}/ready` | 3 | Marca la comanda completa como "Listo" |
 

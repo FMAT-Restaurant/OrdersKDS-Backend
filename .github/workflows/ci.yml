@@ -27,6 +27,9 @@ env:
   # for the 7-sprint horizon (code and tests live or die together).
   # Kept directly in workflow env to avoid committing standalone .env files into Git.
   INTERMEDIATE_DISHES_ENABLED: 'false'
+  # Force all JavaScript-based actions to execute using the Node 24 runtime,
+  # preventing Node 20 deprecation warnings and future-proofing runner execution.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   validate-pr:
@@ -303,11 +306,20 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Send Discord Alert
-        uses: Ilshidur/action-discord@d2594079a10f1d6739ee50a2471f0ca57418b554 # 0.4.0
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        with:
-          args: 'The pipeline has failed on branch ${{ github.ref_name }}! Check the logs here: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+          REF_NAME: ${{ github.ref_name }}
+          SERVER_URL: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          if [ -z "$DISCORD_WEBHOOK" ]; then
+            echo "DISCORD_WEBHOOK is not set; skipping notification."
+            exit 0
+          fi
+          MESSAGE="The pipeline has failed on branch ${REF_NAME}! Check the logs here: ${SERVER_URL}/${REPO}/actions/runs/${RUN_ID}"
+          curl -s -S -X POST -H "Content-Type: application/json" -d "{\"content\": \"$MESSAGE\"}" "$DISCORD_WEBHOOK" > /dev/null || echo "Warning: Failed to deliver Discord notification."
 
   build-and-push:
     name: Build & Push Docker Image
@@ -357,8 +369,15 @@ jobs:
           
       - name: Notify Release
         if: always()
-        uses: Ilshidur/action-discord@d2594079a10f1d6739ee50a2471f0ca57418b554 # 0.4.0
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        with:
-          args: 'Docker image build and push completed for ${{ github.sha }}. Status: ${{ job.status }}'
+          SHA: ${{ github.sha }}
+          STATUS: ${{ job.status }}
+        shell: bash
+        run: |
+          if [ -z "$DISCORD_WEBHOOK" ]; then
+            echo "DISCORD_WEBHOOK is not set; skipping notification."
+            exit 0
+          fi
+          MESSAGE="Docker image build and push completed for ${SHA}. Status: ${STATUS}"
+          curl -s -S -X POST -H "Content-Type: application/json" -d "{\"content\": \"$MESSAGE\"}" "$DISCORD_WEBHOOK" > /dev/null || echo "Warning: Failed to deliver Discord notification."

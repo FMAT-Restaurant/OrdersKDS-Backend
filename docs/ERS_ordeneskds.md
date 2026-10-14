@@ -79,7 +79,7 @@ stateDiagram-v2
 - El sistema deberá agrupar las comandas entrantes en la pantalla de cocina según su estado actual de elaboración.
 - El sistema deberá ordenar las comandas en la pantalla de cocina según mayor tiempo en cocina primero (OP-11, propuesto; medido desde `in_preparation_at`), en lugar de prioridad por tiempo de preparación.
 - El sistema deberá ordenar cronológicamente por la hora de ingreso (y por identificador de orden) aquellas comandas que compartan el mismo tiempo en cocina.
-- **[NUEVO]** El sistema deberá remover la comanda de la pantalla de cocina (KDS) en cuanto su estado transite a **"Pagada"** — información que llega de forma asíncrona desde el microservicio de Pagos y Facturación (ver sección 6).
+- **[MODIFICADO]** En la pantalla de cocina (KDS), el sistema deberá remover de la **vista principal activa** toda comanda cuyos platillos hayan transitado en su totalidad al estado **"Entregada"** (o marcada lista por cocina) para evitar saturar el flujo de preparación, trasladándola a un **apartado secundario de comandas entregadas / historial reciente**. Si una comanda entregada tiene un platillo que se solicite rehacer (retornando a pendiente), dicha comanda deberá reaparecer automáticamente en la vista principal activa. La comanda se removerá de forma **definitiva** de ambos apartados del KDS únicamente en cuanto su estado transite a **"Pagada"** — información que llega de forma asíncrona desde el microservicio de Pagos y Facturación (ver sección 6).
 
 ## 3. Validación y cola KDS
 
