@@ -48,6 +48,14 @@ def test_order_column_contracts() -> None:
     assert table.c.total_amount.default.arg == Decimal("0.00")
     assert table.c.created_at.type.timezone is True
     assert table.c.updated_at.type.timezone is True
+    assert table.c.confirmed_at.type.timezone is True
+    assert table.c.confirmed_at.nullable
+    assert isinstance(table.c.confirmed_by.type, Uuid)
+    assert table.c.confirmed_by.nullable
+    assert table.c.in_preparation_at.type.timezone is True
+    assert table.c.in_preparation_at.nullable
+    assert isinstance(table.c.responsible_waiter_id.type, Uuid)
+    assert table.c.responsible_waiter_id.nullable
 
 
 @pytest.mark.unit
