@@ -9,4 +9,5 @@ app = FastAPI(title="Orders KDS Backend")
 def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
-app.include_router(kitchen.router)  
+
+app.include_router(kitchen.router)
