@@ -301,6 +301,22 @@ The RabbitMQ container takes up to ~30 s to become *healthy* the first time.
 | Service refuses to start: `SAGA_TIMEOUT_SECONDS` missing | Variable intentionally has no default (OP-01) | Set it in `.env` |
 | Integration tests fail to start containers | Docker not running (Testcontainers needs it) | Start Docker Desktop |
 
+#### 6.4 Operational configuration variables (Sagas & KDS)
+
+| Variable | Repo | Obligatoria | Ejemplo | Significado |
+|---|---|---|---|---|
+| `SAGA_TIMEOUT_SECONDS` | `ordenes-kds-backend` | Yes (`Sí`) | `60` | Maximum time (in seconds) a confirmed `CREATED` order waits for Inventory reply before transitioning to `EXPIRED` (OP-01 / ADR-0001). The 60 s countdown starts at `confirmed_at`, not at order creation. No default value in code. |
+| `SAGA_WATCHER_INTERVAL_SECONDS` | `ordenes-kds-backend` | No | `5` | Polling interval (in seconds) for the Saga Timeout Watcher (OP-01 / ADR-0001, TASK-06). Worst-case real expiration is ≈ 65 s (60 s timeout + 5 s watcher interval). |
+| `KDS_WARNING_AFTER_SECONDS` | `ordenes-kds-backend` / `ordenes-kds-frontend` | optional until OP-11 is accepted (`opcional hasta aceptar OP-11`) | *(empty)* | Elapsed kitchen time threshold (in seconds from `in_preparation_at`) to mark a KDS card as warning ("About to be late", `--color-warning`, OP-11 / ADR-0009). |
+| `KDS_LATE_AFTER_SECONDS` | `ordenes-kds-backend` / `ordenes-kds-frontend` | optional until OP-11 is accepted (`opcional hasta aceptar OP-11`) | *(empty)* | Elapsed kitchen time threshold (in seconds from `in_preparation_at`) to mark a KDS card as critical ("Late", `--color-error`, OP-11 / ADR-0009). |
+
+**Important operational notes:**
+- The 60 s countdown starts at `confirmed_at`, not at order creation.
+- The worst-case real expiration is ≈ 65 s (60 s timeout + 5 s watcher interval).
+- Both KDS variables (`KDS_WARNING_AFTER_SECONDS` and `KDS_LATE_AFTER_SECONDS`) are **optional until OP-11 is accepted** (`opcional hasta aceptar OP-11`) and are intentionally left empty in `.env.example`.
+
+> **Design note / Nota de diseño:** Pendiente: dónde viven los umbrales del semáforo (respuesta de /kds/queue vs VITE_*). Se define en TASK-12 (Sprint 3) y TASK-15 (Sprint 4); hasta entonces KDS_WARNING_AFTER_SECONDS y KDS_LATE_AFTER_SECONDS quedan vacías.
+
 ---
 
 ### §7 — Browsing the database with a visual client
@@ -612,6 +628,22 @@ El contenedor de RabbitMQ tarda hasta ~30 s en estar *healthy* la primera vez.
 | `password authentication failed` | Credenciales en `.env` difieren del compose... | Alinear `.env` o ejecutar `docker compose down -v` |
 | Servicio rechaza arrancar: falta `SAGA_TIMEOUT_SECONDS` | Variable intencionalmente sin default | Establécela en `.env` |
 | Falla arranque de tests de integración | Docker no corre (Testcontainers lo necesita) | Inicia Docker Desktop |
+
+#### 6.4 Variables operacionales de configuración (Sagas y KDS)
+
+| Variable | Repo | Obligatoria | Ejemplo | Significado |
+|---|---|---|---|---|
+| `SAGA_TIMEOUT_SECONDS` | `ordenes-kds-backend` | Sí | `60` | Tiempo máximo (en segundos) que una orden confirmada en estado `CREATED` espera respuesta de Inventario antes de transitar a `EXPIRED` (OP-01 / ADR-0001). El conteo de 60 s inicia en `confirmed_at`, no en la creación del pedido. Sin valor por defecto en código. |
+| `SAGA_WATCHER_INTERVAL_SECONDS` | `ordenes-kds-backend` | No | `5` | Intervalo de sondeo (en segundos) con el que el Saga Timeout Watcher revisa órdenes vencidas (OP-01 / ADR-0001, TASK-06). El peor caso real de expiración es ≈ 65 s (60 s del timeout + 5 s del intervalo del watcher). |
+| `KDS_WARNING_AFTER_SECONDS` | `ordenes-kds-backend` / `ordenes-kds-frontend` | opcional hasta aceptar OP-11 | *(vacía)* | Umbral de tiempo en cocina (en segundos desde `in_preparation_at`) para marcar una tarjeta en el KDS como "Por atrasarse" (`--color-warning`, OP-11 / ADR-0009). |
+| `KDS_LATE_AFTER_SECONDS` | `ordenes-kds-backend` / `ordenes-kds-frontend` | opcional hasta aceptar OP-11 | *(vacía)* | Umbral crítico de tiempo en cocina (en segundos desde `in_preparation_at`) para marcar una tarjeta en el KDS como "Atrasada" (`--color-error`, OP-11 / ADR-0009). |
+
+**Aclaraciones operacionales importantes:**
+- El conteo de 60 s inicia en `confirmed_at`, no en la creación del pedido.
+- El peor caso real de expiración es ≈ 65 s (60 s del timeout + 5 s del intervalo del watcher).
+- Las dos variables del KDS (`KDS_WARNING_AFTER_SECONDS` y `KDS_LATE_AFTER_SECONDS`) son **opcional hasta aceptar OP-11** (se dejan vacías a propósito en `.env.example`).
+
+> **Nota de diseño:** Pendiente: dónde viven los umbrales del semáforo (respuesta de /kds/queue vs VITE_*). Se define en TASK-12 (Sprint 3) y TASK-15 (Sprint 4); hasta entonces KDS_WARNING_AFTER_SECONDS y KDS_LATE_AFTER_SECONDS quedan vacías.
 
 ---
 
