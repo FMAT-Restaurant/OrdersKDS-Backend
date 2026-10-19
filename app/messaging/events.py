@@ -42,9 +42,7 @@ class OrderEvent(BaseModel):
         """Build an event whose id is stable across retries and re-entrance."""
         event_type = getattr(cls, "event_name", EventName.ORDER_CREATED)
         event_id = (
-            uuid5(NAMESPACE_URL, f"{event_type}:{order_id}")
-            if cls.unique_per_order
-            else uuid4()
+            uuid5(NAMESPACE_URL, f"{event_type}:{order_id}") if cls.unique_per_order else uuid4()
         )
         return cls(eventId=event_id, orderId=order_id, correlationId=correlation_id)
 
