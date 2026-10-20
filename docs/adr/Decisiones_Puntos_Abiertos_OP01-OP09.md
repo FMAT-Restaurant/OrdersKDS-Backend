@@ -311,8 +311,9 @@ Se declara **NO-GO formal** para la funcionalidad de platillos intermedios:
    - Las pruebas etiquetadas con `@optional-intermediate-dishes` quedan excluidas del pipeline de integración sin penalizar el Quality Gate de SonarCloud.
 
 #### Consecuencias
-- Se enfoca el esfuerzo en la estabilidad de las transacciones principales, la saga transaccional y la cola KDS.
-- Cualquier reactivación futura requerirá un nuevo ADR y la modificación explícita del feature flag.
+- Se enfoca el esfuerzo en la estabilidad de las transacciones principales, la saga transaccional y la cola KDS durante los 7 sprints del curso escolar.
+- **Apertura explícita a fase futura:** Queda formal y plenamente abierta la posibilidad de que la funcionalidad de platillos intermedios sea implementada en una iteración futura o release posterior. Toda la arquitectura base (desacoplamiento asíncrono vía Transactional Outbox, ruta REST `POST /intermediate-dishes`, evento `ordenes.platillo_intermedio.preparado` / `INTERMEDIATE_DISH_PREPARED`, y control por feature toggle `INTERMEDIATE_DISHES_ENABLED`) se mantiene documentada y compatible, de modo que su incorporación futura no requerirá rediseño arquitectónico ni modificaciones disruptivas al modelo de dominio.
+- Cualquier reactivación requerirá un nuevo ADR de reactivación y cambiar el valor del feature flag a `true`.
 
 ---
 
