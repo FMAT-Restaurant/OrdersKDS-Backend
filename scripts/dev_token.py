@@ -12,11 +12,11 @@ Authentication is handled by the Auth microservice; this backend only reads
 This script exists solely to let developers call the local API without running
 the full Auth service.
 
-The signing key (``--secret``) must match whatever the API Gateway is
-configured to use for verification.  In local development both this script and
-the FastAPI dependency in ``app/api/dependencies/auth.py`` should use the same
-shared secret.  In production the API Gateway holds the real key; this script
-is never used there.
+The signing key (``--secret``) is irrelevant for the backend: the API Gateway verifies
+the signature in real environments and ``app/api/dependencies/auth.py`` only decodes the
+claims without checking it (ADR-0011).  The key matters only if you put a Gateway or
+another verifier in front of the API locally; in that case it must match that verifier's
+key.  In production the API Gateway holds the real key; this script is never used there.
 
 Usage:
     python scripts/dev_token.py --role waiter
@@ -30,7 +30,7 @@ Roles understood by this service (DEVELOPMENT_GUIDELINES §2.4):
     admin     — full access including administrative void (WASTED)
 
 Dependencies:
-    pip install pyjwt  (already in requirements/dev.txt)
+    pip install pyjwt  (pinned in requirements/runtime.txt)
 
 NOTE: PyJWT is imported lazily so that this script does not fail at import time
 if the package is not installed; it prints a friendly error instead.
@@ -160,7 +160,8 @@ def _parse_args() -> argparse.Namespace:
         metavar="KEY",
         help=(
             "HMAC-SHA256 signing key.  "
-            "Must match the key configured in the API dependency.  "
+            "The backend does not verify signatures (ADR-0011); it only matters if a "
+            "verifying Gateway runs in front of the API.  "
             f"Default: '{_DEFAULT_DEV_SECRET}' — only safe on localhost."
         ),
     )

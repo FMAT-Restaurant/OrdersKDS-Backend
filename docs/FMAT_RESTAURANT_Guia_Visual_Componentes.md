@@ -47,15 +47,15 @@ Pocos colores, mucho espacio en blanco y un naranja reservado para acciones y é
 
 La guía define cinco estados semánticos: **Éxito**, **Advertencia**, **Error**, **Información** y **Seleccionado**.
 
-| Estado | Uso | Color |
-|---|---|---|
-| Éxito | Operación completada, "En stock", "Pagada" | *La guía no fija el hex* |
-| Advertencia | "Bajo stock", "Pendiente" | *La guía no fija el hex* |
-| Error | Fallos, "Agotado", acciones destructivas | *La guía no fija el hex* |
-| Información | Mensajes neutros, "Sincronizando…" | *La guía no fija el hex* |
-| Seleccionado | Fondo suave + borde | `Soft` `#FFF7ED` + borde `Primary` `#C2410C` |
+| Muestra | Estado | Token | Hex | Uso |
+|:---:|---|---|---|---|
+| ![#16A34A](https://img.shields.io/badge/%20%20%20%20%20%20%20%20-16A34A?style=flat-square) | **Éxito** | `--color-success` | `#16A34A` | Operación completada, "En stock", "Pagada" |
+| ![#D97706](https://img.shields.io/badge/%20%20%20%20%20%20%20%20-D97706?style=flat-square) | **Advertencia** | `--color-warning` | `#D97706` | "Bajo stock", "Pendiente", comanda por atrasarse |
+| ![#DC2626](https://img.shields.io/badge/%20%20%20%20%20%20%20%20-DC2626?style=flat-square) | **Error** | `--color-error` | `#DC2626` | Fallos, "Agotado", "Rechazada", acciones destructivas |
+| ![#2563EB](https://img.shields.io/badge/%20%20%20%20%20%20%20%20-2563EB?style=flat-square) | **Información** | `--color-info` | `#2563EB` | Mensajes neutros, "Sincronizando…" |
+| ![#FFF7ED](https://img.shields.io/badge/%20%20%20%20%20%20%20%20-FFF7ED?style=flat-square) | **Seleccionado** | `--color-primary-soft` + borde `--color-primary` | `#FFF7ED` + `#C2410C` | Fondo suave + borde de selección |
 
-> ⚠️ **Pendiente de acordar entre equipos:** el PDF muestra los colores de Éxito, Advertencia, Error e Información solo como imagen, sin códigos hexadecimales. Antes de implementarlos hay que fijar un valor único y agregarlo a los tokens (sección 13) para que ningún equipo invente el suyo. Regla ya establecida: los estados se comunican con **color + texto**, nunca solo con color.
+> Regla establecida (OP-03 / ADR-0003): los estados se comunican siempre con **color + texto o icono**, nunca solo con color. Contraste mínimo WCAG AA (≥ 4.5:1).
 
 ### Cómo se usa
 
@@ -436,6 +436,10 @@ Al aplicar los tokens en un módulo que se carga dentro del Shell (Module Federa
   --color-primary-soft: #FFF7ED;
   --color-text: #111827;
   --color-border: #E5E7EB;
+  --color-success: #16A34A;
+  --color-warning: #D97706;
+  --color-error: #DC2626;
+  --color-info: #2563EB;
   --radius-control: 8px;
   --radius-card: 12px;
   --space-unit: 4px;
@@ -454,6 +458,10 @@ export default {
     extend: {
       colors: {
         primary: { DEFAULT: '#C2410C', hover: '#9A3412', accent: '#F97316', soft: '#FFF7ED' },
+        success: '#16A34A',
+        warning: '#D97706',
+        error: '#DC2626',
+        info: '#2563EB',
         ink: '#111827',
         body: '#374151',
         muted: '#6B7280',

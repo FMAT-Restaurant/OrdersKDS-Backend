@@ -4,7 +4,7 @@ Domain errors carry a stable :class:`ErrorCode`; the API layer maps
 them to HTTP status codes. Detailed context goes to logs, never to
 the client payload.
 
-Satisfies: RF-24, RF-26, RF-28, RNF-03, RNF-09
+Satisfies: RF-15, RF-24, RF-26, RF-28, RNF-03, RNF-09
 """
 
 from __future__ import annotations
@@ -21,6 +21,20 @@ class DomainError(Exception):
     def __init__(self, message: str = "") -> None:
         super().__init__(message or self.code.value)
         self.message = message or self.code.value
+
+
+class UnauthenticatedError(DomainError):
+    """Raised when the request carries no usable identity (missing or invalid JWT claims)."""
+
+    code: ErrorCode = ErrorCode.UNAUTHENTICATED
+    http_status: int = 401
+
+
+class ForbiddenRoleError(DomainError):
+    """Raised when the authenticated role is not allowed to perform the action."""
+
+    code: ErrorCode = ErrorCode.FORBIDDEN_ROLE
+    http_status: int = 403
 
 
 class OrderNotFoundError(DomainError):

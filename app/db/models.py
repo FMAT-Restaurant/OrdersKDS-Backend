@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Numeric, String, Uuid
+from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Numeric, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -53,6 +53,12 @@ class Order(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
     )
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    confirmed_by: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    in_preparation_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    responsible_waiter_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
 
     items: Mapped[list[OrderItem]] = relationship(
         back_populates="order", cascade="all, delete-orphan", lazy="selectin"
@@ -92,3 +98,19 @@ class OrderItem(Base):
     order: Mapped[Order] = relationship(back_populates="items")
 
     __mapper_args__ = {"version_id_col": version}
+
+
+class Outbox(Base):
+    """Event waiting to be published after its domain transaction commits."""
+
+    __tablename__ = "outbox"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    event_id: Mapped[UUID] = mapped_column(Uuid, unique=True, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    correlation_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

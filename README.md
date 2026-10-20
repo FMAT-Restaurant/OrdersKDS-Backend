@@ -28,6 +28,7 @@ Key design rules:
 - [Technology Stack](#technology-stack)
 - [Architecture Overview](#architecture-overview)
 - [Order Lifecycle](#order-lifecycle)
+- [Inter-Service Communication & Event Contracts](#inter-service-communication--event-contracts)
 - [Quick Start](#quick-start)
 - [Project Structure](#project-structure)
 - [Running Tests](#running-tests)
@@ -152,6 +153,48 @@ stateDiagram-v2
 
 ---
 
+### Inter-Service Communication & Event Contracts
+
+Orders & KDS interacts with external microservices exclusively through asynchronous events over RabbitMQ (topic exchange) backed by the PostgreSQL Transactional Outbox pattern. State changes are pushed to client devices via WebSockets (`/ws/kds` and `/ws/waiter`).
+
+#### Master Event Mapping (Spanish / English / Code)
+
+To preserve consistency between architectural specifications (Spanish), source code (`app/messaging/events.py` in English), and inter-service agreements (e.g., Billing contract with Edwin), the canonical event mapping is established as follows:
+
+| Broker Routing Key (ES) | English Routing Key / Alias | Python Constant (`EventName`) | Direction | Target Microservice | Contract Status |
+|---|---|---|---|---|---|
+| `ordenes.orden.creada` | `orders.order.created` | `ORDER_CREATED` | Publish | Inventory | Confirmed |
+| `ordenes.orden.cancelada` | `orders.order.cancelled` | `ORDER_CANCELLED` | Publish | Inventory | Confirmed |
+| `ordenes.platillo.preparado` | `orders.dish.prepared` | `DISH_PREPARED` | Publish | Inventory | Confirmed |
+| `ordenes.comanda.mermada` | `orders.order.wasted` | `ORDER_WASTED` | Publish | Inventory | Confirmed (`ADMINISTRATIVE` \| `KITCHEN_ERROR`) |
+| `ordenes.cuenta.solicitada` | `orders.bill.requested` | `BILL_REQUESTED` | Publish | Billing (Pagos) | **Confirmed (Edwin Contract)** |
+| `ordenes.cobro.solicitado` | `orders.charge.requested` | `CHARGE_REQUESTED` | Publish | Billing (Pagos) | **Confirmed (Edwin Contract)** |
+| `ordenes.orden.expirada` | `orders.order.expired` | `ORDER_EXPIRED` | Publish | Inventory | Proposed (OP-04) |
+| `sala.dining_session.iniciada` | `dining.session.started` | `DINING_SESSION_STARTED` | Consume | Floor (Sala) | Confirmed |
+| `inventario.stock.reservado` | `inventory.stock.reserved` | `STOCK_RESERVED` | Consume | Inventory | Confirmed |
+| `inventario.stock.insuficiente` | `inventory.stock.insufficient` | `STOCK_INSUFFICIENT` | Consume | Inventory | Confirmed |
+| `menu.platillo.precio_actualizado` | `menu.dish.price_updated` | `DISH_PRICE_UPDATED` | Consume | Menu & Catalog | Confirmed |
+| `menu.catalogo.actualizado` | `menu.catalog.updated` | `CATALOG_UPDATED` | Consume | Menu & Catalog | Confirmed |
+| `pagos.pago.completado` | `payments.payment.completed` | `PAYMENT_COMPLETED` | Consume | Billing (Pagos) | **Confirmed (Edwin Contract)** |
+
+#### Key Integration Agreements
+
+1. **Billing & Payments (`docs/API_COMUNICACIONES.md` §2.3, `contrato_ordenes_pagos_edwin.md`):**
+   - Normal bill requests (`orders.bill.requested`) occur when all items are delivered (`DELIVERED`).
+   - Wasted orders with cost recovery (`orders.charge.requested`) occur on administrative voids during preparation (`WASTED`, RF-26, RF-27).
+   - Voided orders due to kitchen errors (`VOIDED`) are absorbed by the restaurant and **never** charged to customers.
+   - Dual correlation: Orders provides both `orderId` and `sessionId`; Billing must return `orderId` in `payments.payment.completed`.
+   - Prices are frozen at order confirmation (`unitPrice`); Menu catalog is never queried during payment.
+2. **Real-Time WebSockets (ADR-0002 & ADR-0011):**
+   - Segregated endpoints: `/ws/kds` (roles `kitchen`, `chef`, `admin`) and `/ws/waiter` (roles `waiter`, `admin`).
+   - Channels: `kds:station:{station}`, `kds:all`, `floor`, and `user:{userId}`.
+   - Close codes: `4401` (missing/invalid token) and `4403` (forbidden role).
+   - Signature verification is offloaded to the API Gateway; the service validates claims only without holding a signing key.
+3. **Saga Timeout (ADR-0001):**
+   - 60 seconds maximum from `confirmed_at`; watcher checks every 5 seconds.
+
+---
+
 ### Quick Start
 
 #### Prerequisites
@@ -200,7 +243,7 @@ pip install -r requirements/dev.txt
 
 # 4. Set up environment variables
 python scripts/setup_env.py        # generates .env with local defaults
-# Edit .env and set SAGA_TIMEOUT_SECONDS (agree value with team)
+# Verify .env: SAGA_TIMEOUT_SECONDS=60 (agreed in OP-01 / ADR-0001)
 
 # 5. Start the infrastructure (PostgreSQL, Redis, RabbitMQ)
 docker compose up -d postgres redis rabbitmq
@@ -217,7 +260,7 @@ python -m app.workers.run_all
 
 The API will be available at `http://localhost:8000` and the interactive OpenAPI docs at `http://localhost:8000/docs`. The RabbitMQ management UI is at `http://localhost:15672`.
 
-> **Note:** authentication is handled by the Auth microservice. For local development use the token generator in `scripts/dev_token.py` to create JWTs with the roles `waiter`, `kitchen`, `chef` or `admin`.
+> **Note:** authentication is handled by the Auth microservice. For local development use the token generator in `scripts/dev_token.py` to create JWTs with the roles `waiter`, `kitchen`, `chef` or `admin`, and send them as `Authorization: Bearer <token>`. The API Gateway verifies the signature; the backend only reads the `user_id` and `role` claims (ADR-0011), so the signing key of the script does not matter locally.
 
 ---
 
@@ -533,7 +576,7 @@ pip install -r requirements/dev.txt
 
 # 4. Configurar variables de entorno
 python scripts/setup_env.py        # genera .env con valores locales por defecto
-# Editar .env y establecer SAGA_TIMEOUT_SECONDS (acordar con el equipo)
+# Verificar .env: SAGA_TIMEOUT_SECONDS=60 (acordado en OP-01 / ADR-0001)
 
 # 5. Levantar la infraestructura (PostgreSQL, Redis, RabbitMQ)
 docker compose up -d postgres redis rabbitmq
@@ -550,7 +593,7 @@ python -m app.workers.run_all
 
 La API estará disponible en `http://localhost:8000` y la documentación OpenAPI interactiva en `http://localhost:8000/docs`. La interfaz de administración de RabbitMQ está en `http://localhost:15672`.
 
-> **Nota:** la autenticación la maneja el microservicio de Auth. En desarrollo local usa el generador de tokens de `scripts/dev_token.py` para crear JWT con los roles `waiter`, `kitchen`, `chef` o `admin`.
+> **Nota:** la autenticación la maneja el microservicio de Auth. En desarrollo local usa el generador de tokens de `scripts/dev_token.py` para crear JWT con los roles `waiter`, `kitchen`, `chef` o `admin` y envíalos como `Authorization: Bearer <token>`. El API Gateway verifica la firma; el backend solo lee las claims `user_id` y `role` (ADR-0011), por lo que la clave con que firma el script no importa en local.
 
 ---
 

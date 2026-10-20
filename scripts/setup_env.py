@@ -44,9 +44,8 @@ _COMPOSE_DEFAULTS: dict[str, str] = {
 # starting the service.  The placeholder text is descriptive so the developer
 # knows exactly what value is expected.
 _REQUIRED_PLACEHOLDERS: dict[str, str] = {
-    # OP-01: the timeout threshold must be agreed by the team.
-    # Use an integer number of seconds (e.g. 60).
-    "SAGA_TIMEOUT_SECONDS": "<agree-with-team: integer seconds, e.g. 60>",
+    # OP-01 (ADR-0001): agreed timeout threshold is 60 seconds from confirmed_at.
+    "SAGA_TIMEOUT_SECONDS": "60",
 }
 
 # Optional variables — left empty until the corresponding open points are

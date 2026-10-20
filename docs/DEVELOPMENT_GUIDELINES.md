@@ -53,19 +53,24 @@ Si dos documentos se contradicen, se resuelve en este orden (el primero gana):
 
 > El flujo de trabajo Git (§12: rama-persona → `develop` → `main`, nombres de rama y Conventional Commits) es **normativo** en ambos repositorios. Cada `CONTRIBUTING.md` lo desarrolla paso a paso; si hay contradicción, prevalece este documento.
 
-### 1.2 Puntos abiertos que **nunca** se resuelven en silencio
+### 1.2 Decisiones acordadas y puntos abiertos (OP-01…OP-13)
 
-Los documentos fuente marcan decisiones pendientes. Ningún contribuyente (ni agente IA) debe "elegir una" dentro de un PR sin dejarlo explícito:
+Las decisiones tomadas por el equipo sobre los puntos abiertos (sesión de decisiones y ADRs 0001–0010) rigen la arquitectura y la implementación. Ningún contribuyente (ni agente IA) debe alterar estas decisiones sin consenso explícito:
 
-| # | Punto abierto | Dónde vive | Qué hacer mientras tanto |
-|---|---|---|---|
-| OP-01 | Umbral exacto del timeout de "Expirada" | ERS §10.7 | Leerlo de configuración (`SAGA_TIMEOUT_SECONDS`), sin valor por defecto "mágico" en código |
-| OP-02 | Alcance de los canales WebSocket (por mesero / mesa / estación) | Comunicaciones §3.3 | Encapsular la suscripción en un único módulo (`realtime`) para poder cambiarla |
-| OP-03 | Colores hexadecimales de Éxito/Advertencia/Error/Información | FMAT §1 | Usar tokens semánticos (`--color-success`, …) sin inventar el hex; siempre color **+ texto** |
-| OP-04 | Nombre/payload final de `ordenes.orden.expirada`, `ordenes.platillo_intermedio.preparado`, campo `motivo` | Arquitectura §8 | Mantenerlos en `contracts/events/` como *propuestos* |
-| OP-05 | Comportamiento de `confirm` sobre una orden ya confirmada y si congela la edición de ítems | ERS §1.1 ("Creada" incluye la espera de reserva) | Hacer `confirm` idempotente y documentar el supuesto en el PR |
-| OP-06 | Mapeo exacto de teclas del Bump Bar | UI Spec §4 | Definirlo en una sola constante configurable (ver [§7.5](#75-kds-solo-teclado-bump-bar)) |
-| OP-07 | Rutas en español de la Arquitectura §3.2 (`/void-error-cocina`, `/platillos-intermedios`, `?estado=`, `?estacion=`) frente a la regla de inglés | Este documento §2.3 | Usar las rutas en inglés propuestas en §9.1 hasta que el equipo confirme |
+| # | Tema | Estado / Decisión | Dónde vive | ADR / Consecuencia |
+|---|---|---|---|---|
+| OP-01 | Timeout de Saga para "Expirada" | **Resuelto** (`SAGA_TIMEOUT_SECONDS=60` max desde `confirmed_at`, watcher cada 5 s) | ERS §1.2, §10; Arquitectura §5 | ADR-0001 |
+| OP-02 | Alcance de canales WebSocket | **Resuelto** (`/ws/kds` y `/ws/waiter` con `kds:station:{station}`, `kds:all`, `floor`, `user:{userId}`) | Arquitectura §3.3; Comunicaciones §1.3 | ADR-0002 |
+| OP-03 | Colores semánticos | **Resuelto** (paleta con tokens `--color-success/warning/error/info`) | FMAT §1, §13; este documento §8.2 | ADR-0003 |
+| OP-04 | Eventos broker de expiración e intermedios | **Propuesto** (`ordenes.orden.expirada`, `motivo`, `ordenes.platillo_intermedio.preparado`) | Arquitectura §4.2, §8 | Mantener en `contracts/events/` como propuesto |
+| OP-05 | Semántica de `confirm` repetido | **Resuelto** (`confirm` idempotente, fija `confirmed_at`/`confirmed_by`, congela edición de ítems) | ERS §1.1; Arquitectura §3.2 | ADR-0004 |
+| OP-06 | Entrada del KDS y Bump Bar | **Resuelto** (KDS táctil principal, teclado secundario con paridad total; `BUMP_BAR_KEY_MAP`) | RNF-07; este documento §7.5 | ADR-0005 |
+| OP-07 | Rutas REST y parámetros en inglés | **Resuelto** (inglés normativo: `?status=`, `?station=`, `/void-kitchen-error`, `/intermediate-dishes`, cuerpo `note`) | Arquitectura §3.2; este documento §2.3, §9.1 | ADR-0006 |
+| OP-08 | Responsable de marcar "Entregada" | **Resuelto** (cocina marca listo/entregado; el mesero recoge; sin endpoint `deliver`) | ERS §1.1; Arquitectura §3.2 | ADR-0007 |
+| OP-09 | Estación y tiempo de preparación | **Resuelto** (texto de referencia `string` en catálogo, no numérico) | ERS §3; Arquitectura §3.2 | ADR-0008 |
+| OP-11 | Prioridad en cola KDS | **Propuesto** (mayor tiempo en cocina primero desde `in_preparation_at`; desempate por ingreso) | ERS §2; Arquitectura §3.2 | ADR-0009 |
+| OP-12 | Rehacer platillo con orden `DELIVERED` | **Propuesto** (la orden conserva `DELIVERED`; solo el ítem pasa a `PENDING`) | ERS §1.2; Arquitectura §3.2 | ADR-0010 |
+| OP-13 | Recepción de aviso `DELIVERED` al mesero | **Pendiente** (monitor de Sala vs. componente propio en frontend; decidir en INT-03) | Plan Sprints S2–S6 | Condiciona creación de TASK-42 |
 
 ---
 
@@ -99,17 +104,17 @@ Los documentos fuente marcan decisiones pendientes. Ningún contribuyente (ni ag
 | **Texto visible para el personal del restaurante** (etiquetas, avisos, toasts) | No es código: vive en un diccionario de i18n (`es.json`); las **claves** están en inglés (`order.status.in_preparation`). |
 | **Nombres de eventos del broker** y campos definidos por *otros* equipos (`ordenes.orden.creada`, `itemsAfectados`, `motivo: "error_cocina"`) | Son contratos externos que no controlamos. Se aíslan en la **capa anticorrupción** (§2.4). |
 
-### 2.3 Rutas y parámetros: propuesta de renombrado
+### 2.3 Rutas y parámetros en inglés (OP-07 / ADR-0006)
 
-La Arquitectura §3.2 propone algunas rutas con palabras en español. Para cumplir esta regla, el código usa el equivalente en inglés (**propuesta pendiente de confirmar con el equipo de frontend y el Gateway** — punto OP-07):
+Conforme a la decisión OP-07 (ADR-0006), todas las rutas REST, parámetros de consulta y campos del cuerpo JSON de la API propia están formalizados en inglés:
 
-| Arquitectura §3.2 (español) | Código (inglés) |
+| Concepto preliminar | Código normativo (inglés) |
 |---|---|
-| `GET /orders?estado=` | `GET /orders?status=` |
-| `GET /kds/queue?estacion=` | `GET /kds/queue?station=` |
-| `PATCH /orders/{orderId}/void-error-cocina` | `PATCH /orders/{orderId}/void-kitchen-error` |
-| `POST /platillos-intermedios` | `POST /intermediate-dishes` |
-| Body `{ "nota": "..." }` | Body `{ "note": "..." }` |
+| Consulta por estado | `GET /orders?status=` |
+| Consulta cola por estación | `GET /kds/queue?station=` |
+| Anulación por error de cocina | `PATCH /orders/{orderId}/void-kitchen-error` |
+| Platillos intermedios | `POST /intermediate-dishes` |
+| Nota en cuerpo JSON | Body `{ "note": "..." }` |
 
 ### 2.4 Diccionario de equivalencias (español de negocio → identificador en código)
 
@@ -542,6 +547,9 @@ class ErrorCode(StrEnum):
 - El **API Gateway** valida la firma del JWT; el backend extrae `user_id` y `role` de las *claims* mediante una dependencia de FastAPI (`api/dependencies/auth.py`) y las inyecta como `AuthContext`.
 - El identificador del usuario **nunca** llega en el body ni en un campo de formulario (RF-15). Un body que intente enviar `userId`/`status` se ignora o se rechaza (*mass assignment*).
 - La **autorización por rol** se valida en el router (dependencia `require_roles(...)`) **antes** de llamar al service, y el service vuelve a comprobar las reglas de dominio que dependen del rol (defensa en profundidad).
+- El JWT se lee del encabezado `Authorization: Bearer <jwt>` **sin verificar la firma**: ya la verificó el Gateway y este servicio no guarda clave de firma (por eso no existe `JWT_SECRET`; ver ADR-0011). Sí se exige que no esté vencido, que no use `alg: none` y que traiga `user_id` (o `sub`) y un `role` válido (`waiter`, `kitchen`, `chef`, `admin`); de lo contrario → `401 UNAUTHENTICATED`. Un rol no permitido → `403 FORBIDDEN_ROLE`.
+- En WebSocket se usa el mismo token: ausente o inválido → cierre `4401`; rol no permitido para el endpoint → cierre `4403` (§10.3).
+- La matriz rol × endpoint vive como **datos**: los grupos de roles en `app/domain/roles.py` y la tabla de endpoints WebSocket en `app/api/websockets/routes.py` (`WS_ROLES_BY_PATH`). Un router nuevo reutiliza esos grupos con `require_roles(...)`; nunca escribe listas de roles propias.
 
 | Acción | Roles permitidos |
 |---|---|
@@ -726,20 +734,26 @@ export function OrderCard({ order, isFocused }: OrderCardProps) {
 - Los widgets exportados (`OrderTicketWidget`) **no** manejan rutas ni *layout* de página: su anfitrión decide dónde vive y qué props recibe.
 - Nada de `dangerouslySetInnerHTML`. Las notas y modificadores son texto libre del mesero: se renderizan **escapados** (prevención de XSS).
 
-### 7.5 KDS: solo teclado (Bump Bar)
+### 7.5 KDS: pantalla táctil principal y teclado secundario (Bump Bar)
 
-La pantalla de cocina se opera **exclusivamente** con teclado físico sellado (atajos numéricos, flechas y `Enter`). No puede depender de ratón ni de táctil (RNF-07).
+El KDS opera en un monitor táctil grande de pared (landscape) y su interacción principal es táctil (RNF-07 reformulado; OP-06 / ADR-0005). El teclado físico/Bump Bar se mantiene como entrada secundaria con paridad funcional total: toda acción disponible por toque debe ser alcanzable por teclado.
 
-- El mapeo de teclas vive en **una** constante configurable (`BUMP_BAR_KEY_MAP`), no disperso en componentes (punto OP-06).
-- Toda acción del KDS debe ser alcanzable por teclado; el foco siempre es visible y se mueve de forma predecible.
-- Hay pruebas de teclado (unitarias del mapeador y E2E con Playwright usando solo `page.keyboard`).
+- **Diseño táctil:** objetivos grandes (≥ 64 px con separación ≥ 16 px) para operar con manos sucias. Un solo toque para marcar ítem u orden lista. Sin hover, sin doble toque ni arrastre.
+- **Entrada secundaria por teclado:** el mapeo vive en una sola constante configurable (`BUMP_BAR_KEY_MAP`), indexada por `KeyboardEvent.code` (distingue `Enter` de `NumpadEnter`).
+- Toda acción del KDS debe ser alcanzable tanto por interacción táctil como por teclado; al usar teclado, el foco siempre es visible y se mueve de forma predecible.
+- Pruebas automatizadas de ambas interacciones: suites táctiles (Playwright con `hasTouch: true` y `locator.tap()`) y suites de teclado con `page.keyboard`.
 
 ```typescript
 export const BUMP_BAR_KEY_MAP: Readonly<Record<string, KdsCommand>> = {
   ArrowLeft: 'FOCUS_PREVIOUS_ORDER',
   ArrowRight: 'FOCUS_NEXT_ORDER',
-  Enter: 'MARK_FOCUSED_READY',
-  // Numeric shortcuts are defined once the hardware mapping is confirmed (OP-06).
+  ArrowUp: 'FOCUS_PREVIOUS_ITEM',
+  ArrowDown: 'FOCUS_NEXT_ITEM',
+  Enter: 'MARK_FOCUSED_ITEM_READY',
+  NumpadEnter: 'MARK_FOCUSED_ORDER_READY',
+  Backspace: 'UNDO_LAST_READY',
+  PageUp: 'PREVIOUS_STATION',
+  PageDown: 'NEXT_STATION',
 };
 ```
 
@@ -782,6 +796,10 @@ Se usan los tokens de la guía visual; **nadie inventa otro naranja, radio o esp
   --color-primary-soft: #FFF7ED;
   --color-text: #111827;
   --color-border: #E5E7EB;
+  --color-success: #16A34A;
+  --color-warning: #D97706;
+  --color-error: #DC2626;
+  --color-info: #2563EB;
   --radius-control: 8px;
   --radius-card: 12px;
   --space-unit: 4px;
@@ -792,7 +810,7 @@ Se usan los tokens de la guía visual; **nadie inventa otro naranja, radio o esp
 - Radios: 8 px controles, 12 px *cards*. Tipografía: Inter con *fallback* `system-ui, Segoe UI, Roboto, Arial, sans-serif`.
 - El naranja **guía la atención** (acciones, selección); no se usa de fondo de cada card.
 - **Sin franjas de color laterales en cards.** Una acción primaria por bloque. Rojo solo para destructivas.
-- Los colores de Éxito/Advertencia/Error/Información **aún no tienen hex acordado** (OP-03): usa tokens semánticos y no fijes valores.
+- Los colores de Éxito (`#16A34A`), Advertencia (`#D97706`), Error (`#DC2626`) e Información (`#2563EB`) usan sus tokens semánticos acordados (`--color-success`, `--color-warning`, `--color-error`, `--color-info`; OP-03 / ADR-0003), siempre acompañados de texto o icono.
 
 ### 8.3 Orden de clases
 
@@ -804,7 +822,7 @@ Cuando una combinación de clases se repite en **3 o más lugares**, extrae un c
 
 | Vista | Dispositivo | Reglas |
 |---|---|---|
-| KDS | Monitor industrial, **landscape**, lectura a distancia | Alto contraste, tipografía expansiva, sin dependencia de puntero |
+| KDS | Monitor industrial táctil de pared, **landscape**, lectura a distancia | Alto contraste, tipografía expansiva, interacción principal táctil (objetivos ≥ 64 px) y secundaria por teclado |
 | Ticket del mesero | Handheld/tablet 8", **portrait**, una mano | Botones amplios (48 px), scroll vertical |
 
 Respeta `prefers-reduced-motion` en cualquier animación.
@@ -821,18 +839,20 @@ Los cambios de esquema **rompen compatibilidad** y exigen actualizar ambos lados
 |---|---|---|---|---|
 | `GET` | `/orders?status=` | waiter, admin | RF-18 | Lista comandas con su estado |
 | `POST` | `/orders` | waiter, admin | RF-12, RF-13 | Crea comanda (mesa o `takeaway`) → `CREATED` |
-| `PATCH` | `/orders/{orderId}/items` | waiter, admin | RF-14, RF-17, RF-23 | Agrega/edita ítems (solo `CREATED`) |
+| `PATCH` | `/orders/{orderId}/items` | waiter, admin | RF-14, RF-17, RF-23 | Agrega/edita ítems (solo `CREATED` y sin `confirmed_at`) |
 | `PATCH` | `/orders/{orderId}/transfer` | waiter, admin | RF-16 | Cambia la mesa |
-| `POST` | `/orders/{orderId}/confirm` | waiter, admin | RF-32 | Encola `ORDER_CREATED` (outbox) |
+| `POST` | `/orders/{orderId}/confirm` | waiter, admin | RF-32 | Idempotente: fija `confirmed_at` y encola `ORDER_CREATED` (outbox) |
 | `PATCH` | `/orders/{orderId}/cancel` | waiter, admin | RF-24, RF-25 | `CREATED → CANCELLED` |
-| `PATCH` | `/orders/{orderId}/items/{itemId}/redo` | waiter, admin | RF-22 | Ítem `DELIVERED → PENDING`; `note` obligatoria |
+| `PATCH` | `/orders/{orderId}/items/{itemId}/redo` | waiter, admin | RF-22 | Ítem `DELIVERED → PENDING`; `note` obligatoria (la orden conserva `DELIVERED`, OP-12) |
 | `POST` | `/orders/{orderId}/request-bill` | waiter, admin | RF-20 | Encola `BILL_REQUESTED` |
-| `GET` | `/kds/queue?station=` | kitchen, chef, admin | RF-01…RF-04, RF-08 | Cola por prioridad, luego cronológica |
+| `GET` | `/kds/queue?station=` | kitchen, chef, admin | RF-01…RF-04, RF-08 | Cola por mayor tiempo en cocina primero (OP-11), filtrada por estación |
 | `PATCH` | `/orders/{orderId}/items/{itemId}/ready` | kitchen, chef, admin | RF-09, RF-10 | Encola `DISH_PREPARED` |
 | `PATCH` | `/orders/{orderId}/ready` | kitchen, chef, admin | RF-11 | Marca la comanda completa como lista |
 | `PATCH` | `/orders/{orderId}/void` | admin | RF-26, RF-27 | `IN_PREPARATION → WASTED`; `ORDER_WASTED` + `CHARGE_REQUESTED` |
 | `PATCH` | `/orders/{orderId}/void-kitchen-error` | admin, chef | RF-28…RF-31 | `IN_PREPARATION → VOIDED` (comanda completa); `ORDER_WASTED`; **sin** cobro |
 | `POST` | `/intermediate-dishes` | chef | RF-36, RF-37 | *(Opcional)* Encola `INTERMEDIATE_DISH_PREPARED` |
+| `GET` | `/ws/kds` | kitchen, chef, admin | RNF-04, OP-02 | WebSocket cocina: canales `kds:station:{station}` y `kds:all` |
+| `GET` | `/ws/waiter` | waiter, admin | RNF-04, OP-02 | WebSocket mesero: canales `floor` y `user:{userId}` |
 
 ### 9.2 Envoltorio de errores (propuesta a validar con el equipo de contratos)
 
@@ -1173,7 +1193,7 @@ Reglas explícitas para agentes de codificación (Claude, Copilot, Cursor, etc.)
 | Validar en el borde (Pydantic / Zod) | Falla rápido |
 | Sin estilos globales en el frontend; tokens en `.orders-kds-root` | RNF-08 |
 | Componentes accesibles (`aria-*`, foco visible, color + texto) | RNF-11 |
-| KDS operable solo con teclado | RNF-07 |
+| KDS operable por táctil y por teclado (paridad total) | RNF-07 |
 | Cada función/componente exportado con docstring/TSDoc y `Satisfies`/`@satisfies` | Trazabilidad |
 | Nuevo endpoint/evento ⇒ actualizar Pydantic, TS/Zod, JSON Schema, colección Postman y tests de contrato | §9 |
 | No añadir dependencias sin justificarlo en el PR | Superficie de ataque / mantenibilidad |

@@ -435,13 +435,16 @@ Reglas: las claves están en inglés y en `UPPER_SNAKE_CASE`; ningún secreto va
 | `DATABASE_URL` | Sí | Conexión async a PostgreSQL 16 (el driver lo define `requirements/`). | `postgresql+asyncpg://<user>:<password>@localhost:5432/<db>` |
 | `REDIS_URL` | Sí | Vista materializada de mesas y catálogo. | `redis://localhost:6379/0` |
 | `RABBITMQ_URL` | Sí | Broker de eventos. | `amqp://<user>:<password>@localhost:5672/` |
-| `SAGA_TIMEOUT_SECONDS` | Sí | Umbral para pasar una orden de `CREATED` a `EXPIRED`. **Sin valor por defecto en el código** (punto abierto OP-01): el servicio debe fallar al iniciar si falta. Acuerda el valor con el equipo. | *(vacío en `.env.example`)* |
+| `SAGA_TIMEOUT_SECONDS` | Sí | Umbral para pasar una orden confirmada en `CREATED` a `EXPIRED` (OP-01 / ADR-0001). Fijado en **60 segundos** máximos contados desde `confirmed_at`. Sin valor por defecto en código: el servicio falla al iniciar si falta. | `60` |
+| `SAGA_WATCHER_INTERVAL_SECONDS` | No | Frecuencia de revisión del watcher de saga (OP-01 / ADR-0001). *(Propuesto: 5 s).* | `5` |
+| `KDS_WARNING_AFTER_SECONDS` | No | Umbral de advertencia para tarjetas KDS (OP-11, propuesto). | `600` |
+| `KDS_LATE_AFTER_SECONDS` | No | Umbral crítico de retraso para tarjetas KDS (OP-11, propuesto). | `900` |
 | `LOG_LEVEL` | No | Nivel de log estructurado. *(Propuesta)* | `INFO` |
 | `OUTBOX_POLL_INTERVAL_SECONDS` | No | Frecuencia con que el Outbox Worker busca filas pendientes. *(Propuesta)* | `1` |
 | `CATALOG_SYNC_URL` | No | Endpoint `GET /menu/catalogo/completo` para bootstrap/reconciliación, pendiente de aprobar por Catálogo y Menú. *(Propuesta)* | *(vacío hasta aprobarse)* |
 | `CATALOG_RECONCILIATION_INTERVAL_SECONDS` | No | Frecuencia del job de reconciliación; sin definir con el equipo. *(Propuesta)* | *(vacío hasta acordarse)* |
 
-> **JWT:** el API Gateway valida la firma; el backend solo lee `user_id` y `role` de las claims. Por eso **no** existe (ni debe crearse) una variable tipo `JWT_SECRET`. Para desarrollo local usa `scripts/dev_token.py`.
+> **JWT:** el API Gateway valida la firma; el backend solo lee `user_id` y `role` de las claims del encabezado `Authorization: Bearer <jwt>` **sin verificar la firma** (PyJWT con `verify_signature=False`, validando `exp` y rechazando `alg: none`; ver [ADR-0011](adr/0011-jwt-claims-without-local-signature-verification.md)). Por eso **no** existe (ni debe crearse) una variable tipo `JWT_SECRET`. Para desarrollo local usa `scripts/dev_token.py`; la clave con que firma ese script es irrelevante para el backend.
 
 Si agregas una variable: actualiza `.env.example`, esta tabla y menciónalo en el PR (y en las notas de despliegue si es obligatoria).
 
@@ -525,17 +528,22 @@ Cualquier llamada síncrona a otro microservicio de negocio es una **desviación
 
 ## 11. Puntos abiertos: no se resuelven en silencio
 
-La guía §1.2 lista decisiones pendientes (`OP-01` … `OP-07`). Ningún PR "elige una" sin dejarlo explícito. En este repositorio afectan sobre todo a:
+La guía §1.2 lista el estado de las decisiones de arquitectura (`OP-01` … `OP-13`). Ningún PR contradice las decisiones aceptadas ni adopta propuestas sin consenso:
 
-| Punto | Qué hacer mientras tanto |
+| Punto | Estado / Qué hacer |
 |---|---|
-| OP-01 Umbral de "Expirada" | Leerlo de `SAGA_TIMEOUT_SECONDS`, sin valor por defecto. |
-| OP-02 Alcance de canales WebSocket | Encapsular la suscripción en un único módulo. |
-| OP-04 Contrato de `ordenes.orden.expirada`, `ordenes.platillo_intermedio.preparado` y `motivo` | Mantenerlos en `contracts/events/` como *propuestos*. |
-| OP-05 `confirm` sobre una orden ya confirmada | Hacerlo idempotente y documentar el supuesto en el PR. |
-| OP-07 Rutas en español de la Arquitectura §3.2 | Usar las rutas en inglés de la guía §9.1 hasta confirmarse. |
+| OP-01 Umbral de "Expirada" | **Resuelto** (ADR-0001): `SAGA_TIMEOUT_SECONDS=60` max desde `confirmed_at`, watcher cada 5 s. Sin valor por defecto en código. |
+| OP-02 Alcance de canales WebSocket | **Resuelto** (ADR-0002): dos endpoints (`/ws/kds` y `/ws/waiter`) con canales por estación, piso y usuario. |
+| OP-04 Contrato de `ordenes.orden.expirada`, `ordenes.platillo_intermedio.preparado` y `motivo` | Mantenerlos en `contracts/events/` como *propuestos* hasta confirmación con Inventario. |
+| OP-05 `confirm` sobre una orden ya confirmada | **Resuelto** (ADR-0004): `confirm` es idempotente, fija `confirmed_at`/`confirmed_by` y congela edición de ítems. |
+| OP-07 Rutas en español de la Arquitectura §3.2 | **Resuelto** (ADR-0006): rutas y parámetros formalizados en inglés (`?status=`, `?station=`, `/void-kitchen-error`, `/intermediate-dishes`, cuerpo `note`). |
+| OP-08 Quién marca "Entregada" | **Resuelto** (ADR-0007): cocina marca listo y entregado; el mesero recoge; sin endpoint `deliver`. |
+| OP-09 Estación y tiempo en catálogo | **Resuelto** (ADR-0008): texto de referencia (`string`), no cálculo numérico. |
+| OP-11 Prioridad en cola KDS | **Propuesto** (ADR-0009): mayor tiempo en cocina primero (`in_preparation_at`). |
+| OP-12 Rehacer platillo con orden `DELIVERED` | **Propuesto** (ADR-0010): orden conserva `DELIVERED`, solo el ítem pasa a `PENDING`. |
+| OP-13 Aviso al mesero de órdenes `DELIVERED` | **Pendiente**: monitor de Sala vs. componente propio en frontend (decidir en INT-03). |
 
-Si tu cambio depende de uno, escribe el supuesto en la descripción del PR. Cuando el equipo resuelva un punto, actualiza la guía en el mismo cambio.
+Si tu cambio depende de uno de los puntos pendientes o propuestos, escribe el supuesto en la descripción del PR.
 
 ---
 
