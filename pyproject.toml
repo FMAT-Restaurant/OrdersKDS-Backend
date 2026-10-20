@@ -80,6 +80,7 @@ markers = [
     "bdd: Gherkin acceptance scenarios",
     "performance: k6 / load tests (not run in normal CI)",
     "security: OWASP ZAP / security scans",
+    "requirement(*ids): traceability to RF-XX / RNF-XX requirement ids (Guidelines §11.3)",
 ]
 
 # ---------------------------------------------------------------------------

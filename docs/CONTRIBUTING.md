@@ -444,7 +444,7 @@ Reglas: las claves están en inglés y en `UPPER_SNAKE_CASE`; ningún secreto va
 | `CATALOG_SYNC_URL` | No | Endpoint `GET /menu/catalogo/completo` para bootstrap/reconciliación, pendiente de aprobar por Catálogo y Menú. *(Propuesta)* | *(vacío hasta aprobarse)* |
 | `CATALOG_RECONCILIATION_INTERVAL_SECONDS` | No | Frecuencia del job de reconciliación; sin definir con el equipo. *(Propuesta)* | *(vacío hasta acordarse)* |
 
-> **JWT:** el API Gateway valida la firma; el backend solo lee `user_id` y `role` de las claims. Por eso **no** existe (ni debe crearse) una variable tipo `JWT_SECRET`. Para desarrollo local usa `scripts/dev_token.py`.
+> **JWT:** el API Gateway valida la firma; el backend solo lee `user_id` y `role` de las claims del encabezado `Authorization: Bearer <jwt>` **sin verificar la firma** (PyJWT con `verify_signature=False`, validando `exp` y rechazando `alg: none`; ver [ADR-0011](adr/0011-jwt-claims-without-local-signature-verification.md)). Por eso **no** existe (ni debe crearse) una variable tipo `JWT_SECRET`. Para desarrollo local usa `scripts/dev_token.py`; la clave con que firma ese script es irrelevante para el backend.
 
 Si agregas una variable: actualiza `.env.example`, esta tabla y menciónalo en el PR (y en las notas de despliegue si es obligatoria).
 
