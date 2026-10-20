@@ -217,7 +217,7 @@ python -m app.workers.run_all
 
 The API will be available at `http://localhost:8000` and the interactive OpenAPI docs at `http://localhost:8000/docs`. The RabbitMQ management UI is at `http://localhost:15672`.
 
-> **Note:** authentication is handled by the Auth microservice. For local development use the token generator in `scripts/dev_token.py` to create JWTs with the roles `waiter`, `kitchen`, `chef` or `admin`.
+> **Note:** authentication is handled by the Auth microservice. For local development use the token generator in `scripts/dev_token.py` to create JWTs with the roles `waiter`, `kitchen`, `chef` or `admin`, and send them as `Authorization: Bearer <token>`. The API Gateway verifies the signature; the backend only reads the `user_id` and `role` claims (ADR-0011), so the signing key of the script does not matter locally.
 
 ---
 
@@ -550,7 +550,7 @@ python -m app.workers.run_all
 
 La API estará disponible en `http://localhost:8000` y la documentación OpenAPI interactiva en `http://localhost:8000/docs`. La interfaz de administración de RabbitMQ está en `http://localhost:15672`.
 
-> **Nota:** la autenticación la maneja el microservicio de Auth. En desarrollo local usa el generador de tokens de `scripts/dev_token.py` para crear JWT con los roles `waiter`, `kitchen`, `chef` o `admin`.
+> **Nota:** la autenticación la maneja el microservicio de Auth. En desarrollo local usa el generador de tokens de `scripts/dev_token.py` para crear JWT con los roles `waiter`, `kitchen`, `chef` o `admin` y envíalos como `Authorization: Bearer <token>`. El API Gateway verifica la firma; el backend solo lee las claims `user_id` y `role` (ADR-0011), por lo que la clave con que firma el script no importa en local.
 
 ---
 

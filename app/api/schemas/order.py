@@ -1,14 +1,17 @@
+"""Request schemas of order endpoints.
+
+Satisfies: RNF-03, RF-15 (Guidelines §5.7: no mass assignment)
+"""
+
 from pydantic import BaseModel, ConfigDict
 
 
-class OrderUpdateBody(BaseModel):
-    # Aquí definimos los campos que SÍ están permitidos.
-    # Por ejemplo, tal vez permites enviar una nota a la cocina.
-    # Si tu endpoint no necesita recibir nada en el body, simplemente déjalo así.
-    notes: str | None = None
+class MarkReadyRequest(BaseModel):
+    """Optional body of the "mark as ready" endpoints.
 
-    # LA REGLA DE SEGURIDAD (Mass Assignment):
-    # 'extra="forbid"' hace que si alguien envía un campo que no está
-    # definido arriba (como "userId" o "status"), FastAPI rechace
-    # la petición automáticamente con un error 422.
+    The endpoints take no input from the body: ``user_id`` and ``role`` come from the JWT
+    and the target status is decided by the backend. Any field sent (``userId``,
+    ``status``, ...) is rejected with ``422`` instead of silently ignored.
+    """
+
     model_config = ConfigDict(extra="forbid")
