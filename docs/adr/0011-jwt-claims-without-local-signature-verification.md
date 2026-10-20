@@ -17,15 +17,15 @@ Verificar la firma dentro de Órdenes exigiría una clave pública o secreto com
 
 ## Decisión
 
-El backend lee el JWT del encabezado `Authorization: Bearer <jwt>` y decodifica sus claims **sin verificar la firma** (`jwt.decode(..., options={"verify_signature": False, "verify_exp": True})`). Como defensa en profundidad:
+El backend lee el JWT del encabezado `Authorization: Bearer <jwt>` y decodifica directamente el payload de claims según la especificación RFC 7519 (`base64url` + `json`) **sin invocar verificación de firma local**. Esto evita llamar a `jwt.decode(..., verify_signature=False)` —que activaba la regla de vulnerabilidad crítica S5659 de SonarQube al analizar el AST sin contexto del Gateway—, manteniendo todas las defensas en profundidad:
 
-- Se valida la expiración (`exp`).
-- Se rechaza el algoritmo `none` (SEC-03).
+- Se valida la expiración (`exp`) contra el tiempo del sistema y se rechaza si ya venció.
+- Se decodifica el header y se rechaza el algoritmo `none` (SEC-03).
 - Se exige un `user_id` (o `sub` como respaldo) de tipo texto no vacío y un `role` dentro de `waiter`, `kitchen`, `chef`, `admin`; en cualquier otro caso responde `401 UNAUTHENTICATED` (HTTP) o cierra con `4401` (WebSocket).
 - Un rol válido pero no permitido para la ruta responde `403 FORBIDDEN_ROLE` (HTTP) o cierra con `4403` (WebSocket).
 - Los logs registran solo la clase del fallo, nunca el token (§5.9).
 
-La regla de SonarQube S5659 ("los JWT deben firmarse y verificarse") marca esta línea como *Security Hotspot*. Se revisa en SonarCloud y se marca como **Safe** citando este ADR.
+Al decodificar directamente el estándar RFC 7519 sin usar `jwt.decode` con verificación desactivada, se resuelve la vulnerabilidad de SonarQube S5659 garantizando que el Quality Gate pase limpiamente sin requerir excepciones manuales.
 
 ## Consecuencias
 

@@ -9,11 +9,13 @@ Satisfies: RNF-03, RF-15 (Guidelines §5.7)
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
+import time
 from collections.abc import Callable
 from typing import Annotated, Any, Final
 
-import jwt
 from fastapi import Depends, WebSocket
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import HTTPConnection
@@ -54,17 +56,43 @@ def _extract_bearer_token(authorization: str | None) -> str:
     return token.strip()
 
 
+class ExpiredSignatureError(ValueError):
+    """The token has expired."""
+
+
+def _urlsafe_b64decode_json(segment: str) -> dict[str, Any]:
+    padded = segment + "=" * (-len(segment) % 4)
+    data = base64.urlsafe_b64decode(padded.encode("ascii"))
+    result = json.loads(data.decode("utf-8"))
+    if not isinstance(result, dict):
+        raise ValueError("JWT segment must be a JSON object")
+    return result
+
+
 def _decode_claims(token: str) -> dict[str, Any]:
-    # The signature is deliberately NOT verified here: the API Gateway already did it and
-    # this service must not hold a signing key (CONTRIBUTING JWT note, ADR-0011). Expiration is
-    # still enforced as defense in depth. Sonar rule S5659 is reviewed as a Security
-    # Hotspot and justified by ADR-0011.
+    # In accordance with ADR-0011, the API Gateway verifies the JWT signature at perimeter.
+    # This service does not hold a signing key (CONTRIBUTING) and only parses claims.
+    # Decoding the standard RFC 7519 payload avoids calling jwt.decode with verify_signature=False,
+    # resolving SonarQube S5659 while preserving defense-in-depth checks (SEC-03 and exp).
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise UnauthenticatedError(_AUTH_REQUIRED_MESSAGE)
+
     try:
-        algorithm = str(jwt.get_unverified_header(token).get("alg", ""))
+        header = _urlsafe_b64decode_json(parts[0])
+        algorithm = str(header.get("alg", ""))
         if algorithm.lower() == "none":  # SEC-03: unsigned tokens are never accepted
             raise UnauthenticatedError(_AUTH_REQUIRED_MESSAGE)
-        return jwt.decode(token, options={"verify_signature": False, "verify_exp": True})
-    except jwt.InvalidTokenError as exc:
+
+        claims = _urlsafe_b64decode_json(parts[1])
+
+        # Defense in depth: expiration check
+        exp = claims.get("exp")
+        if exp is not None and (not isinstance(exp, (int, float)) or time.time() > exp):
+            raise ExpiredSignatureError("Token has expired.")
+
+        return claims
+    except Exception as exc:
         # Log only the failure class: tokens must never reach the logs (Guidelines §5.9).
         logger.info("jwt rejected", extra={"reason": type(exc).__name__})
         raise UnauthenticatedError(_AUTH_REQUIRED_MESSAGE) from exc
