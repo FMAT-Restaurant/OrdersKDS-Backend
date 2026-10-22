@@ -39,10 +39,15 @@ class OutboxRepository:
         )
         return list(result)
 
-    async def mark_published(self, event_id: UUID) -> None:
+    async def mark_published(
+        self,
+        event_id: UUID,
+        published_at: datetime | None = None,
+    ) -> None:
         """Mark a row only after the broker publisher confirms delivery."""
+        timestamp = published_at or datetime.now(UTC)
         await self._session.execute(
             update(Outbox)
             .where(Outbox.event_id == event_id, Outbox.published_at.is_(None))
-            .values(published_at=datetime.now(UTC))
+            .values(published_at=timestamp)
         )
