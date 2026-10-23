@@ -28,7 +28,9 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
       RABBITMQ_URL: ${RABBITMQ_URL}
-      SAGA_TIMEOUT_SECONDS: 60
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST}
+      SAGA_TIMEOUT_SECONDS: ${SAGA_TIMEOUT_SECONDS}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "8000:8000"
@@ -47,19 +49,20 @@ services:
       start_period: 15s
 
   # Workers run the same image with a different command.
-  # Uncomment once app.workers.run_all is implemented (TASK-05).
-  # workers:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #   container_name: ordenes-workers-ci
-  #   command: ["python", "-m", "app.workers.run_all"]
-  #   environment:
-  #     DATABASE_URL: ${DATABASE_URL}
-  #     REDIS_URL: ${REDIS_URL}
-  #     RABBITMQ_URL: ${RABBITMQ_URL}
-  #     SAGA_TIMEOUT_SECONDS: ${SAGA_TIMEOUT_SECONDS}
-  #     LOG_LEVEL: ${LOG_LEVEL:-INFO}
-  #   depends_on:
-  #     api:
-  #       condition: service_healthy
+  workers:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ordenes-workers-ci
+    command: ["python", "-m", "app.workers.run_all"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST}
+      SAGA_TIMEOUT_SECONDS: ${SAGA_TIMEOUT_SECONDS}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      api:
+        condition: service_healthy

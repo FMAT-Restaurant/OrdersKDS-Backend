@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://restaurant.example.com/contracts/events/ordenes.cobro.solicitado.v1.json",
+  "title": "ChargeRequestedEvent",
+  "type": "object",
+  "required": [
+    "eventId",
+    "orderId"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "orderId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "correlationId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": true
+}
