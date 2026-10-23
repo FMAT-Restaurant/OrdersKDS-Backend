@@ -6,4 +6,5 @@ pytest-bdd==9.0.0
 testcontainers==4.15.0
 ruff==0.16.10
 mypy==2.4.0
+types-jsonschema==4.26.0.20261006
 httpx==0.28.1
