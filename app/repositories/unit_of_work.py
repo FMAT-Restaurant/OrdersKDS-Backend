@@ -8,7 +8,9 @@ from typing import Self
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.repositories.orders import OrderRepository
 from app.repositories.outbox import OutboxRepository
+from app.repositories.processed_events import ProcessedEventsRepository
 
 SessionFactory = Callable[[], AsyncSession]
 
@@ -20,10 +22,18 @@ class UnitOfWork:
         self._session_factory = session_factory
         self.session: AsyncSession | None = None
         self.outbox: OutboxRepository | None = None
+        self.processed_events: ProcessedEventsRepository | None = None
+        self.orders: OrderRepository | None = None
 
     async def __aenter__(self) -> Self:
-        self.session = self._session_factory()
-        self.outbox = OutboxRepository(self.session)
+        if self.session is None:
+            self.session = self._session_factory()
+        if self.outbox is None:
+            self.outbox = OutboxRepository(self.session)
+        if self.processed_events is None:
+            self.processed_events = ProcessedEventsRepository(self.session)
+        if self.orders is None:
+            self.orders = OrderRepository(self.session)
         return self
 
     async def __aexit__(
