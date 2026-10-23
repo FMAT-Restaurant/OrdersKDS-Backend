@@ -144,7 +144,7 @@ class OutboxWorker:
                     await self._sleeper(self._poll_interval)
             except asyncio.CancelledError:
                 logger.info("Outbox worker received cancellation, shutting down")
-                break
+                raise
             except Exception as exc:
                 consecutive_failures += 1
                 backoff = min(

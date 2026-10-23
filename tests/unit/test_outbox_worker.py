@@ -235,8 +235,10 @@ async def test_outbox_worker_run_retries_with_exponential_backoff() -> None:
 @pytest.mark.unit
 @pytest.mark.requirement("RNF-01")
 @pytest.mark.asyncio
-async def test_outbox_worker_run_handles_cancellation() -> None:
-    """Verify clean loop exit on asyncio.CancelledError."""
+async def test_outbox_worker_run_handles_cancellation(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify worker logs shutdown and re-raises asyncio.CancelledError."""
     worker = OutboxWorker(
         session_factory=AsyncMock(),
         publisher=AsyncMock(),
@@ -247,7 +249,10 @@ async def test_outbox_worker_run_handles_cancellation() -> None:
 
     worker.process_batch = cancelled_batch  # type: ignore[method-assign]
 
-    await worker.run()
+    with caplog.at_level(logging.INFO), pytest.raises(asyncio.CancelledError):
+        await worker.run()
+
+    assert "Outbox worker received cancellation, shutting down" in caplog.text
 
 
 @pytest.mark.unit
