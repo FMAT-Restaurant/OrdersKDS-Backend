@@ -20,6 +20,55 @@ from app.domain.errors import OrderNotFoundError, VersionConflictError
 from app.domain.order_status import OrderStatus, ensure_transition_allowed
 
 
+class OrderRepository:
+    """Repository managing Order aggregate root persistence and retrieval."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get_by_public_id(
+        self,
+        public_id: UUID | str,
+        *,
+        for_update: bool = False,
+    ) -> Order | None:
+        """Fetch an order by its public UUID.
+
+        Args:
+            public_id: Public UUID of the order.
+            for_update: If True, acquire row-level lock (SELECT FOR UPDATE).
+
+        Returns:
+            The Order if found, or None.
+        """
+        order_uuid = UUID(str(public_id)) if not isinstance(public_id, UUID) else public_id
+        query = select(Order).where(Order.public_id == order_uuid)
+        if for_update:
+            query = query.with_for_update()
+        return await self._session.scalar(query)
+
+    async def get_for_update(self, public_id: UUID | str) -> Order:
+        """Fetch an order with a row lock, raising OrderNotFoundError if absent.
+
+        Args:
+            public_id: Public UUID of the order.
+
+        Returns:
+            The locked Order aggregate root.
+
+        Raises:
+            OrderNotFoundError: If no order with public_id exists.
+        """
+        order = await self.get_by_public_id(public_id, for_update=True)
+        if order is None:
+            raise OrderNotFoundError(f"No order with public_id={public_id}.")
+        return order
+
+    def save(self, order: Order) -> None:
+        """Stage an order in the active session."""
+        self._session.add(order)
+
+
 async def transition_order(
     session: AsyncSession,
     public_id: UUID,

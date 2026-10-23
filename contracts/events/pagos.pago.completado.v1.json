@@ -1,0 +1,61 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://restaurant.example.com/contracts/events/pagos.pago.completado.v1.json",
+  "title": "PaymentCompletedEvent",
+  "description": "Event emitted by Payments when transaction is settled (RF-21, RNF-02).",
+  "type": "object",
+  "required": [
+    "eventId",
+    "orderId"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "description": "Unique deterministic identifier of this event emission.",
+      "minLength": 1
+    },
+    "orderId": {
+      "type": "string",
+      "description": "Public identifier of the affected order.",
+      "minLength": 1
+    },
+    "correlationId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Correlation identifier propagated across microservices."
+    },
+    "sessionId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Dining session identifier."
+    },
+    "montoTotal": {
+      "type": [
+        "number",
+        "string",
+        "null"
+      ],
+      "description": "Total amount billed or paid."
+    },
+    "totalPaid": {
+      "type": [
+        "number",
+        "string",
+        "null"
+      ],
+      "description": "Total amount settled."
+    },
+    "status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Payment transaction status."
+    }
+  },
+  "additionalProperties": true
+}
