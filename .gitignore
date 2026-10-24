@@ -28,3 +28,6 @@ junit.xml
 
 # Docker
 .dockerignore
+
+# Lockfiles
+uv.lock

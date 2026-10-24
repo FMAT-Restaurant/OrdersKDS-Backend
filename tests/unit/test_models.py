@@ -62,6 +62,12 @@ def test_order_column_contracts() -> None:
     assert table.c.in_preparation_at.nullable
     assert isinstance(table.c.responsible_waiter_id.type, Uuid)
     assert table.c.responsible_waiter_id.nullable
+    assert table.c.table_number.nullable
+    assert not table.c.is_takeaway.nullable
+    assert table.c.is_takeaway.default is not None
+    assert table.c.is_takeaway.default.arg is False
+    assert isinstance(table.c.created_by.type, Uuid)
+    assert table.c.created_by.nullable
 
 
 @pytest.mark.unit
@@ -77,6 +83,46 @@ def test_order_item_column_contracts() -> None:
     assert table.c.status.default.arg == ItemStatus.PENDING
     assert table.c.version.default is not None
     assert table.c.version.default.arg == 1
+    assert table.c.dish_id.nullable
+    assert not table.c.modifiers.nullable
+    assert table.c.notes.nullable
+
+
+@pytest.mark.unit
+def test_order_awaiting_stock_confirmation() -> None:
+    order = Order(public_id=uuid4(), status=OrderStatus.CREATED)
+    assert not order.awaiting_stock_confirmation
+
+    order.confirmed_at = datetime.now(UTC)
+    assert order.awaiting_stock_confirmation
+
+    order.status = OrderStatus.IN_PREPARATION
+    assert not order.awaiting_stock_confirmation
+
+
+@pytest.mark.unit
+def test_order_recalculate_total() -> None:
+    order = Order(public_id=uuid4(), status=OrderStatus.CREATED)
+    order.recalculate_total()
+    assert order.total_amount == Decimal("0.00")
+
+    item1 = OrderItem(
+        public_id=uuid4(),
+        dish_id="dish-1",
+        name="Tacos al Pastor",
+        quantity=2,
+        unit_price=Decimal("45.00"),
+    )
+    item2 = OrderItem(
+        public_id=uuid4(),
+        dish_id="dish-2",
+        name="Agua de Horchata",
+        quantity=3,
+        unit_price=Decimal("15.50"),
+    )
+    order.items.extend([item1, item2])
+    order.recalculate_total()
+    assert order.total_amount == Decimal("136.50")
 
 
 @pytest.mark.unit

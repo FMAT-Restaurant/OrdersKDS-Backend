@@ -66,3 +66,14 @@ class VersionConflictError(DomainError):
 
     code: ErrorCode = ErrorCode.VERSION_CONFLICT
     http_status: int = 409
+
+
+class DishUnavailableError(DomainError):
+    """Raised when a dish is not active or available in local catalog view (RF-17)."""
+
+    code: ErrorCode = ErrorCode.DISH_UNAVAILABLE
+    http_status: int = 422
+
+    def __init__(self, dish_id: str, reason: str = "Dish is not available in catalog.") -> None:
+        self.dish_id = dish_id
+        super().__init__(f"Dish '{dish_id}' is unavailable: {reason}")
