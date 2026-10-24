@@ -130,6 +130,7 @@ async def test_it07_saga_timeout_and_late_reservation_ignored() -> None:
 
     def uow_factory(factory: SessionFactory) -> UnitOfWork:
         return FakeUow(factory, db)
+
     notifier = TrackingNotifier()
     dispatcher = EventConsumerDispatcher(
         session_factory=session_factory,
@@ -185,6 +186,7 @@ async def test_it07_late_reservation_on_cancelled_order_ignored() -> None:
 
     def uow_factory(factory: SessionFactory) -> UnitOfWork:
         return FakeUow(factory, db)
+
     notifier = TrackingNotifier()
     dispatcher = EventConsumerDispatcher(
         session_factory=session_factory,
@@ -233,6 +235,7 @@ async def test_it07_multi_stub_e2e_flow_floor_inventory_billing() -> None:
 
     def uow_factory(factory: SessionFactory) -> UnitOfWork:
         return FakeUow(factory, db)
+
     notifier = TrackingNotifier()
     dispatcher = EventConsumerDispatcher(
         session_factory=session_factory,

@@ -132,6 +132,7 @@ async def test_it06_saga_insufficient_stock_transitions_to_rejected() -> None:
 
     def uow_factory(factory: SessionFactory) -> UnitOfWork:
         return FakeUow(factory, db)
+
     notifier = TrackingNotifier()
     dlq_router = InMemoryDLQRouter()
 

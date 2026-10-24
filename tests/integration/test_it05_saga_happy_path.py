@@ -132,6 +132,7 @@ async def test_it05_saga_happy_path_transitions_to_in_preparation() -> None:
 
     def uow_factory(factory: SessionFactory) -> UnitOfWork:
         return FakeUow(factory, db)
+
     notifier = TrackingNotifier()
     dlq_router = InMemoryDLQRouter()
 
