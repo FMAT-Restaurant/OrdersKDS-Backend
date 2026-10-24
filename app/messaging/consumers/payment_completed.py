@@ -65,7 +65,7 @@ async def handle_payment_completed(
             return False
 
         order.mark_paid()
-        await uow.processed_events.add(
+        uow.processed_events.add(
             event_id=message.event_id,
             order_id=message.order_id,
             event_type=EventName.PAYMENT_COMPLETED,

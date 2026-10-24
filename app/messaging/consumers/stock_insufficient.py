@@ -65,7 +65,7 @@ async def handle_stock_insufficient(
             return False
 
         order.mark_rejected()
-        await uow.processed_events.add(
+        uow.processed_events.add(
             event_id=message.event_id,
             order_id=message.order_id,
             event_type=EventName.STOCK_INSUFFICIENT,

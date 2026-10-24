@@ -41,7 +41,7 @@ class OrderRepository:
         Returns:
             The Order if found, or None.
         """
-        order_uuid = UUID(str(public_id)) if not isinstance(public_id, UUID) else public_id
+        order_uuid = public_id if isinstance(public_id, UUID) else UUID(public_id)
         query = select(Order).where(Order.public_id == order_uuid)
         if for_update:
             query = query.with_for_update()
