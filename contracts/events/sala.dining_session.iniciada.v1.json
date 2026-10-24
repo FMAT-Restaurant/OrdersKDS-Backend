@@ -1,0 +1,129 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://restaurant.example.com/contracts/events/sala.dining_session.iniciada.v1.json",
+  "title": "DiningSessionIniciadaEvent",
+  "description": "Event emitted by Floor when a dining session begins (RF-17, RNF-13). Follows Floor-Module EventEnvelope structure. Notice: Floor-Module uses Spanish fields (mesaId, meseroId, comensales), while inter-team convention specifies English (tableId, waiterId, dinersCount); both are supported.",
+  "type": "object",
+  "required": [
+    "eventId",
+    "eventType",
+    "timestamp",
+    "data"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "description": "Deterministic event identifier.",
+      "minLength": 1
+    },
+    "eventType": {
+      "type": "string",
+      "description": "Routing key/event type identifier.",
+      "minLength": 1
+    },
+    "timestamp": {
+      "type": "string",
+      "description": "ISO-8601 emission timestamp."
+    },
+    "correlationId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Traceability identifier."
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "sessionId"
+      ],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "Identifier of the dining session.",
+          "minLength": 1
+        },
+        "tableId": {
+          "type": [
+            "string",
+            "number",
+            "null"
+          ],
+          "description": "Table identifier (English convention)."
+        },
+        "mesaId": {
+          "type": [
+            "string",
+            "number",
+            "null"
+          ],
+          "description": "Table identifier (Floor-Module legacy Spanish name)."
+        },
+        "waiterId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Waiter identifier (English convention)."
+        },
+        "meseroId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Waiter identifier (Floor-Module legacy Spanish name)."
+        },
+        "dinersCount": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Number of diners (English convention)."
+        },
+        "comensales": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Number of diners (Floor-Module legacy Spanish name)."
+        },
+        "numComensales": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Optional secondary diner count in Floor-Module."
+        },
+        "unionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Identifier of joined tables group."
+        },
+        "mesasIds": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "description": "List of table identifiers when tables are joined.",
+          "items": {
+            "type": [
+              "string",
+              "number"
+            ]
+          }
+        },
+        "timestamp": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Session start timestamp in ISO-8601."
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
