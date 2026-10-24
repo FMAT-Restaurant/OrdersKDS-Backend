@@ -37,6 +37,8 @@ from app.stubs.protocol import StubPublisherProtocol
 
 logger = logging.getLogger(__name__)
 
+EVENT_SALA_DINING_SESSION_INICIADA = "sala.dining_session.iniciada"
+
 
 class FloorStub:
     """Executable contract stub for Floor / Salón microservice."""
@@ -111,7 +113,7 @@ class FloorStub:
         # Construct Floor-Module EventEnvelope<T>
         envelope: dict[str, Any] = {
             "eventId": str(chosen_event_id),
-            "eventType": "sala.dining_session.iniciada",
+            "eventType": EVENT_SALA_DINING_SESSION_INICIADA,
             "timestamp": now_iso,
             "correlationId": str(chosen_correlation_id),
             "data": data_payload,
@@ -129,7 +131,7 @@ class FloorStub:
         }
 
         await self.publisher.publish(
-            event_type="sala.dining_session.iniciada",
+            event_type=EVENT_SALA_DINING_SESSION_INICIADA,
             payload=envelope,
             event_id=chosen_event_id,
             correlation_id=chosen_correlation_id,
@@ -160,7 +162,7 @@ class FloorStub:
         correlation_id = UUID(envelope["correlationId"]) if envelope.get("correlationId") else None
 
         await self.publisher.publish(
-            event_type="sala.dining_session.iniciada",
+            event_type=EVENT_SALA_DINING_SESSION_INICIADA,
             payload=envelope,
             event_id=event_id,
             correlation_id=correlation_id,

@@ -143,6 +143,7 @@ class InventoryStub:
 
     async def handle_order_cancelled(self, payload: Mapping[str, Any]) -> None:
         """Handle compensation event when an order is cancelled."""
+        await asyncio.sleep(0)
         order_id = str(payload.get("orderId", ""))
         self.cancelled_orders.add(order_id)
         logger.info(
@@ -152,6 +153,7 @@ class InventoryStub:
 
     async def handle_order_expired(self, payload: Mapping[str, Any]) -> None:
         """Handle compensation event when an order expires due to timeout."""
+        await asyncio.sleep(0)
         order_id = str(payload.get("orderId", ""))
         self.expired_orders.add(order_id)
         logger.info(

@@ -5,12 +5,16 @@ Satisfies: RNF-13
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import Mapping
 from typing import Any, Protocol
 from uuid import UUID
 
 from app.messaging.publisher import EventPublisher
 from app.messaging.validator import validate_event_payload
+
+logger = logging.getLogger(__name__)
 
 
 class StubPublisherProtocol(Protocol):
@@ -44,6 +48,12 @@ class StubEventPublisherAdapter:
         headers: Mapping[str, object] | None = None,
         exchange: str | None = None,
     ) -> None:
+        if headers or exchange:
+            logger.debug(
+                "Stub adapter ignoring broker metadata: exchange=%s, headers=%s",
+                exchange,
+                headers,
+            )
         await self._publisher.publish(
             event_type=event_type,
             payload=payload,
@@ -72,6 +82,7 @@ class InMemoryStubPublisher:
         exchange: str | None = None,
     ) -> None:
         """Validate against JSON schema and stage event in memory."""
+        await asyncio.sleep(0)
         validate_event_payload(event_type=event_type, payload=payload)
         record = {
             "event_type": event_type,

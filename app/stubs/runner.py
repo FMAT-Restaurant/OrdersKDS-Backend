@@ -114,7 +114,7 @@ async def main() -> None:
                 logger.info("Stubs runner received message on %s", rk)
                 await _dispatch_inbound_message(rk, body, inventory_stub, billing_stub)
             except Exception as exc:
-                logger.error("Error processing message in stubs runner: %s", exc, exc_info=True)
+                logger.exception("Error processing message in stubs runner: %s", exc)
 
     await stubs_queue.consume(_on_message)
     logger.info("Contract stubs runner listening on stubs.orders.inbound. Ready.")
