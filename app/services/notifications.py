@@ -8,6 +8,7 @@ Satisfies: RF-18, RF-33, RF-34
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Protocol
 
@@ -29,6 +30,7 @@ class DefaultOrderNotifier:
 
     async def notify_order_changed(self, order: Order) -> None:
         """Log state transition hook execution without blocking."""
+        await asyncio.sleep(0)
         logger.info(
             "notify_order_changed hook called for order %s (status=%s)",
             order.public_id,

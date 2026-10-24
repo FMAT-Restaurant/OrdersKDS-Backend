@@ -28,7 +28,17 @@
     },
     "reservas": {
       "type": "array",
-      "description": "List of reserved ingredient items or identifiers.",
+      "description": "List of reserved ingredient items or identifiers (legacy Spanish name).",
+      "items": {
+        "type": [
+          "object",
+          "string"
+        ]
+      }
+    },
+    "reservations": {
+      "type": "array",
+      "description": "List of reserved ingredient items or identifiers (English convention).",
       "items": {
         "type": [
           "object",

@@ -7,6 +7,7 @@ Covers: UT-BE-38, UT-BE-39, UT-BE-40, UT-BE-41, UT-BE-42, UT-BE-47
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -64,7 +65,7 @@ def _build_mock_uow(
 
     processed_repo = Mock(spec=ProcessedEventsRepository)
     processed_repo.exists = AsyncMock(return_value=is_duplicate)
-    processed_repo.add = AsyncMock()
+    processed_repo.add = Mock()
 
     # Pre-wire repos
     uow.orders = order_repo
@@ -114,7 +115,7 @@ async def test_stock_reserved_moves_order_to_in_preparation_and_notifies() -> No
     assert order.in_preparation_at.tzinfo is UTC
     assert len(notifier.notified_orders) == 1
     assert notifier.notified_orders[0].public_id == order_id
-    processed_repo.add.assert_awaited_once_with(
+    processed_repo.add.assert_called_once_with(
         event_id=event.event_id,
         order_id=order_id,
         event_type=EventName.STOCK_RESERVED,
@@ -167,7 +168,7 @@ async def test_stock_insufficient_moves_order_to_rejected() -> None:
     assert order.status is OrderStatus.REJECTED
     assert len(notifier.notified_orders) == 1
     assert notifier.notified_orders[0].public_id == order_id
-    processed_repo.add.assert_awaited_once_with(
+    processed_repo.add.assert_called_once_with(
         event_id=event.event_id,
         order_id=order_id,
         event_type=EventName.STOCK_INSUFFICIENT,
@@ -201,7 +202,7 @@ async def test_payment_completed_moves_delivered_or_wasted_to_paid(
     assert applied is True
     assert order.status is OrderStatus.PAID
     assert len(notifier.notified_orders) == 1
-    processed_repo.add.assert_awaited_once_with(
+    processed_repo.add.assert_called_once_with(
         event_id=event.event_id,
         order_id=order_id,
         event_type=EventName.PAYMENT_COMPLETED,
@@ -257,6 +258,18 @@ async def test_payment_completed_on_invalid_status_is_ignored_with_warning(
 # ---------------------------------------------------------------------------
 
 
+def _build_stock_reserved_msg(eid: UUID, oid: UUID) -> StockReservedMessage:
+    return StockReservedMessage(eventId=eid, orderId=oid)
+
+
+def _build_stock_insufficient_msg(eid: UUID, oid: UUID) -> StockInsufficientMessage:
+    return StockInsufficientMessage(eventId=eid, orderId=oid, faltantes=["ing-1"])
+
+
+def _build_payment_completed_msg(eid: UUID, oid: UUID) -> PaymentCompletedMessage:
+    return PaymentCompletedMessage(eventId=eid, orderId=oid, montoTotal=Decimal("50.00"))
+
+
 @pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
@@ -264,28 +277,24 @@ async def test_payment_completed_on_invalid_status_is_ignored_with_warning(
     [
         (
             handle_stock_reserved,
-            lambda eid, oid: StockReservedMessage(eventId=eid, orderId=oid),
+            _build_stock_reserved_msg,
             OrderStatus.CREATED,
         ),
         (
             handle_stock_insufficient,
-            lambda eid, oid: StockInsufficientMessage(
-                eventId=eid, orderId=oid, faltantes=["ing-1"]
-            ),
+            _build_stock_insufficient_msg,
             OrderStatus.CREATED,
         ),
         (
             handle_payment_completed,
-            lambda eid, oid: PaymentCompletedMessage(
-                eventId=eid, orderId=oid, montoTotal=Decimal("50.00")
-            ),
+            _build_payment_completed_msg,
             OrderStatus.DELIVERED,
         ),
     ],
 )
 async def test_duplicate_event_is_ignored(
     consumer_fn: Any,
-    event_builder: Any,
+    event_builder: Callable[[UUID, UUID], Any],
     initial_status: OrderStatus,
 ) -> None:
     order_id = uuid4()
