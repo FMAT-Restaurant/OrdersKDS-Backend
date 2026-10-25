@@ -41,10 +41,10 @@ async def handle_dining_session_created(
         if uow.session is None:
             raise RuntimeError("UnitOfWork session is required to create an order")
         await uow.session.flush()
-        await uow.processed_events.add(
+        uow.processed_events.add(
             event_id=message.event_id,
             order_id=order.public_id,
-            event_type=EventName.DINING_SESSION_CREATED,
+            event_type=EventName.DINING_SESSION_STARTED,
         )
         await uow.commit()
         return True

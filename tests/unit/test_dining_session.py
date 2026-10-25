@@ -47,7 +47,7 @@ async def test_dining_session_creates_created_order_with_waiter() -> None:
     orders.get_by_dining_session_id = AsyncMock(return_value=None)
     orders.save = Mock()
     processed = Mock()
-    processed.add = AsyncMock()
+    processed.add = Mock()
     session = Mock()
     session.flush = AsyncMock()
     uow = Mock()
@@ -65,10 +65,10 @@ async def test_dining_session_creates_created_order_with_waiter() -> None:
     assert order.status is OrderStatus.CREATED
     assert order.dining_session_id == message.session_id
     assert order.responsible_waiter_id == message.waiter_id
-    processed.add.assert_awaited_once_with(
+    processed.add.assert_called_once_with(
         event_id=message.event_id,
         order_id=order.public_id,
-        event_type=EventName.DINING_SESSION_CREATED,
+        event_type=EventName.DINING_SESSION_STARTED,
     )
     uow.commit.assert_awaited_once()
 

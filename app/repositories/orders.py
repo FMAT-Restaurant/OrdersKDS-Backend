@@ -68,6 +68,13 @@ class OrderRepository:
         """Stage an order in the active session."""
         self._session.add(order)
 
+    async def get_by_dining_session_id(self, session_id: UUID | str) -> Order | None:
+        """Fetch the order associated with a dining session."""
+        session_uuid = session_id if isinstance(session_id, UUID) else UUID(session_id)
+        return await self._session.scalar(
+            select(Order).where(Order.dining_session_id == session_uuid)
+        )
+
 
 async def transition_order(
     session: AsyncSession,

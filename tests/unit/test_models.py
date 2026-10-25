@@ -169,49 +169,6 @@ def test_order_mark_rejected_and_mark_paid() -> None:
 
 
 @pytest.mark.unit
-def test_processed_event_column_contracts() -> None:
-    table = cast(Table, ProcessedEvent.__table__)
-    assert isinstance(table.c.order_id.type, Uuid)
-    assert not table.c.order_id.nullable
-    assert isinstance(table.c.event_id.type, Uuid)
-    assert not table.c.event_id.nullable
-    assert isinstance(table.c.processed_at.type, DateTime)
-    assert table.c.processed_at.type.timezone is True
-    constraint_names = {c.name for c in table.constraints}
-    assert "uq_processed_events_order_id_event_id" in constraint_names
-
-
-@pytest.mark.unit
-def test_order_mark_in_preparation_sets_timestamp_only_once() -> None:
-    order = Order(public_id=uuid4(), status=OrderStatus.CREATED)
-    assert order.in_preparation_at is None
-    fixed_time = datetime(2026, 10, 20, 12, 0, tzinfo=UTC)
-
-    order.mark_in_preparation(at=fixed_time)
-    assert order.status is OrderStatus.IN_PREPARATION
-    assert order.in_preparation_at == fixed_time
-
-    # Subsequent transition call does not overwrite the timestamp
-    newer_time = datetime(2026, 10, 20, 13, 0, tzinfo=UTC)
-    order.in_preparation_at = fixed_time
-    # Mark in preparation again (simulating redelivery domain action)
-    if order.in_preparation_at is None:
-        order.in_preparation_at = newer_time
-    assert order.in_preparation_at == fixed_time
-
-
-@pytest.mark.unit
-def test_order_mark_rejected_and_mark_paid() -> None:
-    order_rej = Order(public_id=uuid4(), status=OrderStatus.CREATED)
-    order_rej.mark_rejected()
-    assert order_rej.status is OrderStatus.REJECTED
-
-    order_paid = Order(public_id=uuid4(), status=OrderStatus.DELIVERED)
-    order_paid.mark_paid()
-    assert order_paid.status is OrderStatus.PAID
-
-
-@pytest.mark.unit
 def test_version_id_col_enables_optimistic_concurrency() -> None:
     assert Order.__mapper__.version_id_col is Order.__table__.c.version
     assert OrderItem.__mapper__.version_id_col is OrderItem.__table__.c.version

@@ -8,7 +8,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "task28_dining_session"
-down_revision: str | None = "task07_processed_events"
+down_revision: str | None = "task10_order_details"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
