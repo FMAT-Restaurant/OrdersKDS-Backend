@@ -19,6 +19,10 @@ class EventName(StrEnum):
     CHARGE_REQUESTED = "ordenes.cobro.solicitado"
     BILL_REQUESTED = "ordenes.cuenta.solicitada"
     ORDER_EXPIRED = "ordenes.orden.expirada"
+    MENU_DISH_PRICE_UPDATED = "menu.platillo.precio_actualizado"
+    MENU_CATALOG_UPDATED = "menu.catalogo.actualizado"
+    MENU_DISH_AVAILABILITY_UPDATED = "menu.platillo.disponibilidad_actualizada"
+    MENU_DISH_STATE_UPDATED = "menu.platillo.estado_actualizado"
 
 
 class OrderEvent(BaseModel):
