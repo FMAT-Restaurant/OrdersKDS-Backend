@@ -3,8 +3,9 @@
 Covers the full 9x9 transition matrix: every (current, target) pair is
 exercised, valid jumps pass silently and invalid jumps raise
 ``InvalidStateTransitionError`` (mapped to HTTP 409).
+Also covers the 3x3 item state transition matrix.
 
-Satisfies: RF-18, RF-24, RF-26, RF-28, RNF-03
+Satisfies: RF-09, RF-10, RF-11, RF-18, RF-22, RF-24, RF-26, RF-28, RNF-03
 """
 
 from __future__ import annotations
@@ -16,7 +17,12 @@ import pytest
 from app.core.error_codes import ErrorCode
 from app.domain import order_status as sm
 from app.domain.errors import InvalidStateTransitionError
-from app.domain.order_status import OrderStatus, ensure_transition_allowed
+from app.domain.order_status import (
+    ItemStatus,
+    OrderStatus,
+    ensure_item_transition_allowed,
+    ensure_transition_allowed,
+)
 
 ALL_STATUSES: list[OrderStatus] = list(OrderStatus)
 
@@ -95,3 +101,58 @@ def test_allowed_transitions_table_is_complete_and_immutable() -> None:
         assert isinstance(targets, frozenset)
     for current in ALL_STATUSES:
         assert sm._ALLOWED_TRANSITIONS[current] == EXPECTED_VALID[current]
+
+
+ALL_ITEM_STATUSES: list[ItemStatus] = list(ItemStatus)
+
+EXPECTED_VALID_ITEM_TRANSITIONS: dict[ItemStatus, frozenset[ItemStatus]] = {
+    ItemStatus.PENDING: frozenset({ItemStatus.READY}),
+    ItemStatus.READY: frozenset({ItemStatus.DELIVERED}),
+    ItemStatus.DELIVERED: frozenset({ItemStatus.PENDING}),
+}
+
+ALL_ITEM_PAIRS: list[tuple[ItemStatus, ItemStatus]] = [
+    (current, target)
+    for current, target in itertools.product(ALL_ITEM_STATUSES, ALL_ITEM_STATUSES)
+]
+
+VALID_ITEM_PAIRS: list[tuple[ItemStatus, ItemStatus]] = [
+    pair for pair in ALL_ITEM_PAIRS if pair[1] in EXPECTED_VALID_ITEM_TRANSITIONS[pair[0]]
+]
+
+INVALID_ITEM_PAIRS: list[tuple[ItemStatus, ItemStatus]] = [
+    pair for pair in ALL_ITEM_PAIRS if pair[1] not in EXPECTED_VALID_ITEM_TRANSITIONS[pair[0]]
+]
+
+
+def test_item_matrix_covers_full_3x3() -> None:
+    assert len(ALL_ITEM_STATUSES) == 3
+    assert len(ALL_ITEM_PAIRS) == 9
+    assert len(VALID_ITEM_PAIRS) == 3
+    assert len(INVALID_ITEM_PAIRS) == 6
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("current", "target"), VALID_ITEM_PAIRS)
+def test_valid_item_transition_does_not_raise(current: ItemStatus, target: ItemStatus) -> None:
+    ensure_item_transition_allowed(current, target)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("current", "target"), INVALID_ITEM_PAIRS)
+def test_invalid_item_transition_raises_409_error(current: ItemStatus, target: ItemStatus) -> None:
+    with pytest.raises(InvalidStateTransitionError) as exc_info:
+        ensure_item_transition_allowed(current, target)
+    err = exc_info.value
+    assert err.code is ErrorCode.INVALID_STATE_TRANSITION
+    assert err.http_status == 409
+    assert err.current is current
+    assert err.target is target
+
+
+def test_allowed_item_transitions_table_is_complete_and_immutable() -> None:
+    assert set(sm._ALLOWED_ITEM_TRANSITIONS.keys()) == set(ALL_ITEM_STATUSES)
+    for targets in sm._ALLOWED_ITEM_TRANSITIONS.values():
+        assert isinstance(targets, frozenset)
+    for current in ALL_ITEM_STATUSES:
+        assert sm._ALLOWED_ITEM_TRANSITIONS[current] == EXPECTED_VALID_ITEM_TRANSITIONS[current]

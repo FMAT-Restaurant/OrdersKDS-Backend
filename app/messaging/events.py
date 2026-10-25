@@ -3,7 +3,7 @@
 Spanish field names appear strictly inside Anti-Corruption Layer (ACL) aliases
 on inbound Pydantic models. Domain and persistence code only use English names.
 
-Satisfies: RF-21, RF-33, RF-34, RNF-02
+Satisfies: RF-10, RF-21, RF-33, RF-34, RNF-02, RNF-13
 """
 
 from __future__ import annotations
@@ -67,10 +67,28 @@ class OrderCreatedEvent(OrderEvent):
 
 
 class DishPreparedEvent(OrderEvent):
-    """Repeatable event: each preparation emission gets a new identifier."""
+    """Repeatable event: each preparation emission gets a new identifier (RF-10)."""
 
     event_name: ClassVar[EventName] = EventName.DISH_PREPARED
     unique_per_order: ClassVar[bool] = False
+
+    item_id: UUID | None = Field(default=None, alias="itemId")
+
+    @classmethod
+    def for_item(
+        cls,
+        order_id: UUID,
+        item_id: UUID,
+        *,
+        correlation_id: UUID | None = None,
+    ) -> DishPreparedEvent:
+        """Build a repeatable event for an individual prepared dish (RF-10)."""
+        return cls(
+            eventId=uuid4(),
+            orderId=order_id,
+            itemId=item_id,
+            correlationId=correlation_id,
+        )
 
 
 # ---------------------------------------------------------------------------

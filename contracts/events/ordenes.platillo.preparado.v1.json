@@ -19,6 +19,13 @@
       "description": "Public identifier of the affected order.",
       "minLength": 1
     },
+    "itemId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Public identifier of the prepared order item."
+    },
     "correlationId": {
       "type": [
         "string",

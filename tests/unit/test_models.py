@@ -3,7 +3,7 @@
 Verifies table registration, UUID/Decimal/UTC column contracts and
 the optimistic-concurrency wiring (``version_id_col``).
 
-Satisfies: RNF-09, RNF-02
+Satisfies: RF-09, RF-10, RF-11, RF-18, RNF-09, RNF-02, OP-08
 """
 
 from __future__ import annotations
@@ -155,6 +155,24 @@ def test_order_mark_in_preparation_sets_timestamp_only_once() -> None:
     if order.in_preparation_at is None:
         order.in_preparation_at = newer_time
     assert order.in_preparation_at == fixed_time
+
+
+@pytest.mark.unit
+def test_order_mark_delivered() -> None:
+    order = Order(public_id=uuid4(), status=OrderStatus.IN_PREPARATION)
+    order.mark_delivered()
+    assert order.status is OrderStatus.DELIVERED
+
+
+@pytest.mark.unit
+def test_order_item_mark_ready_and_delivered() -> None:
+    item = OrderItem(public_id=uuid4(), name="Tacos", status=ItemStatus.PENDING)
+    item.mark_ready()
+    assert item.status == ItemStatus.READY
+
+    item2 = OrderItem(public_id=uuid4(), name="Tacos", status=ItemStatus.READY)
+    item2.mark_delivered()
+    assert item2.status == ItemStatus.DELIVERED
 
 
 @pytest.mark.unit

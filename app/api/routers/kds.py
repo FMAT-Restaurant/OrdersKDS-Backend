@@ -3,25 +3,20 @@
 Every route requires one of the ``KITCHEN_ROLES`` (Guidelines §5.7); a waiter gets
 ``403 FORBIDDEN_ROLE`` because the kitchen, not the waiter, marks dishes as ready (OP-08).
 
-The role guard is the deliverable of TASK-20. The handlers are placeholders that answer
-``501`` once the guard lets the caller through.
-
-Satisfies: RF-09, RF-10, RF-11, RNF-03
-
-TODO(RF-01, RF-02, RF-03, RF-04, RF-08, TASK-12): ``GET /kds/queue?station=&view=`` belongs
-to this router and must share the same ``KITCHEN_ROLES`` guard.
+Satisfies: RF-09, RF-10, RF-11, RNF-03, OP-08
 """
 
 import logging
-from typing import Annotated, NoReturn
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, Path, status
 
-from app.api.dependencies.auth import require_roles
+from app.api.dependencies.auth import AuthContext, get_auth_context, require_roles
 from app.api.schemas.errors import ErrorResponse
-from app.api.schemas.order import MarkReadyRequest
+from app.api.schemas.order import MarkReadyRequest, OrderResponse
 from app.domain.roles import KITCHEN_ROLES
+from app.services.orders import OrderService, get_order_service
 
 logger = logging.getLogger(__name__)
 
@@ -37,79 +32,74 @@ router = APIRouter(
             "model": ErrorResponse,
             "description": "Role not allowed, e.g. a waiter (`FORBIDDEN_ROLE`).",
         },
+        status.HTTP_404_NOT_FOUND: {
+            "model": ErrorResponse,
+            "description": "Order or item not found (`ORDER_NOT_FOUND`).",
+        },
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorResponse,
+            "description": "Invalid state transition (`INVALID_STATE_TRANSITION`).",
+        },
     },
 )
 
 OrderIdPath = Annotated[UUID, Path(alias="orderId", description="Public order identifier.")]
 ItemIdPath = Annotated[UUID, Path(alias="itemId", description="Public order item identifier.")]
 
-_NOT_IMPLEMENTED_DETAIL = "Not implemented yet."
-
 
 @router.patch(
     "/orders/{orderId}/items/{itemId}/ready",
+    response_model=OrderResponse,
+    status_code=status.HTTP_200_OK,
     summary="Mark a dish as ready",
     description="Kitchen marks one item of an order as ready. Roles: kitchen, chef, admin.",
-    response_model=None,
-    responses={status.HTTP_501_NOT_IMPLEMENTED: {"description": "Placeholder until TASK-13."}},
 )
-def mark_item_ready(
+async def mark_item_ready(
     order_id: OrderIdPath,
     item_id: ItemIdPath,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    order_service: Annotated[OrderService, Depends(get_order_service)],
     body: MarkReadyRequest | None = None,
-) -> NoReturn:
-    """Mark an item as ready.
-
-    Satisfies: RF-09, RF-10
+) -> OrderResponse:
+    """Mark an item as ready (RF-09, RF-10, OP-08).
 
     Args:
         order_id: Public identifier of the order.
         item_id: Public identifier of the item.
+        auth: Authenticated caller context.
+        order_service: Order lifecycle service.
         body: Optional empty body; any field in it is rejected (no mass assignment).
 
-    Raises:
-        HTTPException: Always ``501`` until TASK-13 implements the behaviour.
+    Returns:
+        Updated Order representation.
     """
-    # TODO(RF-09, RF-10, TASK-13): delegate to the order service with the AuthContext of the
-    # guard: item READY transition, DISH_PREPARED event in the outbox (same transaction) and
-    # the role-dependent domain checks (defense in depth, Guidelines §5.7).
-    logger.warning(
-        "mark_item_ready is not implemented",
-        extra={"order_id": str(order_id), "item_id": str(item_id), "has_body": body is not None},
-    )
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=_NOT_IMPLEMENTED_DETAIL
-    )
+    order = await order_service.mark_item_ready(order_id, item_id, auth)
+    return OrderResponse.from_model(order)
 
 
 @router.patch(
     "/orders/{orderId}/ready",
+    response_model=OrderResponse,
+    status_code=status.HTTP_200_OK,
     summary="Mark an order as ready",
     description="Kitchen marks the whole order as ready. Roles: kitchen, chef, admin.",
-    response_model=None,
-    responses={status.HTTP_501_NOT_IMPLEMENTED: {"description": "Placeholder until TASK-13."}},
 )
-def mark_order_ready(
+async def mark_order_ready(
     order_id: OrderIdPath,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    order_service: Annotated[OrderService, Depends(get_order_service)],
     body: MarkReadyRequest | None = None,
-) -> NoReturn:
-    """Mark a whole order as ready.
-
-    Satisfies: RF-11
+) -> OrderResponse:
+    """Mark a whole order as ready (RF-11, OP-08).
 
     Args:
         order_id: Public identifier of the order.
+        auth: Authenticated caller context.
+        order_service: Order lifecycle service.
         body: Optional empty body; any field in it is rejected (no mass assignment).
 
-    Raises:
-        HTTPException: Always ``501`` until TASK-13 implements the behaviour.
+    Returns:
+        Updated Order representation.
     """
-    # TODO(RF-11, RF-18, TASK-13): delegate to the order service (IN_PREPARATION -> DELIVERED
-    # through the state machine) and push the change over WebSocket after commit.
-    logger.warning(
-        "mark_order_ready is not implemented",
-        extra={"order_id": str(order_id), "has_body": body is not None},
-    )
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=_NOT_IMPLEMENTED_DETAIL
-    )
+    order = await order_service.mark_order_ready(order_id, auth)
+    return OrderResponse.from_model(order)

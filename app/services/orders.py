@@ -1,0 +1,137 @@
+"""Order domain service orchestrating lifecycle operations and transitions.
+
+Satisfies: RF-09, RF-10, RF-11, RF-18, RNF-01, RNF-03, OP-08
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Annotated
+from uuid import UUID
+
+from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.dependencies.auth import AuthContext
+from app.db.models import Order
+from app.db.session import get_session
+from app.domain.errors import (
+    ForbiddenRoleError,
+    InvalidStateTransitionError,
+    OrderNotFoundError,
+)
+from app.domain.order_status import ItemStatus, OrderStatus
+from app.domain.roles import KITCHEN_ROLES
+from app.messaging.events import DishPreparedEvent
+from app.repositories.orders import OrderRepository
+from app.repositories.outbox import OutboxRepository
+from app.services.notifications import (
+    OrderNotifier,
+    default_notifier,
+    notify_order_changed,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class OrderService:
+    """Service encapsulating order operations, outbox staging, and lifecycle events."""
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        notifier: OrderNotifier | None = None,
+    ) -> None:
+        self._session = session
+        self._orders = OrderRepository(session)
+        self._outbox = OutboxRepository(session)
+        self._notifier = notifier or default_notifier
+
+    def _verify_kitchen_role(self, auth: AuthContext) -> None:
+        if auth.role not in KITCHEN_ROLES:
+            raise ForbiddenRoleError("Role not allowed for kitchen action.")
+
+    def _sync_delivery_if_all_ready(self, order: Order) -> bool:
+        """Move order and all items to DELIVERED if every item is ready/delivered."""
+        if not order.items:
+            return False
+        all_ready = all(i.status in (ItemStatus.READY, ItemStatus.DELIVERED) for i in order.items)
+        if all_ready and order.status == OrderStatus.IN_PREPARATION:
+            order.mark_delivered()
+            for item in order.items:
+                if item.status == ItemStatus.READY:
+                    item.mark_delivered()
+            return True
+        return False
+
+    async def mark_item_ready(
+        self,
+        order_id: UUID,
+        item_id: UUID,
+        auth: AuthContext,
+    ) -> Order:
+        """Mark an individual order item as READY (RF-09, RF-10, OP-08)."""
+        self._verify_kitchen_role(auth)
+        order = await self._orders.get_by_public_id(order_id)
+        if order is None:
+            raise OrderNotFoundError(f"Order with id={order_id} not found.")
+
+        target_item = next((i for i in order.items if i.public_id == item_id), None)
+        if target_item is None:
+            raise OrderNotFoundError(f"Item with id={item_id} not found in order {order_id}.")
+
+        if target_item.status in (ItemStatus.READY, ItemStatus.DELIVERED):
+            if order.status == OrderStatus.DELIVERED:
+                return order
+            if order.status != OrderStatus.IN_PREPARATION:
+                raise InvalidStateTransitionError(order.status, OrderStatus.DELIVERED)
+        elif target_item.status == ItemStatus.PENDING:
+            if order.status != OrderStatus.IN_PREPARATION:
+                raise InvalidStateTransitionError(order.status, OrderStatus.DELIVERED)
+            target_item.mark_ready()
+            self._outbox.add(DishPreparedEvent.for_item(order.public_id, target_item.public_id))
+
+        delivered_now = self._sync_delivery_if_all_ready(order)
+        self._orders.save(order)
+        await self._session.commit()
+
+        if delivered_now:
+            await notify_order_changed(order, notifier=self._notifier)
+        return order
+
+    async def mark_order_ready(
+        self,
+        order_id: UUID,
+        auth: AuthContext,
+    ) -> Order:
+        """Mark all pending items of an order as READY and deliver order (RF-11, OP-08)."""
+        self._verify_kitchen_role(auth)
+        order = await self._orders.get_by_public_id(order_id)
+        if order is None:
+            raise OrderNotFoundError(f"Order with id={order_id} not found.")
+        if order.status == OrderStatus.DELIVERED:
+            return order
+        if order.status != OrderStatus.IN_PREPARATION:
+            raise InvalidStateTransitionError(order.status, OrderStatus.DELIVERED)
+
+        for item in order.items:
+            if item.status == ItemStatus.PENDING:
+                item.mark_ready()
+                self._outbox.add(DishPreparedEvent.for_item(order.public_id, item.public_id))
+
+        order.mark_delivered()
+        for item in order.items:
+            if item.status == ItemStatus.READY:
+                item.mark_delivered()
+
+        self._orders.save(order)
+        await self._session.commit()
+        await notify_order_changed(order, notifier=self._notifier)
+        return order
+
+
+def get_order_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> OrderService:
+    """FastAPI dependency yielding an OrderService bound to active session."""
+    return OrderService(session)
