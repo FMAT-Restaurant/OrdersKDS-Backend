@@ -60,12 +60,27 @@ class Order(Base):
     )
     dining_session_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True, unique=True)
     responsible_waiter_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    table_number: Mapped[int | None] = mapped_column(nullable=True, index=True)
+    is_takeaway: Mapped[bool] = mapped_column(nullable=False, default=False)
+    created_by: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
 
     items: Mapped[list[OrderItem]] = relationship(
         back_populates="order", cascade="all, delete-orphan", lazy="selectin"
     )
 
     __mapper_args__ = {"version_id_col": version}
+
+    @property
+    def awaiting_stock_confirmation(self) -> bool:
+        """Whether order was confirmed and is awaiting stock reservation (OP-05)."""
+        return self.status == OrderStatus.CREATED and self.confirmed_at is not None
+
+    def recalculate_total(self) -> None:
+        """Recalculate total_amount from current item prices and quantities."""
+        self.total_amount = sum(
+            (item.unit_price * item.quantity for item in self.items),
+            start=Decimal("0.00"),
+        )
 
     def mark_in_preparation(self, at: datetime | None = None) -> None:
         """Transition order to IN_PREPARATION and record timestamp once (OP-11)."""
@@ -95,11 +110,14 @@ class OrderItem(Base):
     order_id: Mapped[int] = mapped_column(
         ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    dish_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     quantity: Mapped[int] = mapped_column(nullable=False, default=1)
     unit_price: Mapped[Decimal] = mapped_column(
         Numeric(12, 2), nullable=False, default=Decimal("0.00")
     )
+    modifiers: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
     status: Mapped[ItemStatus] = mapped_column(
         Enum(ItemStatus, name="item_status", validate_strings=True),
         default=ItemStatus.PENDING,

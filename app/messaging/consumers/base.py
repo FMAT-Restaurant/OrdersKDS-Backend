@@ -8,6 +8,7 @@ Satisfies: RNF-02, RNF-13
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Callable
@@ -59,6 +60,7 @@ class InMemoryDLQRouter:
         reason: str,
     ) -> None:
         """Record dead-letter payload with timestamp and reason."""
+        await asyncio.sleep(0)
         entry = {
             "queue_name": queue_name,
             "dlq_queue": f"{queue_name}.dlq",

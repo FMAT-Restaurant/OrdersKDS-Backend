@@ -29,8 +29,8 @@ class ProcessedEventsRepository:
         Returns:
             True if (order_id, event_id) has already been processed, False otherwise.
         """
-        event_uuid = UUID(str(event_id)) if not isinstance(event_id, UUID) else event_id
-        order_uuid = UUID(str(order_id)) if not isinstance(order_id, UUID) else order_id
+        event_uuid = event_id if isinstance(event_id, UUID) else UUID(event_id)
+        order_uuid = order_id if isinstance(order_id, UUID) else UUID(order_id)
 
         result = await self._session.scalar(
             select(ProcessedEvent.id).where(
@@ -40,7 +40,7 @@ class ProcessedEventsRepository:
         )
         return result is not None
 
-    async def add(
+    def add(
         self,
         event_id: UUID | str,
         order_id: UUID | str,
@@ -56,8 +56,8 @@ class ProcessedEventsRepository:
         Returns:
             The created ProcessedEvent entity.
         """
-        event_uuid = UUID(str(event_id)) if not isinstance(event_id, UUID) else event_id
-        order_uuid = UUID(str(order_id)) if not isinstance(order_id, UUID) else order_id
+        event_uuid = event_id if isinstance(event_id, UUID) else UUID(event_id)
+        order_uuid = order_id if isinstance(order_id, UUID) else UUID(order_id)
 
         row = ProcessedEvent(
             order_id=order_uuid,

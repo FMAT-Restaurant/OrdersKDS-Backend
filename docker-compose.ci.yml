@@ -66,3 +66,21 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+  # Stubs service for contract simulation in CI (TASK-33, RNF-13)
+  stubs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ordenes-stubs-ci
+    command: ["python", "-m", "app.stubs.runner"]
+    environment:
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST}
+      INVENTORY_STUB_MODE: ${INVENTORY_STUB_MODE:-RESERVE}
+      BILLING_STUB_AUTO_PAY: ${BILLING_STUB_AUTO_PAY:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy

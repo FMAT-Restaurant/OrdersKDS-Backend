@@ -28,7 +28,14 @@
     },
     "faltantes": {
       "type": "array",
-      "description": "List of missing ingredients.",
+      "description": "List of missing ingredients (legacy Spanish name).",
+      "items": {
+        "type": "string"
+      }
+    },
+    "missingIngredients": {
+      "type": "array",
+      "description": "List of missing ingredients (English convention).",
       "items": {
         "type": "string"
       }

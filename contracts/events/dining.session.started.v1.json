@@ -1,0 +1,64 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://restaurant.example.com/contracts/events/dining.session.started.v1.json",
+  "title": "DiningSessionStartedEvent",
+  "description": "Event emitted when a dining session starts (English routing key convention, RF-17, RNF-13).",
+  "type": "object",
+  "required": [
+    "eventId",
+    "sessionId"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "description": "Deterministic event identifier.",
+      "minLength": 1
+    },
+    "sessionId": {
+      "type": "string",
+      "description": "Identifier of the dining session.",
+      "minLength": 1
+    },
+    "tableId": {
+      "type": [
+        "string",
+        "number",
+        "null"
+      ],
+      "description": "Table identifier."
+    },
+    "waiterId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Waiter identifier."
+    },
+    "dinersCount": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Number of diners at table."
+    },
+    "correlationId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Traceability identifier."
+    },
+    "timestamp": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ISO-8601 emission timestamp."
+    },
+    "data": {
+      "type": "object",
+      "description": "Optional nested data envelope if emitted from Floor-Module."
+    }
+  },
+  "additionalProperties": true
+}

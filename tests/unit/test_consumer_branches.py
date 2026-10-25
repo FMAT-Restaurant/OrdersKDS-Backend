@@ -47,7 +47,7 @@ async def test_processed_events_repository_exists_and_add() -> None:
     exists_str = await repo.exists(str(event_id), str(order_id))
     assert exists_str is False
 
-    row = await repo.add(event_id, order_id, event_type="test.event")
+    row = repo.add(event_id, order_id, event_type="test.event")
     session.add.assert_called_once_with(row)
     assert row.event_id == event_id
     assert row.order_id == order_id

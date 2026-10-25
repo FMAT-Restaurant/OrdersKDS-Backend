@@ -88,7 +88,7 @@ class StatefulOrderRepo(OrderRepository):
     async def get_by_public_id(
         self, public_id: UUID | str, *, for_update: bool = False
     ) -> Order | None:
-        uid = UUID(str(public_id)) if not isinstance(public_id, UUID) else public_id
+        uid = public_id if isinstance(public_id, UUID) else UUID(public_id)
         return self._db.orders.get(uid)
 
 
@@ -100,18 +100,18 @@ class StatefulProcessedRepo(ProcessedEventsRepository):
         self._db = db
 
     async def exists(self, event_id: UUID | str, order_id: UUID | str) -> bool:
-        e_uuid = UUID(str(event_id)) if not isinstance(event_id, UUID) else event_id
-        o_uuid = UUID(str(order_id)) if not isinstance(order_id, UUID) else order_id
+        e_uuid = event_id if isinstance(event_id, UUID) else UUID(event_id)
+        o_uuid = order_id if isinstance(order_id, UUID) else UUID(order_id)
         return (o_uuid, e_uuid) in self._db.processed_events
 
-    async def add(
+    def add(
         self,
         event_id: UUID | str,
         order_id: UUID | str,
         event_type: str | None = None,
     ) -> ProcessedEvent:
-        e_uuid = UUID(str(event_id)) if not isinstance(event_id, UUID) else event_id
-        o_uuid = UUID(str(order_id)) if not isinstance(order_id, UUID) else order_id
+        e_uuid = event_id if isinstance(event_id, UUID) else UUID(event_id)
+        o_uuid = order_id if isinstance(order_id, UUID) else UUID(order_id)
         row = ProcessedEvent(order_id=o_uuid, event_id=e_uuid, event_type=event_type)
         self._db.processed_events.add((o_uuid, e_uuid))
         return row

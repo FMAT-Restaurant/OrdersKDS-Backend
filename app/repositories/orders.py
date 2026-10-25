@@ -41,7 +41,7 @@ class OrderRepository:
         Returns:
             The Order if found, or None.
         """
-        order_uuid = UUID(str(public_id)) if not isinstance(public_id, UUID) else public_id
+        order_uuid = public_id if isinstance(public_id, UUID) else UUID(public_id)
         query = select(Order).where(Order.public_id == order_uuid)
         if for_update:
             query = query.with_for_update()
@@ -67,13 +67,6 @@ class OrderRepository:
     def save(self, order: Order) -> None:
         """Stage an order in the active session."""
         self._session.add(order)
-
-    async def get_by_dining_session_id(self, session_id: UUID | str) -> Order | None:
-        """Fetch the order associated with a dining session."""
-        session_uuid = UUID(str(session_id)) if not isinstance(session_id, UUID) else session_id
-        return await self._session.scalar(
-            select(Order).where(Order.dining_session_id == session_uuid)
-        )
 
 
 async def transition_order(

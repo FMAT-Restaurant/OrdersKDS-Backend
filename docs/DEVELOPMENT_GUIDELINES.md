@@ -608,7 +608,7 @@ async def handle_stock_reserved(message: StockReservedMessage, uow: UnitOfWork) 
             return
 
         order.mark_in_preparation()  # ensure_transition_allowed inside
-        await uow.processed_events.add(message.event_id, message.order_id)
+        uow.processed_events.add(message.event_id, message.order_id)
         await uow.commit()
 
     await realtime.notify_order_changed(order)  # WebSocket push after commit
