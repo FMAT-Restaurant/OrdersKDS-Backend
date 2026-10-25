@@ -547,6 +547,9 @@ class ErrorCode(StrEnum):
 - El **API Gateway** valida la firma del JWT; el backend extrae `user_id` y `role` de las *claims* mediante una dependencia de FastAPI (`api/dependencies/auth.py`) y las inyecta como `AuthContext`.
 - El identificador del usuario **nunca** llega en el body ni en un campo de formulario (RF-15). Un body que intente enviar `userId`/`status` se ignora o se rechaza (*mass assignment*).
 - La **autorización por rol** se valida en el router (dependencia `require_roles(...)`) **antes** de llamar al service, y el service vuelve a comprobar las reglas de dominio que dependen del rol (defensa en profundidad).
+- El JWT se lee del encabezado `Authorization: Bearer <jwt>` **sin verificar la firma**: ya la verificó el Gateway y este servicio no guarda clave de firma (por eso no existe `JWT_SECRET`; ver ADR-0011). Sí se exige que no esté vencido, que no use `alg: none` y que traiga `user_id` (o `sub`) y un `role` válido (`waiter`, `kitchen`, `chef`, `admin`); de lo contrario → `401 UNAUTHENTICATED`. Un rol no permitido → `403 FORBIDDEN_ROLE`.
+- En WebSocket se usa el mismo token: ausente o inválido → cierre `4401`; rol no permitido para el endpoint → cierre `4403` (§10.3).
+- La matriz rol × endpoint vive como **datos**: los grupos de roles en `app/domain/roles.py` y la tabla de endpoints WebSocket en `app/api/websockets/routes.py` (`WS_ROLES_BY_PATH`). Un router nuevo reutiliza esos grupos con `require_roles(...)`; nunca escribe listas de roles propias.
 
 | Acción | Roles permitidos |
 |---|---|

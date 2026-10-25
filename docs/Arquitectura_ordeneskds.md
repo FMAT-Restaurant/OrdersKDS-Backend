@@ -89,15 +89,15 @@ Esta API no comunica microservicios entre sí — comunica los dispositivos del 
 | `PATCH` | `/orders/{orderId}/void` | Administrador | Anula comanda completa o platillos individuales ya "EnPreparacion" por razón administrativa → **"Mermada"**. Publica `ordenes.comanda.mermada` + `ordenes.cobro.solicitado` (tratado igual que una comanda entregada). |
 | `PATCH` | `/orders/{orderId}/void-kitchen-error` | Administrador **o Chef** | Anula la comanda **completa** ya "EnPreparacion" por error de cocina → **"Anulada"**. Cuerpo `{ "note": "..." }` obligatorio. Publica `ordenes.comanda.mermada`; **no** publica ningún evento de cobro. |
 
-**Vista 4 — Preparación de Platillos Intermedios (chef) — `[Opcional]`**
+**Vista 4 — Preparación de Platillos Intermedios (chef) — `[NO-GO en fase actual / Abierto a futuro]`**
 | Método | Ruta | Rol | Nota |
 |---|---|---|---|
-| `POST` | `/intermediate-dishes` | **Chef** | Registra un lote preparado por adelantado, fuera de cualquier comanda de cliente. Publica `ordenes.platillo_intermedio.preparado`. Requiere una vista nueva y dedicada (no se integra a una vista existente). |
+| `POST` | `/intermediate-dishes` | **Chef** | **Descartado para el horizonte de 7 sprints (ADR-0011):** Funcionalidad opcional desactivada (`INTERMEDIATE_DISHES_ENABLED=false`). **Queda abierta la posibilidad de implementarse en una fase futura o posterior release**, reactivando el feature flag y publicando el evento asíncrono `ordenes.platillo_intermedio.preparado` sin alterar la arquitectura base. |
 
 > Estos endpoints son una propuesta a validar con el equipo de frontend, igual que en la versión anterior de este documento.
 
 ### 3.3 Notificación al cliente: WebSocket (OP-02 / ADR-0002)
-Una conexión persistente por sesión de cliente, autenticada por JWT, distribuida en dos endpoints según el rol:
+Una conexión persistente por sesión de cliente, autenticada por JWT (con validación de firma delegada al API Gateway según ADR-0011), distribuida en dos endpoints según el rol:
 
 | Canal | Endpoint | Roles permitidos | Modo de suscripción | Contenido recibido |
 |---|---|---|---|---|
@@ -122,31 +122,33 @@ Ningún endpoint publica directamente al broker: escribe en la tabla `outbox` de
 
 ### 4.2 Eventos que este microservicio PUBLICA
 
+Para la tabla de equivalencias en inglés y constantes en código, consultar la matriz canónica en [`API_COMUNICACIONES.md` §2.0](API_COMUNICACIONES.md).
+
 | Evento | Disparado por | Payload (aprox.) | Consumidor | Estado del contrato |
 |---|---|---|---|---|
 | `ordenes.orden.creada` | `POST /orders/{id}/confirm` (en "Creada") | `{orderId, items[]}` | Inventario | Confirmado |
 | `ordenes.orden.cancelada` | `PATCH /orders/{id}/cancel` ("Creada" → "Cancelada") | `{orderId, itemsCancelados[]}` | Inventario | Confirmado |
 | `ordenes.platillo.preparado` | `PATCH /orders/{id}/items/{itemId}/ready` | `{orderId, itemId}` | Inventario | Confirmado |
-| `ordenes.comanda.mermada` | `PATCH /orders/{id}/void` **o** `/void-kitchen-error` ("EnPreparacion" → "Mermada" **o** "Anulada") | `{orderId, itemsAfectados[], motivo: "administrativo" \| "error_cocina"}` | Inventario | Propuesto — pendiente de que Inventario documente su suscripción |
-| `ordenes.cobro.solicitado` | `PATCH /orders/{id}/void` (**solo** para "Mermada") | `{orderId, detalleOrden}` — tratado de forma **idéntica** a la cuenta de una comanda entregada normalmente | Pagos | Propuesto — **no** se publica para "Anulada" |
-| `ordenes.cuenta.solicitada` | `POST /orders/{id}/request-bill` (en "Entregada") | `{orderId, sessionId, detalleOrden}` | Pagos | Propuesto |
-| `ordenes.orden.expirada` **(nuevo)** | Vencimiento del temporizador de Saga (comanda en "Creada" sin respuesta de Inventario) | `{orderId, tiempoEsperaMs}` | Inventario | Propuesto (OP-04) — nombre/payload y campo motivo pendientes de confirmación con Inventario |
-| `ordenes.platillo_intermedio.preparado` **(nuevo, opcional)** | `POST /intermediate-dishes` (chef, fuera del flujo de comandas) | `{platilloIntermedioId, cantidadProducida, insumosUtilizados[]}` | Inventario | Propuesto — pendiente validar nombre/payload con Inventario |
+| `ordenes.comanda.mermada` | `PATCH /orders/{id}/void` **o** `/void-kitchen-error` ("EnPreparacion" → "Mermada" **o** "Anulada") | `{orderId, itemsAfectados[], reason}` | Inventario | Confirmado (`ADMINISTRATIVE` \| `KITCHEN_ERROR`) |
+| `ordenes.cobro.solicitado` (`orders.charge.requested`) | `PATCH /orders/{id}/void` (**solo** para "Mermada") | `{orderId, sessionId, tableId, waiterId, totalAmount, items[]}` — cobro por merma administrativa (RF-26, RF-27) | Pagos | **Confirmado (Contrato Edwin)** — **no** se publica para "Anulada" |
+| `ordenes.cuenta.solicitada` (`orders.bill.requested`) | `POST /orders/{id}/request-bill` (en "Entregada") | `{orderId, sessionId, tableId, waiterId, totalAmount, items[]}` con precios congelados | Pagos | **Confirmado (Contrato Edwin)** |
+| `ordenes.orden.expirada` | Vencimiento del temporizador de Saga (comanda en "Creada" sin respuesta de Inventario) | `{orderId, elapsedSeconds}` | Inventario | Propuesto (OP-04) |
+| `ordenes.platillo_intermedio.preparado` | `POST /intermediate-dishes` | — | Inventario | **Descartado / NO-GO (ADR-0011)** |
 
-> **Por qué `ordenes.comanda.mermada` es un solo evento con un campo `motivo`, y no dos eventos distintos:** tanto "Mermada" como "Anulada" significan lo mismo para Inventario — insumos que ya se consumieron y no se recuperan —, así que reutilizan el mismo evento. Lo único que cambia según el motivo es si además se dispara un cobro (`ordenes.cobro.solicitado`) o no.
+> **Por qué `ordenes.comanda.mermada` es un solo evento con un campo `reason`, y no dos eventos distintos:** tanto "Mermada" como "Anulada" significan lo mismo para Inventario — insumos que ya se consumieron y no se recuperan —, así que reutilizan el mismo evento. Lo único que cambia según el motivo es si además se dispara un cobro (`orders.charge.requested`) o no.
 >
 > **Por qué "Anulada" siempre implica la comanda completa:** al no admitir anulación parcial, el evento de merma publicado para "Anulada" siempre cubre la totalidad de los `itemsAfectados` de la comanda — nunca un subconjunto. Esto es justamente lo que evita el caso borde de una comanda con una mezcla de platillos "Mermados" (con cobro) y "Anulados" (sin cobro) dentro de la misma comanda.
 
 ### 4.3 Eventos que este microservicio CONSUME
 
-| Evento consumido | Origen | Efecto en Órdenes |
-|---|---|---|
-| `sala.dining_session.iniciada` | Sala | Crea el registro base de la orden ("Creada"), usando `sessionId` como correlación |
-| `inventario.stock.reservado` | Inventario | "Creada" → **"EnPreparacion"**; envía la comanda a la cola del KDS |
-| `inventario.stock.insuficiente` | Inventario | "Creada" → **"Rechazada"**; alerta visual al mesero |
-| `menu.platillo.precio_actualizado` | Catálogo y Menú | Actualiza el precio en la vista local materializada |
-| `menu.catalogo.actualizado` | Catálogo y Menú | Actualiza disponibilidad/categoría/estación en la vista local — es lo que impide que el mesero pueda seleccionar un platillo no disponible |
-| `pagos.pago.completado` | Pagos y Facturación | "Entregada" **o** "Mermada" → **"Pagada"** (estado final); la comanda deja de listarse en el KDS |
+| Evento consumido | Origen | Efecto en Órdenes | Estado del contrato |
+|---|---|---|---|
+| `sala.dining_session.iniciada` (`dining.session.started`) | Sala | Crea el registro base de la orden ("Creada"), usando `sessionId` como correlación | Confirmado |
+| `inventario.stock.reservado` | Inventario | "Creada" → **"EnPreparacion"**; estampa `in_preparation_at` y envía la comanda a la cola del KDS | Confirmado |
+| `inventario.stock.insuficiente` | Inventario | "Creada" → **"Rechazada"**; alerta visual al mesero | Confirmado |
+| `menu.platillo.precio_actualizado` | Catálogo y Menú | Actualiza el precio en la vista local materializada | Confirmado |
+| `menu.catalogo.actualizado` | Catálogo y Menú | Actualiza disponibilidad/categoría/estación en la vista local — es lo que impide que el mesero pueda seleccionar un platillo no disponible | Confirmado |
+| `pagos.pago.completado` (`payments.payment.completed`) | Pagos y Facturación | "Entregada" **o** "Mermada" → **"Pagada"** (estado final); la comanda deja de listarse en el KDS | **Confirmado (Contrato Edwin)** |
 
 ### 4.4 Idempotencia
 - `orderId + eventId`: creación, reserva, consumo, cancelación, merma/anulación, expiración.
