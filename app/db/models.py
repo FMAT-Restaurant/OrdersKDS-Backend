@@ -58,6 +58,7 @@ class Order(Base):
     in_preparation_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    dining_session_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True, unique=True)
     responsible_waiter_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
 
     items: Mapped[list[OrderItem]] = relationship(
