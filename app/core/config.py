@@ -37,6 +37,11 @@ class OutboxWorkerSettings:
     batch_size: int = 100
 
 
+def get_redis_url() -> str:
+    """Return the Redis URL used by the catalog projection."""
+    return os.getenv("REDIS_URL", "redis://localhost:6379/0").strip()
+
+
 def _get_required_env(key: str) -> str:
     """Read a required environment variable or raise an error.
 

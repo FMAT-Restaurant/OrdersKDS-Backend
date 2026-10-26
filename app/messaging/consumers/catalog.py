@@ -27,6 +27,13 @@ def _as_bool(value: Any) -> bool | None:
     return bool(value)
 
 
+def _catalog_item_payload(data: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    items = data.get("items")
+    if isinstance(items, list):
+        return [item for item in items if isinstance(item, Mapping)]
+    return [data]
+
+
 class CatalogConsumer:
     """Translate menu events while keeping the anti-corruption boundary explicit."""
 
@@ -38,38 +45,63 @@ class CatalogConsumer:
         data = payload.get("data", payload)
         if not isinstance(data, Mapping):
             return False
-        dish_id = _first(data, "platilloId", "dishId", "id")
-        if dish_id is None:
-            return False
+        stored = False
+        for item in _catalog_item_payload(data):
+            dish_id = _first(item, "platilloId", "dishId", "plateId", "itemId", "id")
+            if dish_id is None:
+                continue
 
-        common = {
-            "updated_at": _first(data, "updated_at", "updatedAt"),
-            "menu_version": _first(data, "menuVersion", "menu_version"),
-        }
-        if event_name == EventName.MENU_DISH_PRICE_UPDATED:
-            return await self._repository.upsert(
-                dish_id,
-                price=_first(data, "precio_actualizado", "precioActualizado", "price"),
-                **common,
-            )
-        if event_name == EventName.MENU_CATALOG_UPDATED:
-            return await self._repository.upsert(
-                dish_id,
-                price=_first(data, "precio_actualizado", "precioActualizado", "price"),
-                available=_as_bool(_first(data, "disponibilidad", "available")),
-                category=_first(data, "categoria", "category"),
-                station=_first(data, "estacion", "station"),
-                preparation_time_text=_first(
-                    data, "tiempoPreparacion", "preparation_time_text", "preparationTime"
-                ),
-                **common,
-            )
-        if event_name in (
-            EventName.MENU_DISH_AVAILABILITY_UPDATED,
-            EventName.MENU_DISH_STATE_UPDATED,
-        ):
-            available = _first(data, "disponibilidad", "available", "disponible")
-            if available is None:
-                available = _first(data, "estado", "state") not in ("UNAVAILABLE", "unavailable")
-            return await self._repository.upsert(dish_id, available=_as_bool(available), **common)
-        return False
+            common = {
+                "updated_at": _first(item, "updated_at", "updatedAt")
+                or _first(data, "updated_at", "updatedAt"),
+                "menu_version": _first(item, "menuVersion", "menu_version")
+                or _first(data, "menuVersion", "menu_version"),
+            }
+            if event_name == EventName.MENU_DISH_PRICE_UPDATED:
+                stored = (
+                    await self._repository.upsert(
+                        dish_id,
+                        price=_first(
+                            item, "precio_actualizado", "precioActualizado", "basePrice", "price"
+                        ),
+                        **common,
+                    )
+                    or stored
+                )
+            elif event_name == EventName.MENU_CATALOG_UPDATED:
+                stored = (
+                    await self._repository.upsert(
+                        dish_id,
+                        price=_first(
+                            item, "precio_actualizado", "precioActualizado", "basePrice", "price"
+                        ),
+                        available=_as_bool(
+                            _first(item, "disponibilidad", "available", "disponible")
+                        ),
+                        category=_first(item, "categoria", "category"),
+                        station=_first(item, "estacion", "station"),
+                        preparation_time_text=_first(
+                            item,
+                            "tiempoPreparacion",
+                            "preparation_time_text",
+                            "preparationTime",
+                        ),
+                        **common,
+                    )
+                    or stored
+                )
+            elif event_name in (
+                EventName.MENU_DISH_AVAILABILITY_UPDATED,
+                EventName.MENU_DISH_STATE_UPDATED,
+            ):
+                available = _first(item, "disponibilidad", "available", "disponible")
+                if available is None:
+                    available = _first(item, "estado", "state") not in (
+                        "UNAVAILABLE",
+                        "unavailable",
+                    )
+                stored = (
+                    await self._repository.upsert(dish_id, available=_as_bool(available), **common)
+                    or stored
+                )
+        return stored

@@ -49,6 +49,43 @@ async def test_catalog_event_maps_anticorruption_aliases() -> None:
 
 
 @pytest.mark.asyncio
+async def test_catalog_event_projects_contract_items_batch_and_aliases() -> None:
+    redis = AsyncMock()
+    redis.hgetall.return_value = {}
+
+    stored = await CatalogConsumer(CatalogRepository(redis)).consume(
+        EventName.MENU_CATALOG_UPDATED,
+        {
+            "items": [
+                {
+                    "plateId": "plate-1",
+                    "basePrice": 14.5,
+                    "available": True,
+                    "station": "  Grill Á  ",
+                    "preparationTime": "15 min",
+                },
+                {
+                    "itemId": "item-2",
+                    "basePrice": "8.00",
+                    "disponible": False,
+                    "estacion": "Bar",
+                    "tiempoPreparacion": "5 min",
+                },
+            ],
+        },
+    )
+
+    assert stored is True
+    assert redis.hset.await_count == 2
+    first_mapping = redis.hset.await_args_list[0].kwargs["mapping"]
+    second_mapping = redis.hset.await_args_list[1].kwargs["mapping"]
+    assert first_mapping["price"] == "14.5"
+    assert first_mapping["station"] == "grill a"
+    assert second_mapping["price"] == "8.00"
+    assert second_mapping["available"] == "false"
+
+
+@pytest.mark.asyncio
 async def test_price_event_and_updated_at_are_projected() -> None:
     redis = AsyncMock()
     redis.hgetall.return_value = {}
