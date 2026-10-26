@@ -11,7 +11,12 @@ from uuid import uuid4
 
 import pytest
 
-from app.messaging.events import DishPreparedEvent, EventName, OrderCreatedEvent
+from app.messaging.events import (
+    DishPreparedEvent,
+    EventName,
+    OrderCreatedEvent,
+    OrderCreatedItem,
+)
 from app.messaging.validator import EventContractError, load_schema, validate_event_payload
 
 
@@ -19,6 +24,17 @@ from app.messaging.validator import EventContractError, load_schema, validate_ev
 @pytest.mark.requirement("RNF-13", "CT-23")
 def test_order_created_event_payload_validates_against_contract() -> None:
     event = OrderCreatedEvent.for_order(uuid4(), correlation_id=uuid4())
+    payload = event.model_dump(mode="json", by_alias=True)
+
+    validate_event_payload(EventName.ORDER_CREATED, payload)
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("RF-32", "RNF-13")
+def test_order_created_event_payload_includes_inventory_items() -> None:
+    event = OrderCreatedEvent.for_order(uuid4()).model_copy(
+        update={"items": [OrderCreatedItem(plateId="dish-1", quantity=2)]}
+    )
     payload = event.model_dump(mode="json", by_alias=True)
 
     validate_event_payload(EventName.ORDER_CREATED, payload)

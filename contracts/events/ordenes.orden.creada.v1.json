@@ -6,7 +6,8 @@
   "type": "object",
   "required": [
     "eventId",
-    "orderId"
+    "orderId",
+    "items"
   ],
   "properties": {
     "eventId": {
@@ -25,6 +26,28 @@
         "null"
       ],
       "description": "Correlation identifier propagated across microservices."
+    },
+    "items": {
+      "type": "array",
+      "description": "Order dishes and quantities that Inventory must reserve.",
+      "items": {
+        "type": "object",
+        "required": [
+          "plateId",
+          "quantity"
+        ],
+        "properties": {
+          "plateId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": true
+      }
     }
   },
   "additionalProperties": true

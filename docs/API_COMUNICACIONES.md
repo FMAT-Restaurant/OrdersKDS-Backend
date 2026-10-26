@@ -55,6 +55,8 @@ Los documentos fuente describen las capacidades funcionales y las vistas de UI, 
 | `PATCH` | `/orders/{orderId}/items/{itemId}/redo` | 5 | Regresa un ítem de "Entregado" a "Pendiente"; requiere cuerpo `{ "note": "..." }` obligatorio (la orden conserva "Entregada", OP-12) |
 | `POST` | `/orders/{orderId}/request-bill` | — | Dispara `ordenes.cuenta.solicitada` |
 
+La confirmación responde `200` sin esperar a Inventario. Una orden en `CREATED` sin confirmar fija `confirmed_at` y `confirmed_by` y publica una sola vez el evento con `items[]`; reintentos y órdenes ya confirmadas responden `200` sin duplicar el evento. Los estados terminales (`CANCELLED`, `REJECTED`, `EXPIRED`, `VOIDED`) responden `409 INVALID_STATE_TRANSITION`.
+
 **Vista 3 — Pantalla KDS (cocina: monitor táctil principal, teclado/Bump Bar secundario)**
 | Método | Ruta propuesta | Requisito | Nota |
 |---|---|---|---|

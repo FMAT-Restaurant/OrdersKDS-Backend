@@ -19,11 +19,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.error_codes import ErrorCode
-from app.db.models import Order, OrderItem
+from app.db.models import Order, OrderItem, Outbox
 from app.db.session import get_session
 from app.domain.errors import DishUnavailableError
 from app.domain.order_status import OrderStatus
 from app.main import app
+from app.messaging.events import EventName, OrderCreatedEvent
 from app.services.catalog import CatalogValidatorProtocol, get_catalog_validator
 
 pytestmark = [
@@ -41,12 +42,15 @@ class FakeAsyncSession:
 
     def __init__(self, db: dict[UUID, Order] | None = None) -> None:
         self.db: dict[UUID, Order] = db if db is not None else {}
+        self.outbox: list[Outbox] = []
         self.committed = False
         self.rolled_back = False
 
     def add(self, instance: object) -> None:
         if isinstance(instance, Order):
             self.db[instance.public_id] = instance
+        elif isinstance(instance, Outbox):
+            self.outbox.append(instance)
 
     async def commit(self) -> None:
         self.committed = True
@@ -637,6 +641,213 @@ def test_update_order_items_role_matrix(
     resp_unauth = client.patch(f"/orders/{order.public_id}/items", json=payload)
     assert resp_unauth.status_code == 401
     assert resp_unauth.json()["error"]["code"] == ErrorCode.UNAUTHENTICATED
+
+
+# ==============================================================================
+# POST /orders/{orderId}/confirm
+# ==============================================================================
+
+
+def test_confirm_order_writes_confirmation_and_stock_event_atomically(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+) -> None:
+    """Confirm a draft and stage its deterministic stock event in the same transaction."""
+    order = Order(public_id=uuid4(), status=OrderStatus.CREATED)
+    order.items.append(
+        OrderItem(
+            public_id=uuid4(),
+            dish_id="dish-1",
+            name="Tacos",
+            quantity=2,
+            unit_price=Decimal("10.00"),
+        )
+    )
+    test_db[order.public_id] = order
+
+    response = client.post(
+        f"/orders/{order.public_id}/confirm",
+        headers=auth_headers("waiter"),
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == OrderStatus.CREATED
+    assert data["confirmedAt"] is not None
+    assert data["confirmedBy"] is not None
+    assert data["awaitingStockConfirmation"] is True
+    assert fake_session.committed is True
+    assert len(fake_session.outbox) == 1
+
+    event = fake_session.outbox[0]
+    assert event.event_type == EventName.ORDER_CREATED
+    assert event.event_id == OrderCreatedEvent.for_order(order.public_id).event_id
+    assert event.payload["items"] == [{"plateId": "dish-1", "quantity": 2}]
+
+
+def test_confirm_order_retry_does_not_stage_a_second_event(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+) -> None:
+    """A repeated confirmation leaves the event and confirmation timestamp unchanged."""
+    order = Order(public_id=uuid4(), status=OrderStatus.CREATED)
+    test_db[order.public_id] = order
+    url = f"/orders/{order.public_id}/confirm"
+
+    first_response = client.post(url, headers=auth_headers("waiter"))
+    original_confirmation_time = order.confirmed_at
+    second_response = client.post(url, headers=auth_headers("admin"))
+
+    assert first_response.status_code == second_response.status_code == 200
+    assert order.confirmed_at == original_confirmation_time
+    assert len(fake_session.outbox) == 1
+
+
+@pytest.mark.parametrize(
+    "existing_status",
+    [
+        OrderStatus.IN_PREPARATION,
+        OrderStatus.DELIVERED,
+        OrderStatus.WASTED,
+        OrderStatus.PAID,
+    ],
+)
+def test_confirm_order_is_idempotent_after_confirmation(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+    existing_status: OrderStatus,
+) -> None:
+    """Return the current state without another event after the order advances."""
+    order = Order(
+        public_id=uuid4(),
+        status=existing_status,
+        confirmed_at=datetime.now(UTC),
+    )
+    test_db[order.public_id] = order
+
+    response = client.post(
+        f"/orders/{order.public_id}/confirm",
+        headers=auth_headers("waiter"),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == existing_status
+    assert fake_session.outbox == []
+    assert fake_session.committed is False
+
+
+def test_confirm_order_with_existing_timestamp_fills_actor_without_republishing(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+) -> None:
+    """Preserve an existing confirmation time while completing actor attribution."""
+    confirmed_at = datetime.now(UTC)
+    order = Order(
+        public_id=uuid4(),
+        status=OrderStatus.CREATED,
+        confirmed_at=confirmed_at,
+    )
+    test_db[order.public_id] = order
+
+    response = client.post(
+        f"/orders/{order.public_id}/confirm",
+        headers=auth_headers("waiter"),
+    )
+
+    assert response.status_code == 200
+    assert order.confirmed_at == confirmed_at
+    assert order.confirmed_by is not None
+    assert fake_session.outbox == []
+    assert fake_session.committed is True
+
+
+@pytest.mark.parametrize(
+    "terminal_status",
+    [
+        OrderStatus.CANCELLED,
+        OrderStatus.REJECTED,
+        OrderStatus.EXPIRED,
+        OrderStatus.VOIDED,
+    ],
+)
+def test_confirm_order_rejects_terminal_states(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+    terminal_status: OrderStatus,
+) -> None:
+    """Reject confirmation for terminal order states without staging an event."""
+    order = Order(public_id=uuid4(), status=terminal_status)
+    test_db[order.public_id] = order
+
+    response = client.post(
+        f"/orders/{order.public_id}/confirm",
+        headers=auth_headers("waiter"),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == ErrorCode.INVALID_STATE_TRANSITION
+    assert fake_session.outbox == []
+    assert fake_session.committed is False
+
+
+def test_confirm_order_rejects_item_without_inventory_identifier(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+) -> None:
+    """Reject malformed legacy items before changing state or writing the outbox."""
+    order = Order(public_id=uuid4(), status=OrderStatus.CREATED)
+    order.items.append(OrderItem(public_id=uuid4(), name="Tacos", quantity=1))
+    test_db[order.public_id] = order
+
+    response = client.post(
+        f"/orders/{order.public_id}/confirm",
+        headers=auth_headers("waiter"),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == ErrorCode.INVALID_STATE_TRANSITION
+    assert order.confirmed_at is None
+    assert fake_session.outbox == []
+    assert fake_session.committed is False
+
+
+def test_confirm_order_not_found_and_role_guards(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Require the waiter role and return 404 when the target order is absent."""
+    missing_id = uuid4()
+    assert (
+        client.post(
+            f"/orders/{missing_id}/confirm",
+            headers=auth_headers("waiter"),
+        ).status_code
+        == 404
+    )
+
+    order = Order(public_id=uuid4(), status=OrderStatus.CREATED)
+    test_db[order.public_id] = order
+    forbidden = client.post(
+        f"/orders/{order.public_id}/confirm",
+        headers=auth_headers("kitchen"),
+    )
+    assert forbidden.status_code == 403
+    assert forbidden.json()["error"]["code"] == ErrorCode.FORBIDDEN_ROLE
+
+    assert client.post(f"/orders/{order.public_id}/confirm").status_code == 401
 
 
 # ==============================================================================

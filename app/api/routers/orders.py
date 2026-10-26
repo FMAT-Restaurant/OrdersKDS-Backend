@@ -10,6 +10,7 @@ Satisfies: RF-12, RF-13, RF-14, RF-15, RF-17, RF-23, RNF-03, RNF-09, RNF-13
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
@@ -24,7 +25,9 @@ from app.db.session import get_session
 from app.domain.errors import InvalidStateTransitionError, OrderNotFoundError
 from app.domain.order_status import ItemStatus, OrderStatus
 from app.domain.roles import Role
+from app.messaging.events import OrderCreatedEvent, OrderCreatedItem
 from app.repositories.orders import OrderRepository
+from app.repositories.outbox import OutboxRepository
 from app.services.catalog import CatalogValidatorProtocol, get_catalog_validator
 
 logger = logging.getLogger(__name__)
@@ -179,6 +182,86 @@ async def update_order_items(
         auth.user_id,
         order.total_amount,
     )
+    return OrderResponse.from_model(order)
+
+
+@router.post(
+    "/{orderId}/confirm",
+    status_code=status.HTTP_200_OK,
+    summary="Confirm order and request stock reservation",
+    description=(
+        "Confirms a CREATED order once, records the authenticated waiter, and stages "
+        "ordenes.orden.creada in the transactional outbox."
+    ),
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "model": ErrorResponse,
+            "description": "The order does not exist.",
+        },
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorResponse,
+            "description": "The order is in a terminal state or has invalid items.",
+        },
+    },
+)
+async def confirm_order(
+    order_id: OrderIdPath,
+    auth: Annotated[AuthContext, Depends(require_roles(Role.WAITER, Role.ADMIN))],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> OrderResponse:
+    """Confirm a draft order and stage its stock request atomically (RF-32, RNF-01).
+
+    The row lock serializes simultaneous confirmations. Only the first request stages
+    the deterministic order-created event; retries return the current order unchanged.
+
+    Args:
+        order_id: Public UUID of the order to confirm.
+        auth: Authenticated caller context.
+        session: Active database session shared by the order and outbox repositories.
+
+    Returns:
+        The current Order representation.
+
+    Raises:
+        OrderNotFoundError: If the order does not exist (404).
+        InvalidStateTransitionError: If the order cannot be confirmed (409).
+    """
+    repo = OrderRepository(session)
+    order = await repo.get_for_update(order_id)
+    actor_uuid = _parse_actor_uuid(auth.user_id)
+
+    if order.status != OrderStatus.CREATED:
+        if order.status in {
+            OrderStatus.IN_PREPARATION,
+            OrderStatus.DELIVERED,
+            OrderStatus.WASTED,
+            OrderStatus.PAID,
+        }:
+            return OrderResponse.from_model(order)
+        raise InvalidStateTransitionError(order.status, "ORDER_CONFIRMED")
+
+    if order.confirmed_at is not None:
+        if order.confirmed_by is None:
+            order.confirmed_by = actor_uuid
+            repo.save(order)
+            await session.commit()
+        return OrderResponse.from_model(order)
+
+    event_items: list[OrderCreatedItem] = []
+    for item in order.items:
+        if not item.dish_id:
+            raise InvalidStateTransitionError(order.status, "ORDER_ITEM_MISSING_DISH_ID")
+        event_items.append(OrderCreatedItem(plateId=item.dish_id, quantity=item.quantity))
+
+    order.confirmed_at = datetime.now(UTC)
+    order.confirmed_by = actor_uuid
+    repo.save(order)
+
+    event = OrderCreatedEvent.for_order(order.public_id).model_copy(update={"items": event_items})
+    OutboxRepository(session).add(event)
+    await session.commit()
+
+    logger.info("Confirmed order %s by waiter %s", order.public_id, auth.user_id)
     return OrderResponse.from_model(order)
 
 

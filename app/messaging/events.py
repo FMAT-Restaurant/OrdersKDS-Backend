@@ -64,10 +64,20 @@ class OrderEvent(BaseModel):
         return cls(eventId=event_id, orderId=order_id, correlationId=correlation_id)
 
 
+class OrderCreatedItem(BaseModel):
+    """Dish and quantity requested from Inventory for an order."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    plate_id: str = Field(alias="plateId", min_length=1)
+    quantity: int = Field(gt=0)
+
+
 class OrderCreatedEvent(OrderEvent):
     """Event emitted when an order enters the inventory reservation flow."""
 
     event_name: ClassVar[EventName] = EventName.ORDER_CREATED
+    items: list[OrderCreatedItem] = Field(default_factory=list)
 
 
 class DishPreparedEvent(OrderEvent):
