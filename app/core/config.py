@@ -52,6 +52,9 @@ class SagaTimeoutSettings:
 
     timeout_seconds: int
     watcher_interval_seconds: float = DEFAULT_SAGA_WATCHER_INTERVAL_SECONDS
+def get_redis_url() -> str:
+    """Return the Redis URL used by the catalog projection."""
+    return os.getenv("REDIS_URL", "redis://localhost:6379/0").strip()
 
 
 def _get_required_env(key: str) -> str:

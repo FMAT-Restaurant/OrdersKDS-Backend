@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from app.db import session as db_session
 from app.domain.errors import DishUnavailableError
 from app.services.catalog import (
+    CatalogRepositoryValidator,
     DefaultCatalogValidator,
     get_catalog_validator,
 )
@@ -40,7 +41,7 @@ async def test_default_catalog_validator_lifecycle() -> None:
 
 def test_get_catalog_validator_returns_singleton() -> None:
     validator = get_catalog_validator()
-    assert isinstance(validator, DefaultCatalogValidator)
+    assert isinstance(validator, CatalogRepositoryValidator)
 
 
 def test_get_database_url_prefers_env_var() -> None:
