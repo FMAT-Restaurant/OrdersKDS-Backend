@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://restaurant.example.com/contracts/events/ordenes.platillo.preparado.v1.json",
+  "title": "DishPreparedEvent",
+  "description": "Repeatable event emitted when a kitchen dish is marked prepared (RF-10, RF-19).",
+  "type": "object",
+  "required": [
+    "eventId",
+    "orderId"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "description": "Unique identifier of this preparation emission.",
+      "minLength": 1
+    },
+    "orderId": {
+      "type": "string",
+      "description": "Public identifier of the affected order.",
+      "minLength": 1
+    },
+    "itemId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Public identifier of the prepared order item."
+    },
+    "correlationId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Correlation identifier propagated across microservices."
+    }
+  },
+  "additionalProperties": true
+}

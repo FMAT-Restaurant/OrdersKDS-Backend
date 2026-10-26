@@ -7,3 +7,4 @@ aio-pika==10.1.0
 asyncpg==0.31.0
 redis==8.1.0
 pyjwt==2.15.1  # reads (does not verify) the JWT claims forwarded by the Gateway, see ADR-0011
+jsonschema==4.26.0  # validates published and consumed event payloads against contracts/events schemas (RNF-13)

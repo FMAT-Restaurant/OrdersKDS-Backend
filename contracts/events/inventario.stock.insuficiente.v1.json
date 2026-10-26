@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://restaurant.example.com/contracts/events/inventario.stock.insuficiente.v1.json",
+  "title": "StockInsufficientEvent",
+  "description": "Event emitted by Inventory rejecting order due to lack of ingredients (RF-34, RNF-02).",
+  "type": "object",
+  "required": [
+    "eventId",
+    "orderId"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "description": "Unique deterministic identifier of this event emission.",
+      "minLength": 1
+    },
+    "orderId": {
+      "type": "string",
+      "description": "Public identifier of the affected order.",
+      "minLength": 1
+    },
+    "correlationId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Correlation identifier propagated across microservices."
+    },
+    "faltantes": {
+      "type": "array",
+      "description": "List of missing ingredients (legacy Spanish name).",
+      "items": {
+        "type": "string"
+      }
+    },
+    "missingIngredients": {
+      "type": "array",
+      "description": "List of missing ingredients (English convention).",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": true
+}

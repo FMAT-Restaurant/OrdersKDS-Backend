@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://restaurant.example.com/contracts/events/ordenes.orden.cancelada.v1.json",
+  "title": "OrderCancelledEvent",
+  "description": "Event emitted when an order is cancelled while created.",
+  "type": "object",
+  "required": [
+    "eventId",
+    "orderId"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "orderId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "correlationId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": true
+}

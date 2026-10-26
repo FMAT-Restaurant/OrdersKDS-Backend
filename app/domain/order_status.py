@@ -2,10 +2,10 @@
 
 The only way to change an order's status is through
 :func:`ensure_transition_allowed`, which enforces the allowed-transition
-table below. Item sub-states live in :class:`ItemStatus` and are never
-mixed with :class:`OrderStatus`.
+table below. Item sub-states live in :class:`ItemStatus` and are governed
+by :func:`ensure_item_transition_allowed`.
 
-Satisfies: RF-18, RF-24, RF-26, RF-28, RF-33, RF-34, RF-35 (ERS 1.3)
+Satisfies: RF-09, RF-10, RF-11, RF-18, RF-22, RF-24, RF-26, RF-28, RF-33, RF-34, RF-35 (ERS 1.3)
 """
 
 from __future__ import annotations
@@ -63,6 +63,12 @@ _ALLOWED_TRANSITIONS: dict[OrderStatus, frozenset[OrderStatus]] = {
     OrderStatus.EXPIRED: frozenset(),
 }
 
+_ALLOWED_ITEM_TRANSITIONS: dict[ItemStatus, frozenset[ItemStatus]] = {
+    ItemStatus.PENDING: frozenset({ItemStatus.READY}),
+    ItemStatus.READY: frozenset({ItemStatus.DELIVERED}),
+    ItemStatus.DELIVERED: frozenset({ItemStatus.PENDING}),
+}
+
 
 def ensure_transition_allowed(current: OrderStatus, target: OrderStatus) -> None:
     """Raise if ``current -> target`` is not part of the lifecycle.
@@ -75,4 +81,23 @@ def ensure_transition_allowed(current: OrderStatus, target: OrderStatus) -> None
         InvalidStateTransitionError: If the transition is not allowed.
     """
     if target not in _ALLOWED_TRANSITIONS[current]:
+        raise InvalidStateTransitionError(current=current, target=target)
+
+
+def ensure_item_transition_allowed(current: ItemStatus, target: ItemStatus) -> None:
+    """Raise if ``current -> target`` is not part of the item lifecycle (RF-09, RF-11, RF-22).
+
+    Allowed item transitions:
+    - PENDING -> READY (kitchen marks item ready)
+    - READY -> DELIVERED (automatic when all items ready and order transitions)
+    - DELIVERED -> PENDING (redo dish from kitchen, TASK-32)
+
+    Args:
+        current: Status the item is currently in.
+        target: Status that was requested.
+
+    Raises:
+        InvalidStateTransitionError: If the transition is not allowed.
+    """
+    if target not in _ALLOWED_ITEM_TRANSITIONS.get(current, frozenset()):
         raise InvalidStateTransitionError(current=current, target=target)
