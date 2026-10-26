@@ -59,6 +59,7 @@ class Order(Base):
     in_preparation_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    dining_session_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True, unique=True)
     responsible_waiter_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     table_number: Mapped[int | None] = mapped_column(nullable=True, index=True)
     is_takeaway: Mapped[bool] = mapped_column(nullable=False, default=False)
