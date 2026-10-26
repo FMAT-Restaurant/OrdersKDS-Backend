@@ -1,12 +1,14 @@
 """Tests for Floor dining-session order creation."""
 
-from unittest.mock import AsyncMock, Mock
+from typing import cast
+from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
 import pytest
 
 from app.db.models import Order
 from app.domain.order_status import OrderStatus
+from app.messaging.consumers.base import EventConsumerDispatcher
 from app.messaging.consumers.dining_session import handle_dining_session_created
 from app.messaging.events import DiningSessionCreatedMessage, EventName
 
@@ -38,6 +40,45 @@ def test_dining_session_message_accepts_num_comensales_and_nested_payload() -> N
     )
     assert nested.diners == 2
     assert nested.waiter_id is None
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_routes_floor_dining_session_event() -> None:
+    uow = Mock()
+    dispatcher = EventConsumerDispatcher(
+        session_factory=Mock(),
+        uow_factory=lambda _factory: uow,
+    )
+    session_id = uuid4()
+    waiter_id = uuid4()
+    payload = {
+        "eventId": str(uuid4()),
+        "eventType": EventName.DINING_SESSION_STARTED,
+        "data": {
+            "sessionId": str(session_id),
+            "meseroId": str(waiter_id),
+            "comensales": 2,
+        },
+    }
+
+    with patch(
+        "app.messaging.consumers.base.handle_dining_session_created",
+        new_callable=AsyncMock,
+        return_value=True,
+    ) as handler:
+        assert (
+            await dispatcher.dispatch_raw(
+                payload,
+                queue_name="sala.dining_session.iniciada.queue",
+            )
+            is True
+        )
+
+    assert handler.await_args is not None
+    message = cast(DiningSessionCreatedMessage, handler.await_args.args[0])
+    assert isinstance(message, DiningSessionCreatedMessage)
+    assert message.session_id == session_id
+    assert message.waiter_id == waiter_id
 
 
 @pytest.mark.asyncio

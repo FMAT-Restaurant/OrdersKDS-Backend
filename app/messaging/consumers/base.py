@@ -17,10 +17,12 @@ from typing import Any, Protocol
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.messaging.consumers.dining_session import handle_dining_session_created
 from app.messaging.consumers.payment_completed import handle_payment_completed
 from app.messaging.consumers.stock_insufficient import handle_stock_insufficient
 from app.messaging.consumers.stock_reserved import handle_stock_reserved
 from app.messaging.events import (
+    DiningSessionCreatedMessage,
     EventName,
     PaymentCompletedMessage,
     StockInsufficientMessage,
@@ -131,6 +133,15 @@ async def _execute_typed_handler(
     if any(k in target_lower for k in payment_keys):
         msg_pay = PaymentCompletedMessage.model_validate(parsed_data)
         return await handle_payment_completed(msg_pay, uow, notifier=notifier)
+
+    dining_session_keys = (
+        EventName.DINING_SESSION_STARTED,
+        "dining_session_started",
+        "dining.session.iniciada",
+    )
+    if any(k in target_lower for k in dining_session_keys):
+        msg_dining_session = DiningSessionCreatedMessage.model_validate(parsed_data)
+        return await handle_dining_session_created(msg_dining_session, uow)
 
     raise ValueError(f"Unknown or unmapped event type: {target_event}")
 
