@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Self
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -51,7 +51,7 @@ class OrderEvent(BaseModel):
         order_id: UUID,
         *,
         correlation_id: UUID | None = None,
-    ) -> OrderEvent:
+    ) -> Self:
         """Build an event whose id is stable across retries and re-entrance."""
         event_type = getattr(cls, "event_name", EventName.ORDER_CREATED)
         event_id = (
@@ -71,6 +71,17 @@ class DishPreparedEvent(OrderEvent):
 
     event_name: ClassVar[EventName] = EventName.DISH_PREPARED
     unique_per_order: ClassVar[bool] = False
+
+
+class OrderExpiredEvent(OrderEvent):
+    """Event emitted when Inventory does not answer before the saga timeout.
+
+    The identifier is deterministic per order, so retries or concurrent scans
+    stage at most one outbox row for the same expiration (RNF-02, OP-01).
+    """
+
+    event_name: ClassVar[EventName] = EventName.ORDER_EXPIRED
+    elapsed_seconds: int | None = Field(default=None, alias="elapsedSeconds")
 
 
 # ---------------------------------------------------------------------------

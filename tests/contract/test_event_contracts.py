@@ -12,7 +12,12 @@ from uuid import uuid4
 import jsonschema
 import pytest
 
-from app.messaging.events import DishPreparedEvent, EventName, OrderCreatedEvent
+from app.messaging.events import (
+    DishPreparedEvent,
+    EventName,
+    OrderCreatedEvent,
+    OrderExpiredEvent,
+)
 from app.messaging.validator import EventContractError, validate_event_payload
 
 _CONTRACTS_DIR = Path(__file__).resolve().parents[2] / "contracts" / "events"
@@ -48,6 +53,17 @@ def test_dish_prepared_event_satisfies_contract() -> None:
     payload = event.model_dump(mode="json", by_alias=True)
 
     validate_event_payload(EventName.DISH_PREPARED, payload)
+
+
+@pytest.mark.contract
+@pytest.mark.requirement("RNF-13", "CT-23", "RF-35")
+def test_order_expired_event_satisfies_contract() -> None:
+    """Verify OrderExpiredEvent payload validates against its contract."""
+    event = OrderExpiredEvent.for_order(uuid4())
+    event.elapsed_seconds = 60
+    payload = event.model_dump(mode="json", by_alias=True)
+
+    validate_event_payload(EventName.ORDER_EXPIRED, payload)
 
 
 @pytest.mark.contract

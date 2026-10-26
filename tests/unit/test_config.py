@@ -7,7 +7,12 @@ from __future__ import annotations
 
 import pytest
 
-from app.core.config import get_outbox_worker_settings, get_rabbitmq_settings
+from app.core.config import (
+    DEFAULT_SAGA_WATCHER_INTERVAL_SECONDS,
+    get_outbox_worker_settings,
+    get_rabbitmq_settings,
+    get_saga_timeout_settings,
+)
 
 
 @pytest.mark.unit
@@ -87,3 +92,55 @@ def test_outbox_worker_settings_defaults_and_overrides(
     fallback = get_outbox_worker_settings()
     assert fallback.poll_interval_seconds == 1.0
     assert fallback.batch_size == 100
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("OP-01", "RNF-01")
+def test_saga_timeout_settings_fails_when_variable_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SAGA_TIMEOUT_SECONDS", raising=False)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Missing required environment variable: SAGA_TIMEOUT_SECONDS",
+    ):
+        get_saga_timeout_settings()
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("OP-01", "RNF-01")
+@pytest.mark.parametrize("raw_timeout", ["invalid", "0", "-10"])
+def test_saga_timeout_settings_rejects_invalid_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+    raw_timeout: str,
+) -> None:
+    monkeypatch.setenv("SAGA_TIMEOUT_SECONDS", raw_timeout)
+
+    with pytest.raises(RuntimeError, match="Invalid SAGA_TIMEOUT_SECONDS"):
+        get_saga_timeout_settings()
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("OP-01", "RNF-01")
+def test_saga_timeout_settings_uses_interval_default_and_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SAGA_TIMEOUT_SECONDS", "60")
+    monkeypatch.delenv("SAGA_WATCHER_INTERVAL_SECONDS", raising=False)
+
+    defaults = get_saga_timeout_settings()
+    assert defaults.timeout_seconds == 60
+    assert defaults.watcher_interval_seconds == DEFAULT_SAGA_WATCHER_INTERVAL_SECONDS
+
+    monkeypatch.setenv("SAGA_WATCHER_INTERVAL_SECONDS", "2.5")
+    custom = get_saga_timeout_settings()
+    assert custom.watcher_interval_seconds == 2.5
+
+    monkeypatch.setenv("SAGA_WATCHER_INTERVAL_SECONDS", "not-a-number")
+    fallback = get_saga_timeout_settings()
+    assert fallback.watcher_interval_seconds == DEFAULT_SAGA_WATCHER_INTERVAL_SECONDS
+
+    monkeypatch.setenv("SAGA_WATCHER_INTERVAL_SECONDS", "0")
+    non_positive = get_saga_timeout_settings()
+    assert non_positive.watcher_interval_seconds == DEFAULT_SAGA_WATCHER_INTERVAL_SECONDS

@@ -9,6 +9,7 @@ Satisfies: RF-24, RNF-09
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -67,6 +68,40 @@ class OrderRepository:
     def save(self, order: Order) -> None:
         """Stage an order in the active session."""
         self._session.add(order)
+
+    async def list_awaiting_stock_confirmed_before(
+        self,
+        threshold: datetime,
+        *,
+        limit: int = 100,
+    ) -> list[Order]:
+        """Return confirmed orders still awaiting Inventory whose timer elapsed.
+
+        Drafts (``CREATED`` without ``confirmed_at``) are excluded: a waiter may
+        take minutes to assemble an order without it expiring (RF-35, OP-01).
+
+        Rows are locked with ``SKIP LOCKED`` so concurrent watcher instances do
+        not expire the same order twice.
+
+        Args:
+            threshold: Latest ``confirmed_at`` considered stale.
+            limit: Maximum number of rows to return in one scan.
+
+        Returns:
+            Oldest stale orders first.
+        """
+        result = await self._session.scalars(
+            select(Order)
+            .where(
+                Order.status == OrderStatus.CREATED,
+                Order.confirmed_at.is_not(None),
+                Order.confirmed_at <= threshold,
+            )
+            .order_by(Order.confirmed_at, Order.id)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        return list(result)
 
 
 async def transition_order(
