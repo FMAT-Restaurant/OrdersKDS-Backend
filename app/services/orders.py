@@ -143,9 +143,7 @@ class OrderService:
                     dish_id = item.dish_id
                     if dish_id is None or item.quantity < 1:
                         raise InvalidOrderItemError()
-                    event_items.append(
-                        OrderCreatedItem(plateId=dish_id, quantity=item.quantity)
-                    )
+                    event_items.append(OrderCreatedItem(plateId=dish_id, quantity=item.quantity))
                 event = OrderCreatedEvent.for_order(
                     order.public_id,
                     items=event_items,
