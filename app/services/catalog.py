@@ -6,9 +6,9 @@ Satisfies: RF-17 (Guidelines §3.4, §5.5)
 from __future__ import annotations
 
 import asyncio
+import unicodedata
 from collections.abc import Mapping
 from typing import Any, Protocol, cast
-import unicodedata
 
 from redis.asyncio import Redis
 
