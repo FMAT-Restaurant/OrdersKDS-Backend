@@ -73,8 +73,9 @@ async def test_it13_menu_event_projects_to_catalog_and_blocks_unavailable_dish()
     )
 
     assert unavailable is True
+    validator = CatalogRepositoryValidator(repository)
     with pytest.raises(DishUnavailableError, match="dish-1"):
-        await CatalogRepositoryValidator(repository).validate_dish_available("dish-1")
+        await validator.validate_dish_available("dish-1")
 
 
 @pytest.mark.asyncio
