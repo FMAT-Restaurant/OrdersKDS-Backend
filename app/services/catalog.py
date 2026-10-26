@@ -120,7 +120,7 @@ class _RedisHashAdapter:
 
     async def hgetall(self, name: str) -> dict[object, object]:
         values = await self._redis.hgetall(name)
-        return {key: value for key, value in values.items()}
+        return dict(values.items())
 
     async def hset(self, name: str, mapping: Mapping[str, str]) -> int:
         return await self._redis.hset(name, mapping=cast(Mapping[Any, Any], mapping))

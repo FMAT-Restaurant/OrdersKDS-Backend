@@ -17,7 +17,7 @@ from app.services.catalog import CatalogRepositoryValidator
 
 class InMemoryRedisHash:
     def __init__(self) -> None:
-        self.values: dict[str, dict[str, str]] = {}
+        self.values: dict[str, dict[object, object]] = {}
 
     async def hgetall(self, name: str) -> Mapping[object, object]:
         return self.values.get(name, {})
