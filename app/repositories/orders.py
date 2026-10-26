@@ -9,15 +9,52 @@ Satisfies: RF-24, RNF-09
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import Select, and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.exc import StaleDataError
 
-from app.db.models import Order
+from app.db.models import Order, OrderItem
 from app.domain.errors import OrderNotFoundError, VersionConflictError
-from app.domain.order_status import OrderStatus, ensure_transition_allowed
+from app.domain.order_status import ItemStatus, OrderStatus, ensure_transition_allowed
+
+
+def build_kds_queue_query(view: str = "active") -> Select[Order]:
+    """Build SQLAlchemy query for KDS preparation queue (TASK-12).
+
+    Discards any order where in_preparation_at is null, and explicitly excludes PAID status.
+    - view='active': filters IN_PREPARATION or (DELIVERED with at least one PENDING item).
+    - view='delivered': filters pure DELIVERED orders, excluding PAID.
+    Orders by in_preparation_at ASC (oldest in kitchen first),
+    tie-breaking by created_at ASC, then order_id ASC.
+    """
+    query = (
+        select(Order)
+        .options(selectinload(Order.items))
+        .where(Order.in_preparation_at.isnot(None))
+        .where(Order.status != OrderStatus.PAID)
+    )
+    if view == "active":
+        query = query.where(
+            or_(
+                Order.status == OrderStatus.IN_PREPARATION,
+                and_(
+                    Order.status == OrderStatus.DELIVERED,
+                    Order.items.any(OrderItem.status == ItemStatus.PENDING),
+                ),
+            )
+        )
+    elif view == "delivered":
+        query = query.where(Order.status == OrderStatus.DELIVERED)
+
+    return query.order_by(
+        Order.in_preparation_at.asc(),
+        Order.created_at.asc(),
+        Order.public_id.asc(),
+    )
 
 
 class OrderRepository:
@@ -67,6 +104,24 @@ class OrderRepository:
     def save(self, order: Order) -> None:
         """Stage an order in the active session."""
         self._session.add(order)
+
+    async def get_kds_queue(self, view: str = "active") -> list[Order]:
+        """Fetch orders for KDS queue matching view and in_preparation_at.
+
+        Orders by in_preparation_at ASC (oldest in kitchen first),
+        then created_at ASC, then order_id (public_id) ASC.
+        """
+        query = build_kds_queue_query(view=view)
+        result = await self._session.scalars(query)
+        orders = list(result.unique().all())
+        orders.sort(
+            key=lambda o: (
+                o.in_preparation_at or datetime.min.replace(tzinfo=UTC),
+                o.created_at or datetime.min.replace(tzinfo=UTC),
+                o.public_id,
+            )
+        )
+        return orders
 
 
 async def transition_order(
