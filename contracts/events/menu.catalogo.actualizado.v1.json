@@ -1,0 +1,100 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://restaurant.example.com/contracts/events/menu.catalogo.actualizado.v1.json",
+  "title": "MenuCatalogUpdatedEvent",
+  "description": "Event emitted when the restaurant culinary catalog is updated (ADR-0008, OP-09). Supports both English fields and legacy Spanish aliases.",
+  "type": "object",
+  "required": [
+    "eventId",
+    "timestamp"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "description": "Deterministic event identifier.",
+      "minLength": 1
+    },
+    "timestamp": {
+      "type": "string",
+      "description": "ISO-8601 emission timestamp."
+    },
+    "correlationId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Traceability identifier."
+    },
+    "items": {
+      "type": "array",
+      "description": "Updated catalog items collection.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "description": "Item identifier."
+          },
+          "plateId": {
+            "type": "string",
+            "description": "Plate/recipe identifier."
+          },
+          "name": {
+            "type": "string",
+            "description": "Culinary item commercial name."
+          },
+          "nombre": {
+            "type": "string",
+            "description": "Legacy Spanish alias for name."
+          },
+          "available": {
+            "type": "boolean",
+            "description": "Whether the dish is available to order."
+          },
+          "disponible": {
+            "type": "boolean",
+            "description": "Legacy Spanish alias for available."
+          },
+          "station": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "KDS kitchen prep station (e.g. GRILL, COLD, BAR)."
+          },
+          "estacion": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Legacy Spanish alias for station."
+          },
+          "preparationTime": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Estimated cooking time string (e.g. '15 min')."
+          },
+          "tiempoPreparacion": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Legacy Spanish alias for preparationTime."
+          },
+          "basePrice": {
+            "type": [
+              "number",
+              "string",
+              "null"
+            ],
+            "description": "Commercial unit price."
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
