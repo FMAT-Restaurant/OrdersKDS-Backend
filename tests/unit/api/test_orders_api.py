@@ -19,7 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.error_codes import ErrorCode
-from app.db.models import Order, OrderItem
+from app.db.models import Order, OrderItem, Outbox
 from app.db.session import get_session
 from app.domain.errors import DishUnavailableError
 from app.domain.order_status import OrderStatus
@@ -41,12 +41,15 @@ class FakeAsyncSession:
 
     def __init__(self, db: dict[UUID, Order] | None = None) -> None:
         self.db: dict[UUID, Order] = db if db is not None else {}
+        self.outbox_rows: list[Outbox] = []
         self.committed = False
         self.rolled_back = False
 
     def add(self, instance: object) -> None:
         if isinstance(instance, Order):
             self.db[instance.public_id] = instance
+        elif isinstance(instance, Outbox):
+            self.outbox_rows.append(instance)
 
     async def commit(self) -> None:
         self.committed = True
@@ -54,7 +57,7 @@ class FakeAsyncSession:
     async def rollback(self) -> None:
         self.rolled_back = True
 
-    async def scalar(self, statement: Any, *args: Any, **kwargs: Any) -> Any:
+    async def scalar(self, statement: Any) -> Any:
         params = statement.compile().params
         order_id = next((v for v in params.values() if isinstance(v, UUID)), None)
         if order_id is not None:
@@ -119,7 +122,7 @@ def test_create_dining_table_order_success(
     test_db: dict[UUID, Order],
 ) -> None:
     """Create a dining table draft order (RF-12, UT-BE-27, CT-02)."""
-    payload = {"tableNumber": 7, "isTakeaway": False}
+    payload: dict[str, object] = {"tableNumber": 7, "isTakeaway": False}
     response = client.post("/orders", headers=auth_headers("waiter"), json=payload)
 
     assert response.status_code == 201
@@ -151,7 +154,7 @@ def test_create_takeaway_order_success(
     test_db: dict[UUID, Order],
 ) -> None:
     """Create a takeaway draft order without table number (RF-13, UT-BE-27, CT-02)."""
-    payload = {"isTakeaway": True, "tableNumber": None}
+    payload: dict[str, object] = {"isTakeaway": True, "tableNumber": None}
     response = client.post("/orders", headers=auth_headers("waiter"), json=payload)
 
     assert response.status_code == 201
@@ -171,7 +174,7 @@ def test_create_dining_order_without_table_number_fails_validation(
     auth_headers: Callable[[str], dict[str, str]],
 ) -> None:
     """Reject dining order when tableNumber is missing (RF-12 validation)."""
-    payload = {"isTakeaway": False, "tableNumber": None}
+    payload: dict[str, object] = {"isTakeaway": False, "tableNumber": None}
     response = client.post("/orders", headers=auth_headers("waiter"), json=payload)
 
     assert response.status_code == 422
@@ -187,7 +190,7 @@ def test_create_order_with_invalid_table_number_fails_validation(
     invalid_table: int,
 ) -> None:
     """Reject non-positive table numbers."""
-    payload = {"isTakeaway": False, "tableNumber": invalid_table}
+    payload: dict[str, object] = {"isTakeaway": False, "tableNumber": invalid_table}
     response = client.post("/orders", headers=auth_headers("waiter"), json=payload)
 
     assert response.status_code == 422
@@ -220,7 +223,7 @@ def test_create_order_role_matrix(
     auth_headers: Callable[[str], dict[str, str]],
 ) -> None:
     """Verify role matrix: WAITER and ADMIN succeed; KITCHEN and CHEF return 403 (RNF-03)."""
-    payload = {"tableNumber": 4, "isTakeaway": False}
+    payload: dict[str, object] = {"tableNumber": 4, "isTakeaway": False}
 
     # Allowed roles
     assert client.post("/orders", headers=auth_headers("waiter"), json=payload).status_code == 201
@@ -260,7 +263,7 @@ def test_update_order_items_success(
     )
     test_db[order.public_id] = order
 
-    items_payload = {
+    items_payload: dict[str, object] = {
         "items": [
             {
                 "dishId": "dish-01",
@@ -335,7 +338,7 @@ def test_update_order_items_replaces_previous_items(
     order.recalculate_total()
     test_db[order.public_id] = order
 
-    replacement_payload = {
+    replacement_payload: dict[str, object] = {
         "items": [
             {
                 "dishId": "new-dish",
@@ -376,7 +379,7 @@ def test_update_order_items_dish_unavailable_raises_422(
     test_db[order.public_id] = order
     fake_catalog.unavailable_ids.add("dish-sold-out")
 
-    payload = {
+    payload: dict[str, object] = {
         "items": [
             {
                 "dishId": "dish-sold-out",
@@ -416,7 +419,7 @@ def test_update_order_items_rejected_when_order_confirmed(
     )
     test_db[order.public_id] = order
 
-    payload = {
+    payload: dict[str, object] = {
         "items": [
             {
                 "dishId": "dish-1",
@@ -436,6 +439,227 @@ def test_update_order_items_rejected_when_order_confirmed(
     data = response.json()
     assert data["error"]["code"] == ErrorCode.INVALID_STATE_TRANSITION
     assert "confirmed" in data["error"]["message"].lower()
+
+
+def test_confirm_order_stages_deterministic_event_and_records_actor(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+) -> None:
+    order = Order(
+        public_id=uuid4(),
+        table_number=3,
+        status=OrderStatus.CREATED,
+        items=[
+            OrderItem(
+                public_id=uuid4(),
+                dish_id="dish-1",
+                name="Dish",
+                quantity=2,
+                unit_price=Decimal("12.50"),
+            )
+        ],
+    )
+    test_db[order.public_id] = order
+
+    response = client.post(
+        f"/orders/{order.public_id}/confirm",
+        headers=auth_headers("waiter"),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == OrderStatus.CREATED
+    assert response.json()["awaitingStockConfirmation"] is True
+    assert order.confirmed_at is not None
+    assert order.confirmed_by is not None
+    assert fake_session.committed
+    assert len(fake_session.outbox_rows) == 1
+    outbox = fake_session.outbox_rows[0]
+    assert outbox.event_type == "ordenes.orden.creada"
+    assert outbox.payload["orderId"] == str(order.public_id)
+    assert outbox.payload["items"] == [{"plateId": "dish-1", "quantity": 2}]
+
+
+def test_confirm_order_rejects_items_without_inventory_identifier(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+) -> None:
+    order = Order(
+        public_id=uuid4(),
+        status=OrderStatus.CREATED,
+        items=[
+            OrderItem(
+                public_id=uuid4(),
+                dish_id=None,
+                name="Dish",
+                quantity=1,
+                unit_price=Decimal("12.50"),
+            )
+        ],
+    )
+    test_db[order.public_id] = order
+
+    response = client.post(
+        f"/orders/{order.public_id}/confirm",
+        headers=auth_headers("waiter"),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == ErrorCode.VALIDATION_ERROR
+    assert order.confirmed_at is None
+    assert order.confirmed_by is None
+    assert fake_session.outbox_rows == []
+    assert not fake_session.committed
+
+
+def test_confirm_order_is_idempotent_for_awaiting_stock_order(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+) -> None:
+    confirmed_at = datetime.now(UTC)
+    order = Order(
+        public_id=uuid4(),
+        table_number=3,
+        status=OrderStatus.CREATED,
+        confirmed_at=confirmed_at,
+        confirmed_by=uuid4(),
+    )
+    test_db[order.public_id] = order
+
+    first = client.post(
+        f"/orders/{order.public_id}/confirm",
+        headers=auth_headers("waiter"),
+    )
+    second = client.post(
+        f"/orders/{order.public_id}/confirm",
+        headers=auth_headers("waiter"),
+    )
+
+    assert first.status_code == second.status_code == 200
+    assert order.confirmed_at == confirmed_at
+    assert len(fake_session.outbox_rows) == 0
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        OrderStatus.IN_PREPARATION,
+        OrderStatus.DELIVERED,
+        OrderStatus.WASTED,
+        OrderStatus.PAID,
+    ],
+)
+def test_confirm_order_returns_current_state_without_republishing(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+    status: OrderStatus,
+) -> None:
+    order = Order(public_id=uuid4(), status=status)
+    test_db[order.public_id] = order
+
+    response = client.post(
+        f"/orders/{order.public_id}/confirm",
+        headers=auth_headers("waiter"),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == status
+    assert len(fake_session.outbox_rows) == 0
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        OrderStatus.CANCELLED,
+        OrderStatus.REJECTED,
+        OrderStatus.EXPIRED,
+        OrderStatus.VOIDED,
+    ],
+)
+def test_confirm_order_rejects_terminal_state_without_publishing(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+    status: OrderStatus,
+) -> None:
+    order = Order(public_id=uuid4(), status=status)
+    test_db[order.public_id] = order
+
+    response = client.post(
+        f"/orders/{order.public_id}/confirm",
+        headers=auth_headers("waiter"),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == ErrorCode.INVALID_STATE_TRANSITION
+    assert len(fake_session.outbox_rows) == 0
+
+
+def test_confirm_order_not_found_returns_404(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+) -> None:
+    """Return 404 ORDER_NOT_FOUND when confirming a non-existent order."""
+    missing_id = uuid4()
+    response = client.post(
+        f"/orders/{missing_id}/confirm",
+        headers=auth_headers("waiter"),
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == ErrorCode.ORDER_NOT_FOUND
+
+
+def test_confirm_order_role_matrix(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Role matrix for POST /orders/{orderId}/confirm (RNF-03)."""
+    order = Order(public_id=uuid4(), status=OrderStatus.CREATED)
+    test_db[order.public_id] = order
+
+    assert (
+        client.post(
+            f"/orders/{order.public_id}/confirm",
+            headers=auth_headers("waiter"),
+        ).status_code
+        == 200
+    )
+
+    assert (
+        client.post(
+            f"/orders/{order.public_id}/confirm",
+            headers=auth_headers("admin"),
+        ).status_code
+        == 200
+    )
+
+    resp_kitchen = client.post(
+        f"/orders/{order.public_id}/confirm",
+        headers=auth_headers("kitchen"),
+    )
+    assert resp_kitchen.status_code == 403
+    assert resp_kitchen.json()["error"]["code"] == ErrorCode.FORBIDDEN_ROLE
+
+    resp_chef = client.post(
+        f"/orders/{order.public_id}/confirm",
+        headers=auth_headers("chef"),
+    )
+    assert resp_chef.status_code == 403
+    assert resp_chef.json()["error"]["code"] == ErrorCode.FORBIDDEN_ROLE
+
+    resp_unauth = client.post(f"/orders/{order.public_id}/confirm")
+    assert resp_unauth.status_code == 401
+    assert resp_unauth.json()["error"]["code"] == ErrorCode.UNAUTHENTICATED
 
 
 @pytest.mark.parametrize(
@@ -462,7 +686,7 @@ def test_update_order_items_rejected_when_status_not_created(
     )
     test_db[order.public_id] = order
 
-    payload = {
+    payload: dict[str, object] = {
         "items": [
             {
                 "dishId": "dish-1",
@@ -489,7 +713,7 @@ def test_update_order_items_non_existent_order_returns_404(
 ) -> None:
     """Return 404 ORDER_NOT_FOUND when order does not exist."""
     missing_id = uuid4()
-    payload = {
+    payload: dict[str, object] = {
         "items": [
             {
                 "dishId": "dish-1",
@@ -568,7 +792,7 @@ def test_update_order_items_rejects_extra_fields_as_mass_assignment(
     order = Order(public_id=uuid4(), status=OrderStatus.CREATED)
     test_db[order.public_id] = order
 
-    payload = {
+    payload: dict[str, object] = {
         "items": [
             {
                 "dishId": "d1",
@@ -598,7 +822,9 @@ def test_update_order_items_role_matrix(
     order = Order(public_id=uuid4(), status=OrderStatus.CREATED)
     test_db[order.public_id] = order
 
-    payload = {"items": [{"dishId": "d1", "name": "Tacos", "quantity": 1, "unitPrice": "10.00"}]}
+    payload: dict[str, object] = {
+        "items": [{"dishId": "d1", "name": "Tacos", "quantity": 1, "unitPrice": "10.00"}]
+    }
 
     assert (
         client.patch(

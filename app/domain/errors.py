@@ -77,3 +77,13 @@ class DishUnavailableError(DomainError):
     def __init__(self, dish_id: str, reason: str = "Dish is not available in catalog.") -> None:
         self.dish_id = dish_id
         super().__init__(f"Dish '{dish_id}' is unavailable: {reason}")
+
+
+class InvalidOrderItemError(DomainError):
+    """Raised when an order item cannot be represented in the Inventory event."""
+
+    code: ErrorCode = ErrorCode.VALIDATION_ERROR
+    http_status: int = 422
+
+    def __init__(self) -> None:
+        super().__init__("Order contains an item that cannot be sent to Inventory.")

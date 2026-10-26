@@ -16,6 +16,7 @@ from app.messaging.events import (
     DishPreparedEvent,
     EventName,
     OrderCreatedEvent,
+    OrderCreatedItem,
     OrderExpiredEvent,
 )
 from app.messaging.validator import EventContractError, validate_event_payload
@@ -39,10 +40,28 @@ def test_all_contract_schemas_are_valid_draft7() -> None:
 @pytest.mark.requirement("RNF-13", "CT-23")
 def test_order_created_event_satisfies_contract() -> None:
     """Verify OrderCreatedEvent payload validates against its contract."""
-    event = OrderCreatedEvent.for_order(uuid4(), correlation_id=uuid4())
+    event = OrderCreatedEvent.for_order(
+        uuid4(),
+        correlation_id=uuid4(),
+        items=[OrderCreatedItem(plateId="dish-1", quantity=2)],
+    )
     payload = event.model_dump(mode="json", by_alias=True)
 
     validate_event_payload(EventName.ORDER_CREATED, payload)
+    assert payload["items"] == [{"plateId": "dish-1", "quantity": 2}]
+
+
+@pytest.mark.contract
+@pytest.mark.requirement("RNF-13", "CT-23")
+def test_order_created_contract_rejects_invalid_items() -> None:
+    payload: dict[str, object] = {
+        "eventId": str(uuid4()),
+        "orderId": str(uuid4()),
+        "items": [{"plateId": "dish-1", "quantity": 0}],
+    }
+
+    with pytest.raises(EventContractError, match="failed contract validation"):
+        validate_event_payload(EventName.ORDER_CREATED, payload)
 
 
 @pytest.mark.contract
