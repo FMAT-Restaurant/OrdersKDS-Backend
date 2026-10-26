@@ -4,17 +4,52 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from typing import Any
+from uuid import UUID
 
 import jwt
 import pytest
 from fastapi.testclient import TestClient
 
+from app.db.models import Order, Outbox
 from app.main import app
 
 # Any key works: the service never verifies signatures (ADR-0011).
 _TEST_SIGNING_KEY = "unit-test-key-not-a-secret-0123456789"
 
 TokenFactory = Callable[..., str]
+
+
+class FakeAsyncSession:
+    """In-memory AsyncSession double for testing FastAPI endpoints without I/O."""
+
+    def __init__(self, db: dict[UUID, Order] | None = None) -> None:
+        self.db: dict[UUID, Order] = db if db is not None else {}
+        self.outbox_rows: list[Outbox] = []
+        self.committed = False
+        self.rolled_back = False
+
+    def add(self, instance: object) -> None:
+        if isinstance(instance, Order):
+            self.db[instance.public_id] = instance
+        elif isinstance(instance, Outbox):
+            self.outbox_rows.append(instance)
+
+    async def commit(self) -> None:
+        self.committed = True
+
+    async def rollback(self) -> None:
+        self.rolled_back = True
+
+    async def scalar(self, statement: Any, *args: Any, **kwargs: Any) -> Any:
+        params = statement.compile().params
+        order_id = next((v for v in params.values() if isinstance(v, UUID)), None)
+        if order_id is not None:
+            return self.db.get(order_id)
+        return None
+
+    async def close(self) -> None:
+        pass
 
 
 @pytest.fixture
