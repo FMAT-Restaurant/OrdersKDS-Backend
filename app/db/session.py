@@ -1,4 +1,4 @@
-"""Database engine and async session dependency for FastAPI.
+"""Database engine and request-scoped async session dependency.
 
 Satisfies: RNF-01, RNF-09, RNF-10
 """
@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncGenerator
 
+from fastapi import Request
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -42,9 +43,11 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
     return _session_factory
 
 
-async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI dependency yielding an active AsyncSession."""
-    factory = get_session_factory()
+async def get_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
+    """FastAPI dependency yielding an application-lifespan session."""
+    factory = getattr(request.app.state, "session_factory", None)
+    if factory is None:
+        raise RuntimeError("Database session factory is not configured.")
     async with factory() as session:
         try:
             yield session

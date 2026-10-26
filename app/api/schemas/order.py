@@ -207,3 +207,13 @@ class OrderResponse(BaseModel):
             createdAt=order.created_at or now,
             updatedAt=order.updated_at or now,
         )
+
+
+class ConfirmOrderResponse(BaseModel):
+    """Current order state returned by the idempotent confirmation endpoint."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    order_id: UUID = Field(alias="orderId")
+    status: OrderStatus
+    confirmed_at: datetime | None = Field(alias="confirmedAt")

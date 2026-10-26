@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import docker
 import pytest
@@ -16,12 +16,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from testcontainers.core.container import DockerContainer
 
-from app.api.dependencies.auth import AuthContext
-from app.api.routers.orders import confirm_order
 from app.db.base import Base
 from app.db.models import Order, OrderItem, Outbox
 from app.domain.order_status import OrderStatus
-from app.domain.roles import Role
+from app.services.orders import confirm_order
 
 
 def _is_docker_daemon_running() -> bool:
@@ -86,11 +84,11 @@ async def test_concurrent_confirmations_stage_only_one_order_created_event() -> 
                 session.add(order)
                 await session.commit()
 
-            auth = AuthContext(user_id=str(uuid4()), role=Role.WAITER)
+            actor_id = uuid4()
 
             async def confirm_in_own_session() -> None:
-                async with session_factory() as session:
-                    await confirm_order(order_id, auth, session)
+                async with session_factory() as session, session.begin():
+                    await confirm_order(session, order_id, actor_id)
 
             await asyncio.gather(confirm_in_own_session(), confirm_in_own_session())
 
@@ -102,10 +100,16 @@ async def test_concurrent_confirmations_stage_only_one_order_created_event() -> 
 
             assert stored_order is not None
             assert stored_order.confirmed_at is not None
-            assert stored_order.confirmed_by == UUID(auth.user_id)
+            assert stored_order.confirmed_by == actor_id
             assert stored_order.version == 2
             assert len(outbox_rows) == 1
             assert outbox_rows[0].payload["orderId"] == str(order_id)
-            assert outbox_rows[0].payload["items"] == [{"plateId": "dish-1", "quantity": 2}]
+            assert outbox_rows[0].payload["items"] == [
+                {
+                    "itemId": str(order.items[0].public_id),
+                    "name": "Tacos",
+                    "quantity": 2,
+                }
+            ]
         finally:
             await engine.dispose()

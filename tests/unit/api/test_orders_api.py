@@ -10,6 +10,7 @@ Covers: UT-BE-25, UT-BE-26, UT-BE-27, UT-BE-28, UT-BE-60, CT-02, CT-03
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator, Callable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -54,6 +55,13 @@ class FakeAsyncSession:
 
     async def commit(self) -> None:
         self.committed = True
+
+    async def flush(self) -> None:
+        self.committed = True
+
+    @asynccontextmanager
+    async def begin(self) -> AsyncGenerator[None, None]:
+        yield
 
     async def rollback(self) -> None:
         self.rolled_back = True
@@ -676,15 +684,15 @@ def test_confirm_order_writes_confirmation_and_stock_event_atomically(
     data = response.json()
     assert data["status"] == OrderStatus.CREATED
     assert data["confirmedAt"] is not None
-    assert data["confirmedBy"] is not None
-    assert data["awaitingStockConfirmation"] is True
-    assert fake_session.committed is True
+    assert "confirmedBy" not in data
     assert len(fake_session.outbox) == 1
 
     event = fake_session.outbox[0]
     assert event.event_type == EventName.ORDER_CREATED
-    assert event.event_id == OrderCreatedEvent.for_order(order.public_id).event_id
-    assert event.payload["items"] == [{"plateId": "dish-1", "quantity": 2}]
+    assert event.event_id == OrderCreatedEvent.for_order(order.public_id, []).event_id
+    assert event.payload["items"] == [
+        {"itemId": str(order.items[0].public_id), "name": "Tacos", "quantity": 2}
+    ]
 
 
 def test_confirm_order_retry_does_not_stage_a_second_event(
@@ -800,13 +808,13 @@ def test_confirm_order_rejects_terminal_states(
     assert fake_session.committed is False
 
 
-def test_confirm_order_rejects_item_without_inventory_identifier(
+def test_confirm_order_uses_order_item_identity_for_inventory_event(
     client: TestClient,
     auth_headers: Callable[[str], dict[str, str]],
     test_db: dict[UUID, Order],
     fake_session: FakeAsyncSession,
 ) -> None:
-    """Reject malformed legacy items before changing state or writing the outbox."""
+    """Inventory event items use the persisted item ID and name."""
     order = Order(public_id=uuid4(), status=OrderStatus.CREATED)
     order.items.append(OrderItem(public_id=uuid4(), name="Tacos", quantity=1))
     test_db[order.public_id] = order
@@ -816,11 +824,12 @@ def test_confirm_order_rejects_item_without_inventory_identifier(
         headers=auth_headers("waiter"),
     )
 
-    assert response.status_code == 409
-    assert response.json()["error"]["code"] == ErrorCode.INVALID_STATE_TRANSITION
-    assert order.confirmed_at is None
-    assert fake_session.outbox == []
-    assert fake_session.committed is False
+    assert response.status_code == 200
+    assert order.confirmed_at is not None
+    assert len(fake_session.outbox) == 1
+    assert fake_session.outbox[0].payload["items"] == [
+        {"itemId": str(order.items[0].public_id), "name": "Tacos", "quantity": 1}
+    ]
 
 
 def test_confirm_order_not_found_and_role_guards(

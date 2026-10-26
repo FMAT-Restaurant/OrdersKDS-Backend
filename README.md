@@ -714,4 +714,4 @@ La documentación completa se encuentra en la carpeta [`docs/`](docs/):
    pytest tests/unit tests/integration
    ```
 4. Abre un Pull Request contra `develop` usando el template proporcionado.
-5. El pipeline de CI y el Quality Gate de SonarCloud deben pasar antes de que cualquier PR pueda ser mergeado.
+5. El pipeline de CI y el Quality Gate de SonarCloud deben pasar antes de que cualquier PR pueda integrarse.

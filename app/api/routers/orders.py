@@ -10,7 +10,6 @@ Satisfies: RF-12, RF-13, RF-14, RF-15, RF-17, RF-23, RNF-03, RNF-09, RNF-13
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 from typing import Annotated
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
@@ -19,16 +18,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies.auth import AuthContext, require_roles
 from app.api.schemas.errors import ErrorResponse
-from app.api.schemas.order import CreateOrderRequest, OrderResponse, UpdateOrderItemsRequest
+from app.api.schemas.order import (
+    ConfirmOrderResponse,
+    CreateOrderRequest,
+    OrderResponse,
+    UpdateOrderItemsRequest,
+)
 from app.db.models import Order, OrderItem
 from app.db.session import get_session
 from app.domain.errors import InvalidStateTransitionError, OrderNotFoundError
 from app.domain.order_status import ItemStatus, OrderStatus
 from app.domain.roles import Role
-from app.messaging.events import OrderCreatedEvent, OrderCreatedItem
 from app.repositories.orders import OrderRepository
-from app.repositories.outbox import OutboxRepository
 from app.services.catalog import CatalogValidatorProtocol, get_catalog_validator
+from app.services.orders import confirm_order as confirm_order_service
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +190,6 @@ async def update_order_items(
 
 @router.post(
     "/{orderId}/confirm",
-    status_code=status.HTTP_200_OK,
     summary="Confirm order and request stock reservation",
     description=(
         "Confirms a CREATED order once, records the authenticated waiter, and stages "
@@ -204,65 +206,33 @@ async def update_order_items(
         },
     },
 )
-async def confirm_order(
+async def confirm_order_endpoint(
     order_id: OrderIdPath,
-    auth: Annotated[AuthContext, Depends(require_roles(Role.WAITER, Role.ADMIN))],
+    actor: Annotated[AuthContext, Depends(require_roles(Role.WAITER, Role.ADMIN))],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> OrderResponse:
+) -> ConfirmOrderResponse:
     """Confirm a draft order and stage its stock request atomically (RF-32, RNF-01).
-
-    The row lock serializes simultaneous confirmations. Only the first request stages
-    the deterministic order-created event; retries return the current order unchanged.
 
     Args:
         order_id: Public UUID of the order to confirm.
-        auth: Authenticated caller context.
-        session: Active database session shared by the order and outbox repositories.
+        actor: Authenticated caller context.
+        session: Request-scoped database session.
 
     Returns:
-        The current Order representation.
+        The current order identifier, status, and confirmation timestamp.
 
     Raises:
-        OrderNotFoundError: If the order does not exist (404).
-        InvalidStateTransitionError: If the order cannot be confirmed (409).
+        OrderNotFoundError: If the order does not exist.
+        InvalidStateTransitionError: If the order is in a terminal state.
     """
-    repo = OrderRepository(session)
-    order = await repo.get_for_update(order_id)
-    actor_uuid = _parse_actor_uuid(auth.user_id)
-
-    if order.status != OrderStatus.CREATED:
-        if order.status in {
-            OrderStatus.IN_PREPARATION,
-            OrderStatus.DELIVERED,
-            OrderStatus.WASTED,
-            OrderStatus.PAID,
-        }:
-            return OrderResponse.from_model(order)
-        raise InvalidStateTransitionError(order.status, "ORDER_CONFIRMED")
-
-    if order.confirmed_at is not None:
-        if order.confirmed_by is None:
-            order.confirmed_by = actor_uuid
-            repo.save(order)
-            await session.commit()
-        return OrderResponse.from_model(order)
-
-    event_items: list[OrderCreatedItem] = []
-    for item in order.items:
-        if not item.dish_id:
-            raise InvalidStateTransitionError(order.status, "ORDER_ITEM_MISSING_DISH_ID")
-        event_items.append(OrderCreatedItem(plateId=item.dish_id, quantity=item.quantity))
-
-    order.confirmed_at = datetime.now(UTC)
-    order.confirmed_by = actor_uuid
-    repo.save(order)
-
-    event = OrderCreatedEvent.for_order(order.public_id).model_copy(update={"items": event_items})
-    OutboxRepository(session).add(event)
-    await session.commit()
-
-    logger.info("Confirmed order %s by waiter %s", order.public_id, auth.user_id)
-    return OrderResponse.from_model(order)
+    actor_id = _parse_actor_uuid(actor.user_id)
+    async with session.begin():
+        order = await confirm_order_service(session, order_id, actor_id)
+    return ConfirmOrderResponse(
+        orderId=order.public_id,
+        status=OrderStatus(order.status),
+        confirmedAt=order.confirmed_at,
+    )
 
 
 @router.get(

@@ -669,7 +669,7 @@ En DBeaver: *Database → New Database Connection → PostgreSQL*, llena los cam
 |---|---|---|---|
 | **Desarrollo local** | Tu propio contenedor Docker | Solo tú; `docker compose down -v` la reinicia | Tabla superior |
 | **Pruebas automáticas** | Testcontainers efímeros (creados y destruidos por `pytest tests/integration` y CI) | Código de pruebas | Nada a qué conectar; nunca la compartas |
-| **Pruebas compartidas / staging** | Host compartido definido en **TASK-38** | Todo el equipo y tests de integración con otros MS | Host, puerto y credenciales provistas por el Scrum Master (nunca las comitees) |
+| **Pruebas compartidas / staging** | Host compartido definido en **TASK-38** | Todo el equipo y pruebas de integración con otros microservicios | Host, puerto y credenciales proporcionados por el Scrum Master (nunca las incluyas en commits) |
 | **Versión final (release)** | Desplegada desde `main` | El sistema liberado | Credenciales restringidas; no se usa para experimentos |
 
 > Usa el mismo cliente para inspeccionar la base de staging compartida creando una segunda conexión. Prefiere **credenciales de solo lectura** para que nadie altere los datos de prueba compartidos por accidente.

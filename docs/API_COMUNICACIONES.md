@@ -50,7 +50,7 @@ Los documentos fuente describen las capacidades funcionales y las vistas de UI, 
 |---|---|---|---|
 | `PATCH` | `/orders/{orderId}/items` | 4 | Agrega platillos, modificadores, notas — solo si `estado = Creada` y sin `confirmed_at` |
 | `PATCH` | `/orders/{orderId}/transfer` | 4 | Cambia la mesa asociada a la comanda |
-| `POST` | `/orders/{orderId}/confirm` | 7 | Idempotente: fija `confirmed_at` y dispara la publicación de `ordenes.orden.creada` vía outbox (OP-05) |
+| `POST` | `/orders/{orderId}/confirm` | 7 | Idempotente: fija `confirmed_at` y `confirmed_by` y encola `ordenes.orden.creada` vía outbox sin esperar a Inventario (OP-05) |
 | `PATCH` | `/orders/{orderId}/cancel` | 6 | Solo permitido si `estado = Creada`; dispara `ordenes.orden.cancelada` |
 | `PATCH` | `/orders/{orderId}/items/{itemId}/redo` | 5 | Regresa un ítem de "Entregado" a "Pendiente"; requiere cuerpo `{ "note": "..." }` obligatorio (la orden conserva "Entregada", OP-12) |
 | `POST` | `/orders/{orderId}/request-bill` | — | Dispara `ordenes.cuenta.solicitada` |
@@ -177,6 +177,13 @@ Eventos que salen de este microservicio por Transactional Outbox:
 | `orders.bill.requested` (`ordenes.cuenta.solicitada`) | `POST /orders/{id}/request-bill` | `{orderId, sessionId, tableId, waiterId, totalAmount, items[]}` | Pagos | **Confirmado (Contrato Edwin)** |
 | `orders.charge.requested` (`ordenes.cobro.solicitado`) | `PATCH /orders/{id}/void` (solo `WASTED`) | `{orderId, sessionId, tableId, waiterId, totalAmount, items[]}` | Pagos | **Confirmado (Contrato Edwin)** |
 | `ordenes.orden.expirada` | Watcher tras 60 s desde `confirmed_at` | `{orderId, elapsedSeconds}` | Inventario | Propuesto (OP-04) |
+
+La confirmación responde con `200` y el estado actual. `CREATED` sin `confirmed_at` fija los
+campos de confirmación y encola exactamente un evento; las llamadas repetidas mientras espera
+stock, y las órdenes `IN_PREPARATION`, `DELIVERED`, `WASTED` o `PAID`, responden sin otro evento.
+`CANCELLED`, `REJECTED`, `EXPIRED` y `VOIDED` responden `409 INVALID_STATE_TRANSITION`.
+El evento se valida con el modelo Pydantic `OrderCreatedEvent`; su contrato JSON Schema está en
+[`contracts/events/order-created.schema.json`](../contracts/events/order-created.schema.json).
 
 ---
 

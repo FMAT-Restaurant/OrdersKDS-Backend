@@ -33,7 +33,7 @@ def test_order_created_event_payload_validates_against_contract() -> None:
 @pytest.mark.requirement("RF-32", "RNF-13")
 def test_order_created_event_payload_includes_inventory_items() -> None:
     event = OrderCreatedEvent.for_order(uuid4()).model_copy(
-        update={"items": [OrderCreatedItem(plateId="dish-1", quantity=2)]}
+        update={"items": [OrderCreatedItem(itemId=uuid4(), name="Tacos", quantity=2)]}
     )
     payload = event.model_dump(mode="json", by_alias=True)
 

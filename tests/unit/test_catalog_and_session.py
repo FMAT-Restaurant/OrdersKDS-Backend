@@ -81,12 +81,13 @@ async def test_get_session_yields_session_happy_path() -> None:
     mock_context.__aexit__.return_value = False
     mock_factory = MagicMock(return_value=mock_context)
 
-    with patch("app.db.session.get_session_factory", return_value=mock_factory):
-        generator = db_session.get_session()
-        session = await anext(generator)
-        assert session is mock_session
-        with pytest.raises(StopAsyncIteration):
-            await anext(generator)
+    request = MagicMock()
+    request.app.state.session_factory = mock_factory
+    generator = db_session.get_session(request)
+    session = await anext(generator)
+    assert session is mock_session
+    with pytest.raises(StopAsyncIteration):
+        await anext(generator)
 
 
 async def test_get_session_handles_exception_and_rolls_back() -> None:
@@ -96,11 +97,12 @@ async def test_get_session_handles_exception_and_rolls_back() -> None:
     mock_context.__aexit__.return_value = False
     mock_factory = MagicMock(return_value=mock_context)
 
-    with patch("app.db.session.get_session_factory", return_value=mock_factory):
-        generator = db_session.get_session()
-        session = await anext(generator)
-        assert session is mock_session
-        simulated_error = RuntimeError("Simulated error in route")
-        with pytest.raises(RuntimeError):
-            await generator.athrow(simulated_error)
-        mock_session.rollback.assert_awaited()
+    request = MagicMock()
+    request.app.state.session_factory = mock_factory
+    generator = db_session.get_session(request)
+    session = await anext(generator)
+    assert session is mock_session
+    simulated_error = RuntimeError("Simulated error in route")
+    with pytest.raises(RuntimeError):
+        await generator.athrow(simulated_error)
+    mock_session.rollback.assert_awaited()

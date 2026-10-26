@@ -33,20 +33,26 @@
       "items": {
         "type": "object",
         "required": [
-          "plateId",
+          "itemId",
+          "name",
           "quantity"
         ],
         "properties": {
-          "plateId": {
+          "itemId": {
             "type": "string",
-            "minLength": 1
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
           },
           "quantity": {
             "type": "integer",
             "minimum": 1
           }
         },
-        "additionalProperties": true
+        "additionalProperties": false
       }
     }
   },

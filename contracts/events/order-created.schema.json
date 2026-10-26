@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orders-kds/contracts/events/order-created.schema.json",
+  "title": "Order created event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["eventId", "orderId", "items"],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "orderId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "correlationId": {
+      "type": ["string", "null"],
+      "format": "uuid"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["itemId", "name", "quantity"],
+        "properties": {
+          "itemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "quantity": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          }
+        }
+      }
+    }
+  }
+}
