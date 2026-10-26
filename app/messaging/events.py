@@ -36,6 +36,7 @@ class EventName(StrEnum):
     STOCK_RESERVED = "inventario.stock.reservado"
     STOCK_INSUFFICIENT = "inventario.stock.insuficiente"
     PAYMENT_COMPLETED = "pagos.pago.completado"
+    DINING_SESSION_STARTED = "sala.dining_session.iniciada"
 
 
 class OrderEvent(BaseModel):
@@ -147,3 +148,29 @@ class PaymentCompletedMessage(BaseModel):
                 merged["eventId"] = data["eventId"]
             return merged
         return data
+
+
+class DiningSessionCreatedMessage(BaseModel):
+    """Inbound Floor event that starts one order for a dining session."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    event_id: UUID = Field(alias="eventId")
+    session_id: UUID = Field(alias="sessionId")
+    waiter_id: UUID | None = Field(default=None, alias="waiterId")
+    diners: int | None = Field(default=None, alias="dinersCount")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_payload(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        nested = data.get("data")
+        payload = {**nested, **data} if isinstance(nested, dict) else dict(data)
+        if "meseroId" in payload and "waiterId" not in payload:
+            payload["waiterId"] = payload["meseroId"]
+        if "comensales" in payload and "dinersCount" not in payload:
+            payload["dinersCount"] = payload["comensales"]
+        if "numComensales" in payload and "dinersCount" not in payload:
+            payload["dinersCount"] = payload["numComensales"]
+        return payload

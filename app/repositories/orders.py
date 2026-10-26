@@ -138,6 +138,13 @@ class OrderRepository:
             .with_for_update(skip_locked=True)
         )
         return list(result)
+    async def get_by_dining_session_id(self, session_id: UUID | str) -> Order | None:
+        """Fetch the order associated with a dining session."""
+        session_uuid = session_id if isinstance(session_id, UUID) else UUID(session_id)
+        return await self._session.scalar(
+            select(Order).where(Order.dining_session_id == session_uuid)
+        )
+
     async def get_kds_queue(self, view: str = "active") -> list[Order]:
         """Fetch orders for KDS queue matching view and in_preparation_at.
 
