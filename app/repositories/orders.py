@@ -105,6 +105,40 @@ class OrderRepository:
         """Stage an order in the active session."""
         self._session.add(order)
 
+    async def list_awaiting_stock_confirmed_before(
+        self,
+        threshold: datetime,
+        *,
+        limit: int = 100,
+    ) -> list[Order]:
+        """Return confirmed orders still awaiting Inventory whose timer elapsed.
+
+        Drafts (``CREATED`` without ``confirmed_at``) are excluded: a waiter may
+        take minutes to assemble an order without it expiring (RF-35, OP-01).
+
+        Rows are locked with ``SKIP LOCKED`` so concurrent watcher instances do
+        not expire the same order twice.
+
+        Args:
+            threshold: Latest ``confirmed_at`` considered stale.
+            limit: Maximum number of rows to return in one scan.
+
+        Returns:
+            Oldest stale orders first.
+        """
+        result = await self._session.scalars(
+            select(Order)
+            .where(
+                Order.status == OrderStatus.CREATED,
+                Order.confirmed_at.is_not(None),
+                Order.confirmed_at <= threshold,
+            )
+            .order_by(Order.confirmed_at, Order.id)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        return list(result)
+
     async def get_by_dining_session_id(self, session_id: UUID | str) -> Order | None:
         """Fetch the order associated with a dining session."""
         session_uuid = session_id if isinstance(session_id, UUID) else UUID(session_id)

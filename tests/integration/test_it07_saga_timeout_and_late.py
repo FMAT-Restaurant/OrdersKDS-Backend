@@ -7,13 +7,15 @@ Covers: IT-07, IT-LATE
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Order, ProcessedEvent
+from app.core.config import SagaTimeoutSettings
+from app.db.models import Order, Outbox, ProcessedEvent
 from app.domain.order_status import OrderStatus
 from app.messaging.consumers.base import EventConsumerDispatcher, InMemoryDLQRouter
 from app.messaging.events import EventName
@@ -25,12 +27,14 @@ from app.stubs.config import InventoryStubMode
 from app.stubs.floor_stub import FloorStub
 from app.stubs.inventory_stub import InventoryStub
 from app.stubs.protocol import InMemoryStubPublisher
+from app.workers.saga_timeout_watcher import SagaTimeoutWatcher
 
 
 class InMemoryDb:
     def __init__(self) -> None:
         self.orders: dict[UUID, Order] = {}
         self.processed_events: set[tuple[UUID, UUID]] = set()
+        self.outbox: list[Outbox] = []
 
 
 class FakeSession:
@@ -38,11 +42,22 @@ class FakeSession:
         self.db = db
         self.staged_processed: list[tuple[UUID, UUID]] = []
 
+    async def __aenter__(self) -> FakeSession:
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        return None
+
     def add(self, instance: object) -> None:
         if isinstance(instance, ProcessedEvent):
             self.staged_processed.append((instance.order_id, instance.event_id))
         elif isinstance(instance, Order):
             self.db.orders[instance.public_id] = instance
+        elif isinstance(instance, Outbox):
+            self.db.outbox.append(instance)
+
+    async def scalars(self, _statement: object) -> list[Order]:
+        return list(self.db.orders.values())
 
     async def commit(self) -> None:
         for order_id, event_id in self.staged_processed:
@@ -118,10 +133,12 @@ async def test_it07_saga_timeout_and_late_reservation_ignored() -> None:
     """IT-07: Silent Inventory stub leads to EXPIRED order, late reservation is discarded."""
     db = InMemoryDb()
     order_id = uuid4()
+    now = datetime(2026, 10, 25, 12, 0, 0, tzinfo=UTC)
     order = Order(
         public_id=order_id,
         status=OrderStatus.CREATED,
         total_amount=Decimal("300.00"),
+        confirmed_at=now - timedelta(seconds=61),
     )
     db.orders[order_id] = order
 
@@ -147,8 +164,17 @@ async def test_it07_saga_timeout_and_late_reservation_ignored() -> None:
     assert ev is None
     assert len(stub_bus.get_events()) == 0
 
-    # 2. Timeout watcher marks order as EXPIRED
-    order.status = OrderStatus.EXPIRED
+    # 2. Timeout watcher marks order as EXPIRED and stages ORDER_EXPIRED
+    watcher = SagaTimeoutWatcher(
+        session_factory,
+        settings=SagaTimeoutSettings(timeout_seconds=60, watcher_interval_seconds=5.0),
+        clock=lambda: now,
+    )
+    assert await watcher.expire_stale_orders() == 1
+    assert order.status == OrderStatus.EXPIRED
+    assert len(db.outbox) == 1
+    assert db.outbox[0].event_type == EventName.ORDER_EXPIRED
+    assert db.outbox[0].payload["orderId"] == str(order_id)
 
     # 3. Late reservation arrives from delayed/late stub
     inventory_stub.set_mode(InventoryStubMode.RESERVE)

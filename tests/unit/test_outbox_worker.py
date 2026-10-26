@@ -345,6 +345,7 @@ async def test_run_all_main_lifecycle(
     monkeypatch.setenv("RABBITMQ_URL", "amqp://user:pass@localhost:5672/")
     monkeypatch.setenv("RABBITMQ_EXCHANGE", "test.topic")
     monkeypatch.setenv("RABBITMQ_VHOST", "/")
+    monkeypatch.setenv("SAGA_TIMEOUT_SECONDS", "60")
 
     mock_engine = AsyncMock()
     mock_publisher = AsyncMock()
@@ -367,6 +368,7 @@ async def test_run_all_main_lifecycle(
         patch("app.workers.run_all.create_async_engine", return_value=mock_engine),
         patch("app.workers.run_all.EventPublisher", return_value=mock_publisher),
         patch("app.workers.outbox_worker.OutboxWorker.run", fake_run),
+        patch("app.workers.saga_timeout_watcher.SagaTimeoutWatcher.run", fake_run),
         caplog.at_level(logging.INFO),
     ):
         await main()

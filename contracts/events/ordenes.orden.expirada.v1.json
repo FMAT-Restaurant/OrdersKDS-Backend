@@ -21,6 +21,10 @@
         "string",
         "null"
       ]
+    },
+    "elapsedSeconds": {
+      "type": "integer",
+      "minimum": 0
     }
   },
   "additionalProperties": true

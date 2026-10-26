@@ -16,9 +16,14 @@ import sys
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.core.config import get_outbox_worker_settings, get_rabbitmq_settings
+from app.core.config import (
+    get_outbox_worker_settings,
+    get_rabbitmq_settings,
+    get_saga_timeout_settings,
+)
 from app.messaging.publisher import EventPublisher
 from app.workers.outbox_worker import OutboxWorker
+from app.workers.saga_timeout_watcher import SagaTimeoutWatcher
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -41,6 +46,7 @@ async def main() -> None:
     db_url = _get_database_url()
     rabbitmq_settings = get_rabbitmq_settings()
     worker_settings = get_outbox_worker_settings()
+    saga_settings = get_saga_timeout_settings()
 
     engine = create_async_engine(db_url, echo=False)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -69,13 +75,20 @@ async def main() -> None:
         await publisher.connect()
         logger.info("Connected to RabbitMQ and declared exchange '%s'", rabbitmq_settings.exchange)
 
-        worker = OutboxWorker(
+        outbox_worker = OutboxWorker(
             session_factory=session_factory,
             publisher=publisher,
             poll_interval_seconds=worker_settings.poll_interval_seconds,
         )
+        saga_watcher = SagaTimeoutWatcher(
+            session_factory=session_factory,
+            settings=saga_settings,
+        )
 
-        await worker.run(stop_event=stop_event)
+        await asyncio.gather(
+            outbox_worker.run(stop_event=stop_event),
+            saga_watcher.run(stop_event=stop_event),
+        )
     finally:
         logger.info("Cleaning up worker resources...")
         await publisher.close()
