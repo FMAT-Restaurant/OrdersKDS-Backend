@@ -13,7 +13,8 @@ TODO(RNF-04, TASK-29): extend the WebSocket cases with channel subscription (`FO
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import AsyncGenerator, Callable, Iterable
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -23,8 +24,10 @@ from starlette.websockets import WebSocketDisconnect
 
 from app.api.websockets.routes import KDS_WS_PATH, WAITER_WS_PATH, WS_ROLES_BY_PATH
 from app.core.error_codes import ErrorCode
+from app.db.session import get_session
 from app.domain.roles import KITCHEN_ROLES, WAITER_ROLES, Role
 from app.main import app
+from tests.unit.conftest import FakeAsyncSession
 
 pytestmark = [pytest.mark.unit, pytest.mark.requirement("RNF-03", "RF-15", "RNF-04")]
 
@@ -34,17 +37,17 @@ ITEM_ID = UUID("00000000-0000-4000-8000-000000000002")
 PUBLIC_PATHS = {"/health"}
 PATH_PARAMETER = re.compile(r"\{[^}]+\}")
 
-# Kitchen routes (§5.7: kitchen, chef, admin). An allowed role passes the guard and reaches the
-# placeholder handler, which answers 501 until TASK-13.
+# Kitchen routes (§5.7: kitchen, chef, admin). Waiter is rejected with 403 FORBIDDEN_ROLE.
+# Allowed roles pass the guard and reach domain logic (404 when order does not exist in DB).
 KITCHEN_ROUTES = [
     f"/orders/{ORDER_ID}/ready",
     f"/orders/{ORDER_ID}/items/{ITEM_ID}/ready",
 ]
 KITCHEN_HTTP_MATRIX = [
     ("waiter", 403),
-    ("kitchen", 501),
-    ("chef", 501),
-    ("admin", 501),
+    ("kitchen", 404),
+    ("chef", 404),
+    ("admin", 404),
 ]
 
 # (endpoint, role) pairs that keep the connection open / get closed with 4403.
@@ -60,6 +63,18 @@ WS_FORBIDDEN_MATRIX = [
     (WAITER_WS_PATH, "kitchen"),
     (WAITER_WS_PATH, "chef"),
 ]
+
+
+@pytest.fixture(autouse=True)
+def override_db_session() -> Any:
+    fake_session = FakeAsyncSession({})
+
+    async def _get_test_session() -> AsyncGenerator[FakeAsyncSession, None]:
+        yield fake_session
+
+    app.dependency_overrides[get_session] = _get_test_session
+    yield
+    app.dependency_overrides.clear()
 
 
 def _protected_http_routes() -> list[tuple[str, str]]:
@@ -137,7 +152,7 @@ def test_kitchen_routes_accept_an_absent_or_empty_body(
 ) -> None:
     response = client.patch(path, headers=auth_headers("kitchen"), json=body)
 
-    assert response.status_code == 501
+    assert response.status_code == 404
 
 
 @pytest.mark.parametrize("path", KITCHEN_ROUTES)

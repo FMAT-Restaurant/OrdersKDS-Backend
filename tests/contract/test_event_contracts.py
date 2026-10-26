@@ -1,6 +1,6 @@
 """Contract validation tests for event JSON schemas and typed models.
 
-Satisfies: RNF-13, CT-23
+Satisfies: RF-10, RNF-13, CT-23
 """
 
 from __future__ import annotations
@@ -47,6 +47,17 @@ def test_dish_prepared_event_satisfies_contract() -> None:
     event = DishPreparedEvent.for_order(uuid4())
     payload = event.model_dump(mode="json", by_alias=True)
 
+    validate_event_payload(EventName.DISH_PREPARED, payload)
+
+
+@pytest.mark.contract
+@pytest.mark.requirement("RF-10", "RNF-13", "CT-23")
+def test_dish_prepared_event_for_item_satisfies_contract() -> None:
+    """Verify DishPreparedEvent.for_item payload validates against its contract."""
+    event = DishPreparedEvent.for_item(order_id=uuid4(), item_id=uuid4(), correlation_id=uuid4())
+    payload = event.model_dump(mode="json", by_alias=True)
+
+    assert "itemId" in payload
     validate_event_payload(EventName.DISH_PREPARED, payload)
 
 

@@ -9,7 +9,7 @@ column wired as ``version_id_col``, so a stale ``UPDATE`` raises
 ``StaleDataError``, which repositories translate to ``409
 VERSION_CONFLICT``.
 
-Satisfies: RF-18, RF-21, RF-23, RF-33, RF-34, RNF-02, RNF-09
+Satisfies: RF-09, RF-10, RF-11, RF-18, RF-21, RF-23, RF-33, RF-34, RNF-02, RNF-09, OP-08
 """
 
 from __future__ import annotations
@@ -23,7 +23,12 @@ from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Numeric, String, Unique
 from sqlalchemy.orm import Mapped, mapped_column, relationship, synonym
 
 from app.db.base import Base
-from app.domain.order_status import ItemStatus, OrderStatus, ensure_transition_allowed
+from app.domain.order_status import (
+    ItemStatus,
+    OrderStatus,
+    ensure_item_transition_allowed,
+    ensure_transition_allowed,
+)
 
 
 def _utcnow() -> datetime:
@@ -90,6 +95,11 @@ class Order(Base):
         if self.in_preparation_at is None:
             self.in_preparation_at = at or _utcnow()
 
+    def mark_delivered(self) -> None:
+        """Transition order to DELIVERED (OP-08)."""
+        ensure_transition_allowed(self.status, OrderStatus.DELIVERED)
+        self.status = OrderStatus.DELIVERED
+
     def mark_rejected(self) -> None:
         """Transition order to REJECTED."""
         ensure_transition_allowed(self.status, OrderStatus.REJECTED)
@@ -135,6 +145,16 @@ class OrderItem(Base):
     order: Mapped[Order] = relationship(back_populates="items")
 
     __mapper_args__ = {"version_id_col": version}
+
+    def mark_ready(self) -> None:
+        """Transition item to READY (RF-09, RF-10)."""
+        ensure_item_transition_allowed(self.status, ItemStatus.READY)
+        self.status = ItemStatus.READY
+
+    def mark_delivered(self) -> None:
+        """Transition item to DELIVERED (OP-08)."""
+        ensure_item_transition_allowed(self.status, ItemStatus.DELIVERED)
+        self.status = ItemStatus.DELIVERED
 
 
 class Outbox(Base):
