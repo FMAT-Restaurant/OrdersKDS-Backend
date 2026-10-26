@@ -119,12 +119,20 @@ class OrderItemResponse(BaseModel):
     status: ItemStatus
     modifiers: list[str] = Field(default_factory=list)
     notes: str | None = None
+    station: str | None = None
+    preparation_time_text: str | None = Field(default=None, alias="preparationTimeText")
     version: int
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
 
     @classmethod
-    def from_model(cls, item: OrderItem) -> OrderItemResponse:
+    def from_model(
+        cls,
+        item: OrderItem,
+        *,
+        station: str | None = None,
+        preparation_time_text: str | None = None,
+    ) -> OrderItemResponse:
         now = datetime.now(UTC)
         item_id = item.public_id or uuid4()
         return cls(
@@ -138,6 +146,8 @@ class OrderItemResponse(BaseModel):
             status=item.status or ItemStatus.PENDING,
             modifiers=list(item.modifiers or []),
             notes=item.notes,
+            station=station,
+            preparationTimeText=preparation_time_text,
             version=item.version if item.version is not None else 1,
             createdAt=item.created_at or now,
             updatedAt=item.updated_at or now,
@@ -167,7 +177,12 @@ class OrderResponse(BaseModel):
     updated_at: datetime = Field(alias="updatedAt")
 
     @classmethod
-    def from_model(cls, order: Order) -> OrderResponse:
+    def from_model(
+        cls,
+        order: Order,
+        *,
+        items: list[OrderItemResponse] | None = None,
+    ) -> OrderResponse:
         now = datetime.now(UTC)
         order_public_id = order.public_id or uuid4()
         return cls(
@@ -179,7 +194,11 @@ class OrderResponse(BaseModel):
             status=order.status or OrderStatus.CREATED,
             version=order.version if order.version is not None else 1,
             totalAmount=order.total_amount if order.total_amount is not None else Decimal("0.00"),
-            items=[OrderItemResponse.from_model(item) for item in order.items],
+            items=(
+                items
+                if items is not None
+                else [OrderItemResponse.from_model(item) for item in order.items]
+            ),
             confirmedAt=order.confirmed_at,
             confirmedBy=order.confirmed_by,
             inPreparationAt=order.in_preparation_at,
