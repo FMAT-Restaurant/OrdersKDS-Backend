@@ -603,6 +603,65 @@ def test_confirm_order_rejects_terminal_state_without_publishing(
     assert len(fake_session.outbox_rows) == 0
 
 
+def test_confirm_order_not_found_returns_404(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+) -> None:
+    """Return 404 ORDER_NOT_FOUND when confirming a non-existent order."""
+    missing_id = uuid4()
+    response = client.post(
+        f"/orders/{missing_id}/confirm",
+        headers=auth_headers("waiter"),
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == ErrorCode.ORDER_NOT_FOUND
+
+
+def test_confirm_order_role_matrix(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Role matrix for POST /orders/{orderId}/confirm (RNF-03)."""
+    order = Order(public_id=uuid4(), status=OrderStatus.CREATED)
+    test_db[order.public_id] = order
+
+    assert (
+        client.post(
+            f"/orders/{order.public_id}/confirm",
+            headers=auth_headers("waiter"),
+        ).status_code
+        == 200
+    )
+
+    assert (
+        client.post(
+            f"/orders/{order.public_id}/confirm",
+            headers=auth_headers("admin"),
+        ).status_code
+        == 200
+    )
+
+    resp_kitchen = client.post(
+        f"/orders/{order.public_id}/confirm",
+        headers=auth_headers("kitchen"),
+    )
+    assert resp_kitchen.status_code == 403
+    assert resp_kitchen.json()["error"]["code"] == ErrorCode.FORBIDDEN_ROLE
+
+    resp_chef = client.post(
+        f"/orders/{order.public_id}/confirm",
+        headers=auth_headers("chef"),
+    )
+    assert resp_chef.status_code == 403
+    assert resp_chef.json()["error"]["code"] == ErrorCode.FORBIDDEN_ROLE
+
+    resp_unauth = client.post(f"/orders/{order.public_id}/confirm")
+    assert resp_unauth.status_code == 401
+    assert resp_unauth.json()["error"]["code"] == ErrorCode.UNAUTHENTICATED
+
+
 @pytest.mark.parametrize(
     "invalid_status",
     [
