@@ -19,6 +19,16 @@ class CatalogValidatorProtocol(Protocol):
         ...
 
 
+class CatalogRepositoryValidator:
+    """Adapt the Redis catalog projection to the order API validator contract."""
+
+    def __init__(self, repository: CatalogValidatorProtocol) -> None:
+        self._repository = repository
+
+    async def validate_dish_available(self, dish_id: str) -> None:
+        await self._repository.validate_dish_available(dish_id)
+
+
 class DefaultCatalogValidator:
     """In-memory and stub-friendly catalog validator.
 

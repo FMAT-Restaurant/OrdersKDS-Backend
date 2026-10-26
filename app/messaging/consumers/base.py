@@ -17,6 +17,7 @@ from typing import Any, Protocol
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.messaging.consumers.catalog import CatalogConsumer
 from app.messaging.consumers.payment_completed import handle_payment_completed
 from app.messaging.consumers.stock_insufficient import handle_stock_insufficient
 from app.messaging.consumers.stock_reserved import handle_stock_reserved
@@ -114,6 +115,7 @@ async def _execute_typed_handler(
     parsed_data: dict[str, Any],
     uow: UnitOfWork,
     notifier: OrderNotifier | None,
+    catalog_consumer: CatalogConsumer | None,
 ) -> bool:
     """Validate data against specific Pydantic model and execute domain handler."""
     target_lower = target_event.lower()
@@ -132,6 +134,12 @@ async def _execute_typed_handler(
         msg_pay = PaymentCompletedMessage.model_validate(parsed_data)
         return await handle_payment_completed(msg_pay, uow, notifier=notifier)
 
+    menu_events = tuple(event.value for event in EventName if event.value.startswith("menu."))
+    if target_event in menu_events:
+        if catalog_consumer is None:
+            raise RuntimeError("Catalog consumer is required for menu events")
+        return await catalog_consumer.consume(target_event, parsed_data)
+
     raise ValueError(f"Unknown or unmapped event type: {target_event}")
 
 
@@ -144,11 +152,13 @@ class EventConsumerDispatcher:
         dlq_router: DLQRouter | None = None,
         notifier: OrderNotifier | None = None,
         uow_factory: Callable[[SessionFactory], UnitOfWork] | None = None,
+        catalog_consumer: CatalogConsumer | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._dlq_router: DLQRouter = dlq_router or InMemoryDLQRouter()
         self._notifier = notifier
         self._uow_factory = uow_factory or UnitOfWork
+        self._catalog_consumer = catalog_consumer
 
     @property
     def dlq_router(self) -> DLQRouter:
@@ -179,6 +189,7 @@ class EventConsumerDispatcher:
                 parsed_data=parsed_data,
                 uow=uow,
                 notifier=self._notifier,
+                catalog_consumer=self._catalog_consumer,
             )
         except (ValidationError, ValueError, TypeError) as err:
             await self._dlq_router.route_to_dlq(

@@ -9,6 +9,8 @@ from decimal import Decimal
 from typing import Protocol
 from uuid import UUID
 
+from app.domain.errors import DishUnavailableError
+
 logger = logging.getLogger(__name__)
 
 MAX_STATION_LENGTH = 50
@@ -84,6 +86,15 @@ class CatalogRepository:
     async def get(self, dish_id: UUID | str) -> dict[str, str]:
         values = await self._redis.hgetall(self.key(dish_id))
         return {_decode(key): _decode(value) for key, value in values.items()}
+
+    async def validate_dish_available(self, dish_id: str) -> None:
+        """Raise the domain error when the projected item is unavailable."""
+        values = await self.get(dish_id)
+        if values.get("available", "true").lower() != "true":
+            raise DishUnavailableError(
+                dish_id=dish_id,
+                reason="Dish marked unavailable in catalog",
+            )
 
     async def upsert(
         self,
