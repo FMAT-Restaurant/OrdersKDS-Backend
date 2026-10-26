@@ -8,12 +8,58 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from typing import Any, Protocol, cast
+import unicodedata
 
 from redis.asyncio import Redis
 
 from app.cache.catalog import CatalogRepository
 from app.core.config import get_redis_url
 from app.domain.errors import DishUnavailableError
+
+
+def normalize_station_name(name: str | None) -> str | None:
+    """Normalize station name: strip, lowercase, and remove accents (NFD).
+
+    Satisfies: RF-08, OP-09
+    """
+    if name is None:
+        return None
+    cleaned = name.strip().lower()
+    normalized = unicodedata.normalize("NFD", cleaned)
+    return "".join(c for c in normalized if unicodedata.category(c) != "Mn")
+
+
+_CATALOG_MOCK_REGISTRY: dict[str, dict[str, str | None]] = {}
+
+
+def register_catalog_mock(
+    item_id: str,
+    station: str | None = None,
+    preparation_time_text: str | None = None,
+) -> None:
+    """Register station and preparation time for a dish/item ID in the mock."""
+    _CATALOG_MOCK_REGISTRY[item_id] = {
+        "station": station,
+        "preparation_time_text": preparation_time_text,
+    }
+
+
+def clear_catalog_mock() -> None:
+    """Clear all entries in the catalog mock registry."""
+    _CATALOG_MOCK_REGISTRY.clear()
+
+
+def get_catalog_info_mock(item_id: str) -> dict[str, str | None]:
+    """Temporary mock for catalog information until TASK-21a (Redis local view).
+
+    Rule of TASK-21a: If a dish has no station, returns station: None.
+    """
+    if item_id in _CATALOG_MOCK_REGISTRY:
+        return dict(_CATALOG_MOCK_REGISTRY[item_id])
+    return {
+        "station": None,
+        "preparation_time_text": None,
+    }
 
 
 class CatalogValidatorProtocol(Protocol):
