@@ -138,6 +138,7 @@ class OrderRepository:
             .with_for_update(skip_locked=True)
         )
         return list(result)
+
     async def get_by_dining_session_id(self, session_id: UUID | str) -> Order | None:
         """Fetch the order associated with a dining session."""
         session_uuid = session_id if isinstance(session_id, UUID) else UUID(session_id)
