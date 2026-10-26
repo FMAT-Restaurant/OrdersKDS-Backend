@@ -1,8 +1,8 @@
 """Orders router: creation and modification of order drafts.
 
-Every route is guarded by JWT role claims (ADR-0011). Waiters and admins can create
-and modify draft orders. Modification is strictly rejected once the order has been confirmed
-or has moved past CREATED status (OP-05 / ADR-0004).
+Every route is guarded by JWT role claims (ADR-0011). Waiters and admins can create,
+modify, and confirm draft orders. Modification is strictly rejected once the order has
+been confirmed or has moved past CREATED status (OP-05 / ADR-0004).
 
 Satisfies: RF-12, RF-13, RF-14, RF-15, RF-17, RF-23, RNF-03, RNF-09, RNF-13
 """
@@ -26,6 +26,7 @@ from app.domain.order_status import ItemStatus, OrderStatus
 from app.domain.roles import Role
 from app.repositories.orders import OrderRepository
 from app.services.catalog import CatalogValidatorProtocol, get_catalog_validator
+from app.services.orders import OrderService
 
 logger = logging.getLogger(__name__)
 
@@ -182,25 +183,44 @@ async def update_order_items(
     return OrderResponse.from_model(order)
 
 
+@router.post(
+    "/{orderId}/confirm",
+    status_code=status.HTTP_200_OK,
+    summary="Confirm order",
+    description=(
+        "Confirms a draft order and queues inventory reservation without waiting for Inventory."
+    ),
+)
+async def confirm_order(
+    order_id: OrderIdPath,
+    auth: Annotated[AuthContext, Depends(require_roles(Role.WAITER, Role.ADMIN))],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> OrderResponse:
+    """Confirm an order once, atomically recording its timestamp and outbox event (TASK-11)."""
+    order = await OrderService(session).confirm_order(
+        order_id,
+        confirmed_by=_parse_actor_uuid(auth.user_id),
+    )
+    return OrderResponse.from_model(order)
+
+
 @router.get(
     "/{orderId}",
     status_code=status.HTTP_200_OK,
     summary="Get order details",
     description="Retrieve an order aggregate by public UUID.",
+    dependencies=[
+        Depends(require_roles(Role.WAITER, Role.ADMIN, Role.KITCHEN, Role.CHEF)),
+    ],
 )
 async def get_order_by_id(
     order_id: OrderIdPath,
-    _auth: Annotated[
-        AuthContext,
-        Depends(require_roles(Role.WAITER, Role.ADMIN, Role.KITCHEN, Role.CHEF)),
-    ],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OrderResponse:
     """Fetch order by public UUID (RF-18).
 
     Args:
         order_id: Public UUID of target order.
-        _auth: Authenticated caller context.
         session: Active database session.
 
     Returns:

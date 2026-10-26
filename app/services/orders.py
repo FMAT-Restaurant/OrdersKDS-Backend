@@ -1,11 +1,12 @@
 """Order domain service orchestrating lifecycle operations and transitions.
 
-Satisfies: RF-09, RF-10, RF-11, RF-18, RNF-01, RNF-03, OP-08
+Satisfies: RF-09, RF-10, RF-11, RF-18, RNF-01, RNF-03, OP-05, OP-08
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -17,12 +18,14 @@ from app.db.models import Order
 from app.db.session import get_session
 from app.domain.errors import (
     ForbiddenRoleError,
+    InvalidOrderItemError,
     InvalidStateTransitionError,
     OrderNotFoundError,
 )
 from app.domain.order_status import ItemStatus, OrderStatus
 from app.domain.roles import KITCHEN_ROLES
-from app.messaging.events import DishPreparedEvent
+from app.messaging.events import DishPreparedEvent, OrderCreatedEvent, OrderCreatedItem
+from app.messaging.validator import validate_event_payload
 from app.repositories.orders import OrderRepository
 from app.repositories.outbox import OutboxRepository
 from app.services.notifications import (
@@ -128,6 +131,47 @@ class OrderService:
         await self._session.commit()
         await notify_order_changed(order, notifier=self._notifier)
         return order
+
+    async def confirm_order(self, order_id: UUID, confirmed_by: UUID) -> Order:
+        """Confirm an order and atomically stage its inventory event (OP-05, TASK-11)."""
+        order = await self._orders.get_for_update(order_id)
+
+        if order.status == OrderStatus.CREATED:
+            if order.confirmed_at is None:
+                event_items: list[OrderCreatedItem] = []
+                for item in order.items:
+                    dish_id = item.dish_id
+                    if dish_id is None or item.quantity < 1:
+                        raise InvalidOrderItemError()
+                    event_items.append(
+                        OrderCreatedItem(plateId=dish_id, quantity=item.quantity)
+                    )
+                event = OrderCreatedEvent.for_order(
+                    order.public_id,
+                    items=event_items,
+                )
+                payload = event.model_dump(mode="json", by_alias=True)
+                validate_event_payload(event.event_name, payload)
+                order.confirmed_at = datetime.now(UTC)
+                order.confirmed_by = confirmed_by
+                self._outbox.add(event)
+                self._orders.save(order)
+                await self._session.commit()
+            elif order.confirmed_by is None:
+                order.confirmed_by = confirmed_by
+                self._orders.save(order)
+                await self._session.commit()
+            return order
+
+        if order.status in {
+            OrderStatus.IN_PREPARATION,
+            OrderStatus.DELIVERED,
+            OrderStatus.WASTED,
+            OrderStatus.PAID,
+        }:
+            return order
+
+        raise InvalidStateTransitionError(order.status, "CONFIRM")
 
 
 def get_order_service(

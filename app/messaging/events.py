@@ -10,10 +10,17 @@ from __future__ import annotations
 
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any, ClassVar, Self
+from typing import Any, ClassVar, Self, TypeGuard, cast
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+def _is_string_keyed_dict(value: object) -> TypeGuard[dict[str, object]]:
+    if not isinstance(value, dict):
+        return False
+    keys = cast(dict[object, object], value)
+    return all(isinstance(key, str) for key in keys)
 
 
 class EventName(StrEnum):
@@ -65,10 +72,37 @@ class OrderEvent(BaseModel):
         return cls(eventId=event_id, orderId=order_id, correlationId=correlation_id)
 
 
+class OrderCreatedItem(BaseModel):
+    """Inventory-facing dish and quantity included in an order-created event."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    plate_id: str = Field(alias="plateId", min_length=1)
+    quantity: int = Field(gt=0)
+
+
 class OrderCreatedEvent(OrderEvent):
     """Event emitted when an order enters the inventory reservation flow."""
 
     event_name: ClassVar[EventName] = EventName.ORDER_CREATED
+    items: list[OrderCreatedItem] = Field(alias="items")
+
+    @classmethod
+    def for_order(
+        cls,
+        order_id: UUID,
+        *,
+        items: list[OrderCreatedItem] | None = None,
+        correlation_id: UUID | None = None,
+    ) -> OrderCreatedEvent:
+        """Build the deterministic inventory-reservation event for an order."""
+        event_id = uuid5(NAMESPACE_URL, f"{cls.event_name}:{order_id}")
+        return cls(
+            eventId=event_id,
+            orderId=order_id,
+            correlationId=correlation_id,
+            items=items or [],
+        )
 
 
 class DishPreparedEvent(OrderEvent):
@@ -122,7 +156,7 @@ class StockReservedMessage(BaseModel):
     order_id: UUID = Field(alias="orderId")
     correlation_id: UUID | None = Field(default=None, alias="correlationId")
     reservations: list[dict[str, object] | str] = Field(
-        default_factory=list,
+        default_factory=list[dict[str, object] | str],
         alias="reservas",
     )
 
@@ -159,9 +193,11 @@ class PaymentCompletedMessage(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _extract_nested_data(cls, data: Any) -> Any:
-        if isinstance(data, dict) and "data" in data and isinstance(data["data"], dict):
-            nested = dict(data["data"])
-            merged = {**nested, **data}
+        if not _is_string_keyed_dict(data):
+            return data
+        nested = data.get("data")
+        if _is_string_keyed_dict(nested):
+            merged: dict[str, object] = {**nested, **data}
             if "eventId" in data:
                 merged["eventId"] = data["eventId"]
             return merged
@@ -181,10 +217,12 @@ class DiningSessionCreatedMessage(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _normalize_payload(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
+        if not _is_string_keyed_dict(data):
             return data
         nested = data.get("data")
-        payload = {**nested, **data} if isinstance(nested, dict) else dict(data)
+        payload: dict[str, object] = (
+            {**nested, **data} if _is_string_keyed_dict(nested) else dict(data)
+        )
         if "meseroId" in payload and "waiterId" not in payload:
             payload["waiterId"] = payload["meseroId"]
         if "comensales" in payload and "dinersCount" not in payload:
