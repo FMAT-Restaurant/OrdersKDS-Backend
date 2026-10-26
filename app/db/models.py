@@ -20,7 +20,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Numeric, String, UniqueConstraint, Uuid
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, synonym
 
 from app.db.base import Base
 from app.domain.order_status import ItemStatus, OrderStatus, ensure_transition_allowed
@@ -37,6 +37,7 @@ class Order(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     public_id: Mapped[UUID] = mapped_column(Uuid, default=uuid.uuid4, unique=True, nullable=False)
+    order_id = synonym("public_id")
     status: Mapped[OrderStatus] = mapped_column(
         Enum(OrderStatus, name="order_status", validate_strings=True),
         default=OrderStatus.CREATED,
