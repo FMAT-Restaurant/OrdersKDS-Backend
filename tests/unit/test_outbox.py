@@ -21,8 +21,8 @@ def test_outbox_table_is_registered() -> None:
 def test_order_event_id_is_deterministic_per_order_and_type() -> None:
     order_id = uuid4()
 
-    first = OrderCreatedEvent.for_order(order_id)
-    retry = OrderCreatedEvent.for_order(order_id)
+    first = OrderCreatedEvent.for_order(order_id, [])
+    retry = OrderCreatedEvent.for_order(order_id, [])
 
     assert first.event_id == retry.event_id
     assert first.event_name is EventName.ORDER_CREATED
@@ -41,7 +41,7 @@ def test_repeatable_event_gets_a_new_id_for_each_emission() -> None:
 async def test_add_stages_event_without_committing() -> None:
     session = Mock(spec=AsyncSession)
     session.add = Mock()
-    event = OrderCreatedEvent.for_order(uuid4())
+    event = OrderCreatedEvent.for_order(uuid4(), [])
 
     row = OutboxRepository(session).add(event)
 
@@ -63,7 +63,7 @@ async def test_unit_of_work_rolls_back_state_and_outbox_on_failure() -> None:
     with pytest.raises(RuntimeError):
         async with UnitOfWork(session_factory) as uow:
             assert uow.outbox is not None
-            uow.outbox.add(OrderCreatedEvent.for_order(uuid4()))
+            uow.outbox.add(OrderCreatedEvent.for_order(uuid4(), []))
             raise RuntimeError("simulated failure after staging the event")
 
     session.rollback.assert_awaited_once()

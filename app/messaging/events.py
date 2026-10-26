@@ -24,13 +24,20 @@ class EventName(StrEnum):
 class OrderEvent(BaseModel):
     """Base event with a stable id for one order and event type."""
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
     event_name: ClassVar[EventName]
     unique_per_order: ClassVar[bool] = True
 
     event_id: UUID = Field(alias="eventId")
     order_id: UUID = Field(alias="orderId")
     correlation_id: UUID | None = Field(default=None, alias="correlationId")
+
+    @classmethod
+    def _event_id_for_order(cls, order_id: UUID) -> UUID:
+        event_type = cls.event_name
+        if cls.unique_per_order:
+            return uuid5(NAMESPACE_URL, f"{event_type}:{order_id}")
+        return uuid4()
 
     @classmethod
     def for_order(
@@ -40,17 +47,41 @@ class OrderEvent(BaseModel):
         correlation_id: UUID | None = None,
     ) -> OrderEvent:
         """Build an event whose id is stable across retries and re-entrance."""
-        event_type = getattr(cls, "event_name", EventName.ORDER_CREATED)
-        event_id = (
-            uuid5(NAMESPACE_URL, f"{event_type}:{order_id}") if cls.unique_per_order else uuid4()
-        )
+        event_id = cls._event_id_for_order(order_id)
         return cls(eventId=event_id, orderId=order_id, correlationId=correlation_id)
+
+
+class OrderCreatedItem(BaseModel):
+    """Inventory reservation data for one order line."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    item_id: UUID = Field(alias="itemId")
+    name: str = Field(min_length=1, max_length=200, strict=True)
+    quantity: int = Field(gt=0, strict=True)
 
 
 class OrderCreatedEvent(OrderEvent):
     """Event emitted when an order enters the inventory reservation flow."""
 
     event_name: ClassVar[EventName] = EventName.ORDER_CREATED
+    items: list[OrderCreatedItem]
+
+    @classmethod
+    def for_order(
+        cls,
+        order_id: UUID,
+        items: list[OrderCreatedItem] | None = None,
+        *,
+        correlation_id: UUID | None = None,
+    ) -> OrderCreatedEvent:
+        """Build an order-created event with a deterministic id and validated items."""
+        return cls(
+            eventId=cls._event_id_for_order(order_id),
+            orderId=order_id,
+            correlationId=correlation_id,
+            items=items or [],
+        )
 
 
 class DishPreparedEvent(OrderEvent):
