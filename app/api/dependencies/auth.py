@@ -47,6 +47,28 @@ class AuthContext(BaseModel):
 
     user_id: str = Field(min_length=1, description="Caller identifier taken from the JWT.")
     role: Role = Field(description="Caller role taken from the JWT.")
+    exp: float | None = Field(default=None, description="Expiration timestamp (epoch seconds).")
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, AuthContext):
+            return False
+        if other.exp is None or self.exp is None:
+            return self.user_id == other.user_id and self.role == other.role
+        return (
+            self.user_id == other.user_id
+            and self.role == other.role
+            and abs(self.exp - other.exp) < 1.0
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.user_id, self.role))
+
+    def is_expired(self, now: float | None = None) -> bool:
+        """Check whether token expiration has been reached."""
+        if self.exp is None:
+            return False
+        current_time = now if now is not None else time.time()
+        return current_time >= self.exp
 
 
 def _extract_bearer_token(authorization: str | None) -> str:
@@ -107,7 +129,9 @@ def _context_from_claims(claims: dict[str, Any]) -> AuthContext:
         role = Role(raw_role)
     except ValueError as exc:
         raise UnauthenticatedError(_AUTH_REQUIRED_MESSAGE) from exc
-    return AuthContext(user_id=user_id, role=role)
+    exp_val = claims.get("exp")
+    exp = float(exp_val) if isinstance(exp_val, (int, float)) else None
+    return AuthContext(user_id=user_id, role=role, exp=exp)
 
 
 def resolve_auth_context(authorization: str | None) -> AuthContext:
@@ -128,7 +152,17 @@ def resolve_auth_context(authorization: str | None) -> AuthContext:
 
 def get_auth_context(connection: HTTPConnection) -> AuthContext:
     """FastAPI dependency resolving the caller of an HTTP request or WebSocket handshake."""
-    return resolve_auth_context(connection.headers.get("authorization"))
+    authorization = connection.headers.get("authorization")
+    if not authorization:
+        # Check Sec-WebSocket-Protocol header for browser websockets (SEC-09)
+        ws_protocol = connection.headers.get("sec-websocket-protocol")
+        if ws_protocol:
+            parts = [p.strip() for p in ws_protocol.split(",")]
+            if len(parts) >= 2 and parts[0].lower() == "bearer":
+                authorization = f"Bearer {parts[1]}"
+            elif len(parts) == 1 and "." in parts[0]:
+                authorization = f"Bearer {parts[0]}"
+    return resolve_auth_context(authorization)
 
 
 def ensure_role_allowed(context: AuthContext, allowed_roles: frozenset[Role]) -> None:
@@ -178,7 +212,13 @@ async def authorize_websocket(
     Returns:
         The caller identity, or ``None`` when the connection was closed.
     """
-    await websocket.accept()
+    ws_protocol = websocket.headers.get("sec-websocket-protocol")
+    selected_subprotocol = None
+    if ws_protocol:
+        protocols = [p.strip() for p in ws_protocol.split(",")]
+        selected_subprotocol = protocols[0]
+
+    await websocket.accept(subprotocol=selected_subprotocol)
     try:
         context = get_auth_context(websocket)
         ensure_role_allowed(context, allowed_roles)

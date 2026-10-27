@@ -1,60 +1,57 @@
-"""WebSocket endpoints of the KDS and waiter channels.
+"""WebSocket endpoints combining KDS and waiter channels.
 
 Role matrix (OP-02 / ADR-0002): ``/ws/kds`` -> kitchen, chef, admin;
 ``/ws/waiter`` -> waiter, admin. An unauthenticated caller is closed with ``4401`` and a
 role that does not match the endpoint with ``4403``.
 
-Satisfies: RNF-03, RNF-04, RF-18
-
-TODO(RNF-04, RF-18, TASK-29): channels (``kds:station:{station}``, ``kds:all``, ``floor``,
-``user:{userId}``), the ``subscribe`` message, ``FORBIDDEN_CHANNEL`` and the push of
-``order.status_changed`` / ``item.status_changed``. Until then inbound messages are ignored.
-
-TODO(RNF-03, TASK-29, TASK-30): browsers cannot set an ``Authorization`` header on
-``new WebSocket`` and the token must not travel in the URL. Agree with the Gateway how the
-token reaches this service (forwarded header vs. subprotocol) before the frontend connects.
+Satisfies: RNF-03, RNF-04, RF-18, SEC-09, OP-02 (ADR-0002)
 """
+
+from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
 from typing import Final
 
-from fastapi import APIRouter, WebSocket
+from fastapi import APIRouter
 
-from app.api.dependencies.auth import authorize_websocket
-from app.domain.roles import KITCHEN_ROLES, WAITER_ROLES, Role
+from app.api.websockets.kds_socket import (
+    KDS_ALLOWED_ROLES,
+    KDS_WS_PATH,
+    kds_websocket,
+)
+from app.api.websockets.kds_socket import (
+    router as kds_router,
+)
+from app.api.websockets.waiter_socket import (
+    WAITER_ALLOWED_ROLES,
+    WAITER_WS_PATH,
+    waiter_websocket,
+)
+from app.api.websockets.waiter_socket import (
+    router as waiter_router,
+)
+from app.domain.roles import Role
 
 logger = logging.getLogger(__name__)
 
-KDS_WS_PATH: Final = "/ws/kds"
-WAITER_WS_PATH: Final = "/ws/waiter"
-
-# Role x WebSocket endpoint matrix (TASK-20), as data.
+# Role x WebSocket endpoint matrix (TASK-20, TASK-29), as data.
 WS_ROLES_BY_PATH: Final[Mapping[str, frozenset[Role]]] = {
-    KDS_WS_PATH: KITCHEN_ROLES,
-    WAITER_WS_PATH: WAITER_ROLES,
+    KDS_WS_PATH: KDS_ALLOWED_ROLES,
+    WAITER_WS_PATH: WAITER_ALLOWED_ROLES,
 }
 
 router = APIRouter()
+router.include_router(kds_router)
+router.include_router(waiter_router)
 
-
-async def _serve(websocket: WebSocket, path: str) -> None:
-    context = await authorize_websocket(websocket, WS_ROLES_BY_PATH[path])
-    if context is None:
-        return
-    # iter_text ends cleanly when the client disconnects.
-    async for _ignored in websocket.iter_text():
-        continue
-    logger.debug("websocket closed", extra={"path": path, "user_id": context.user_id})
-
-
-@router.websocket(KDS_WS_PATH)
-async def kds_websocket(websocket: WebSocket) -> None:
-    """Kitchen channel. Roles: kitchen, chef, admin."""
-    await _serve(websocket, KDS_WS_PATH)
-
-
-@router.websocket(WAITER_WS_PATH)
-async def waiter_websocket(websocket: WebSocket) -> None:
-    """Waiter channel. Roles: waiter, admin."""
-    await _serve(websocket, WAITER_WS_PATH)
+__all__ = [
+    "KDS_ALLOWED_ROLES",
+    "KDS_WS_PATH",
+    "WAITER_ALLOWED_ROLES",
+    "WAITER_WS_PATH",
+    "WS_ROLES_BY_PATH",
+    "kds_websocket",
+    "router",
+    "waiter_websocket",
+]

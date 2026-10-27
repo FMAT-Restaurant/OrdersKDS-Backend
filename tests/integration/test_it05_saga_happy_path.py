@@ -16,7 +16,7 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Order, ProcessedEvent
+from app.db.models import Order, OrderItem, ProcessedEvent
 from app.domain.order_status import OrderStatus
 from app.messaging.consumers.base import EventConsumerDispatcher, InMemoryDLQRouter
 from app.messaging.events import EventName
@@ -111,6 +111,9 @@ class TrackingNotifier:
 
     async def notify_order_changed(self, order: Order) -> None:
         self.notifications.append(order)
+
+    async def notify_item_changed(self, order: Order, item: OrderItem) -> None:
+        pass
 
 
 @pytest.mark.integration

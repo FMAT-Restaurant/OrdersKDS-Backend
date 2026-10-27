@@ -79,7 +79,9 @@ class OrderRepository:
             The Order if found, or None.
         """
         order_uuid = public_id if isinstance(public_id, UUID) else UUID(public_id)
-        query = select(Order).where(Order.public_id == order_uuid)
+        query = (
+            select(Order).options(selectinload(Order.items)).where(Order.public_id == order_uuid)
+        )
         if for_update:
             query = query.with_for_update()
         return await self._session.scalar(query)

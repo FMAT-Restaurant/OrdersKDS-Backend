@@ -41,9 +41,13 @@ class SpyOrderNotifier(OrderNotifier):
 
     def __init__(self) -> None:
         self.notified_orders: list[Order] = []
+        self.notified_items: list[tuple[Order, OrderItem]] = []
 
     async def notify_order_changed(self, order: Order) -> None:
         self.notified_orders.append(order)
+
+    async def notify_item_changed(self, order: Order, item: OrderItem) -> None:
+        self.notified_items.append((order, item))
 
 
 @pytest.fixture
@@ -136,8 +140,11 @@ def test_mark_item_ready_publishes_dish_prepared(
     assert event_row.payload["itemId"] == str(item1.public_id)
     assert fake_session.committed is True
 
-    # Order has not reached DELIVERED yet, so notification not sent
+    # Order has not reached DELIVERED yet, so order notification not sent
     assert len(spy_notifier.notified_orders) == 0
+    assert len(spy_notifier.notified_items) == 1
+    assert spy_notifier.notified_items[0][0].public_id == order.public_id
+    assert spy_notifier.notified_items[0][1].public_id == item1.public_id
 
 
 def test_mark_item_ready_idempotent_no_duplicate_publish(
@@ -193,6 +200,8 @@ def test_mark_item_ready_last_item_transitions_order_and_items_to_delivered(
     assert fake_session.outbox_rows[0].payload["itemId"] == str(item2.public_id)
 
     # Notification broadcast triggered after commit
+    assert len(spy_notifier.notified_items) == 1
+    assert spy_notifier.notified_items[0][1].public_id == item2.public_id
     assert len(spy_notifier.notified_orders) == 1
     assert spy_notifier.notified_orders[0].public_id == order.public_id
 

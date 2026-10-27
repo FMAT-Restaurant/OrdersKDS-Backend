@@ -31,6 +31,7 @@ from app.repositories.outbox import OutboxRepository
 from app.services.notifications import (
     OrderNotifier,
     default_notifier,
+    notify_item_changed,
     notify_order_changed,
 )
 
@@ -98,6 +99,7 @@ class OrderService:
         self._orders.save(order)
         await self._session.commit()
 
+        await notify_item_changed(order, target_item, notifier=self._notifier)
         if delivered_now:
             await notify_order_changed(order, notifier=self._notifier)
         return order
