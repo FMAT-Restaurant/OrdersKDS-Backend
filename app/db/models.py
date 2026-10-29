@@ -115,6 +115,11 @@ class Order(Base):
         ensure_transition_allowed(self.status, OrderStatus.PAID)
         self.status = OrderStatus.PAID
 
+    def mark_cancelled(self) -> None:
+        """Transition order to CANCELLED (RF-24)."""
+        ensure_transition_allowed(self.status, OrderStatus.CANCELLED)
+        self.status = OrderStatus.CANCELLED
+
 
 class OrderItem(Base):
     """Single line of an order."""

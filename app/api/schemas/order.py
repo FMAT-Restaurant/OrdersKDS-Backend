@@ -121,6 +121,14 @@ class TransferOrderRequest(BaseModel):
     )
 
 
+class CancelOrderRequest(BaseModel):
+    """Optional payload for cancelling an order (RF-24)."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    reason: str | None = Field(default=None, description="Optional cancellation reason.")
+
+
 class OrderItemResponse(BaseModel):
     """Public representation of an order item."""
 

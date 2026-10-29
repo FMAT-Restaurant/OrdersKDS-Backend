@@ -4,7 +4,8 @@ Every route is guarded by JWT role claims (ADR-0011). Waiters and admins can cre
 modify, query, transfer, and confirm draft orders. Modification is strictly rejected
 once the order has been confirmed or has moved past CREATED status (OP-05 / ADR-0004).
 
-Satisfies: RF-12, RF-13, RF-14, RF-15, RF-16, RF-17, RF-18, RF-23, RNF-03, RNF-09, RNF-13
+Satisfies: RF-12, RF-13, RF-14, RF-15, RF-16, RF-17, RF-18, RF-23, RF-24, RF-25,
+           RNF-03, RNF-09, RNF-13
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies.auth import AuthContext, require_roles
 from app.api.schemas.errors import ErrorResponse
 from app.api.schemas.order import (
+    CancelOrderRequest,
     CreateOrderRequest,
     OrderResponse,
     TransferOrderRequest,
@@ -260,6 +262,52 @@ async def update_order_items(
         order.public_id,
         auth.user_id,
         order.total_amount,
+    )
+    return OrderResponse.from_model(order)
+
+
+@router.patch(
+    "/{orderId}/cancel",
+    status_code=status.HTTP_200_OK,
+    summary="Cancel order",
+    description=(
+        "Cancels an order while in CREATED status and publishes compensation event (RF-24, RF-25)."
+    ),
+)
+@router.post(
+    "/{orderId}/cancel",
+    status_code=status.HTTP_200_OK,
+    summary="Cancel order (POST alias)",
+    description=(
+        "Cancels an order while in CREATED status and publishes compensation event (RF-24, RF-25)."
+    ),
+    include_in_schema=False,
+)
+async def cancel_order(
+    order_id: OrderIdPath,
+    auth: Annotated[AuthContext, Depends(require_roles(Role.WAITER, Role.ADMIN))],
+    order_service: Annotated[OrderService, Depends(get_order_service)],
+    payload: CancelOrderRequest | None = None,
+) -> OrderResponse:
+    """Cancel an order draft in CREATED status (RF-24, RF-25).
+
+    Args:
+        order_id: Public UUID of target order.
+        auth: Authenticated caller context from JWT.
+        order_service: Order domain service instance.
+        payload: Optional cancellation payload.
+
+    Returns:
+        The cancelled Order aggregate representation.
+
+    Raises:
+        OrderNotFoundError: If order does not exist (404).
+        InvalidStateTransitionError: If order is not in CREATED status (409).
+    """
+    order = await order_service.cancel_order(
+        order_id=order_id,
+        auth=auth,
+        reason=payload.reason if payload else None,
     )
     return OrderResponse.from_model(order)
 
