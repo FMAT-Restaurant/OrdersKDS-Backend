@@ -3,8 +3,8 @@
 Covers order creation, item replacement with modifiers and notes, catalog validation,
 price freezing, state and confirmation guards, error envelopes, and role matrix.
 
-Satisfies: RF-12, RF-13, RF-14, RF-15, RF-17, RF-23, RNF-03, OP-05
-Covers: UT-BE-25, UT-BE-26, UT-BE-27, UT-BE-28, UT-BE-60, CT-02, CT-03
+Satisfies: RF-12, RF-13, RF-14, RF-15, RF-16, RF-17, RF-18, RF-23, RNF-03, RNF-09, OP-05
+Covers: UT-BE-25, UT-BE-26, UT-BE-27, UT-BE-28, UT-BE-29, UT-BE-60, CT-01, CT-02, CT-03, CT-04
 """
 
 from __future__ import annotations
@@ -12,24 +12,38 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.core.error_codes import ErrorCode
 from app.db.models import Order, OrderItem, Outbox
 from app.db.session import get_session
-from app.domain.errors import DishUnavailableError
+from app.domain.errors import DishUnavailableError, VersionConflictError
 from app.domain.order_status import OrderStatus
 from app.main import app
 from app.services.catalog import CatalogValidatorProtocol, get_catalog_validator
+from app.services.notifications import OrderNotifier
+from app.services.orders import OrderService, get_order_service
 
 pytestmark = [
     pytest.mark.unit,
     pytest.mark.requirement(
-        "RF-12", "RF-13", "RF-14", "RF-15", "RF-17", "RF-23", "RNF-03", "OP-05"
+        "RF-12",
+        "RF-13",
+        "RF-14",
+        "RF-15",
+        "RF-16",
+        "RF-17",
+        "RF-18",
+        "RF-23",
+        "RNF-03",
+        "RNF-09",
+        "OP-05",
     ),
 ]
 
@@ -56,6 +70,32 @@ class FakeAsyncSession:
 
     async def rollback(self) -> None:
         self.rolled_back = True
+
+    async def scalars(self, statement: Any, *args: Any, **kwargs: Any) -> Any:
+        params = statement.compile().params
+        status_val = next((v for v in params.values() if isinstance(v, OrderStatus)), None)
+        orders = list(self.db.values())
+        if status_val is not None:
+            orders = [o for o in orders if o.status == status_val]
+        orders.sort(
+            key=lambda o: (
+                o.created_at or datetime.min.replace(tzinfo=UTC),
+                o.public_id,
+            ),
+            reverse=True,
+        )
+
+        class _Result:
+            def unique(self) -> _Result:
+                return self
+
+            def all(self) -> list[Order]:
+                return orders
+
+            def __iter__(self) -> Any:
+                return iter(orders)
+
+        return _Result()
 
     async def scalar(self, statement: Any) -> Any:
         params = statement.compile().params
@@ -92,21 +132,45 @@ def fake_session(test_db: dict[UUID, Order]) -> FakeAsyncSession:
     return FakeAsyncSession(test_db)
 
 
+class SpyOrderNotifier(OrderNotifier):
+    """Spy recorder for WebSocket notification broadcasts."""
+
+    def __init__(self) -> None:
+        self.notified_orders: list[Order] = []
+        self.notified_items: list[tuple[Order, OrderItem]] = []
+
+    async def notify_order_changed(self, order: Order) -> None:
+        self.notified_orders.append(order)
+
+    async def notify_item_changed(self, order: Order, item: OrderItem) -> None:
+        self.notified_items.append((order, item))
+
+
 @pytest.fixture
 def fake_catalog() -> FakeCatalogValidator:
     return FakeCatalogValidator()
+
+
+@pytest.fixture
+def spy_notifier() -> SpyOrderNotifier:
+    return SpyOrderNotifier()
 
 
 @pytest.fixture(autouse=True)
 def override_dependencies(
     fake_session: FakeAsyncSession,
     fake_catalog: FakeCatalogValidator,
+    spy_notifier: SpyOrderNotifier,
 ) -> Any:
     async def _get_test_session() -> AsyncGenerator[FakeAsyncSession, None]:
         yield fake_session
 
     app.dependency_overrides[get_session] = _get_test_session
     app.dependency_overrides[get_catalog_validator] = lambda: fake_catalog
+    app.dependency_overrides[get_order_service] = lambda: OrderService(
+        session=cast(AsyncSession, fake_session),
+        notifier=spy_notifier,
+    )
     yield
     app.dependency_overrides.clear()
 
@@ -933,3 +997,389 @@ def test_get_order_by_id_role_matrix(
     resp_unauth = client.get(f"/orders/{order.public_id}")
     assert resp_unauth.status_code == 401
     assert resp_unauth.json()["error"]["code"] == ErrorCode.UNAUTHENTICATED
+
+
+# ==============================================================================
+# GET /orders (RF-18, CT-01)
+# ==============================================================================
+
+
+def test_list_orders_empty(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+) -> None:
+    """Empty database returns empty order list with 200 OK (RF-18, CT-01)."""
+    response = client.get("/orders", headers=auth_headers("waiter"))
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_list_orders_all_sorted_by_created_at_desc(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Return all orders sorted newest first (RF-18, CT-01)."""
+    order1 = Order(
+        public_id=uuid4(),
+        table_number=1,
+        status=OrderStatus.CREATED,
+        created_at=datetime(2026, 10, 29, 10, 0, tzinfo=UTC),
+    )
+    order2 = Order(
+        public_id=uuid4(),
+        table_number=2,
+        status=OrderStatus.IN_PREPARATION,
+        created_at=datetime(2026, 10, 29, 10, 30, tzinfo=UTC),
+    )
+    test_db[order1.public_id] = order1
+    test_db[order2.public_id] = order2
+
+    response = client.get("/orders", headers=auth_headers("waiter"))
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 2
+    assert data[0]["orderId"] == str(order2.public_id)
+    assert data[1]["orderId"] == str(order1.public_id)
+
+
+def test_list_orders_filter_by_status(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Filter orders by OrderStatus query parameter (RF-18, CT-01)."""
+    order_created = Order(
+        public_id=uuid4(),
+        table_number=3,
+        status=OrderStatus.CREATED,
+        created_at=datetime(2026, 10, 29, 9, 0, tzinfo=UTC),
+    )
+    order_in_prep = Order(
+        public_id=uuid4(),
+        table_number=4,
+        status=OrderStatus.IN_PREPARATION,
+        created_at=datetime(2026, 10, 29, 9, 15, tzinfo=UTC),
+    )
+    test_db[order_created.public_id] = order_created
+    test_db[order_in_prep.public_id] = order_in_prep
+
+    resp_created = client.get("/orders?status=CREATED", headers=auth_headers("waiter"))
+    assert resp_created.status_code == 200
+    created_data = resp_created.json()
+    assert len(created_data) == 1
+    assert created_data[0]["orderId"] == str(order_created.public_id)
+
+    resp_prep = client.get("/orders?status=IN_PREPARATION", headers=auth_headers("waiter"))
+    assert resp_prep.status_code == 200
+    prep_data = resp_prep.json()
+    assert len(prep_data) == 1
+    assert prep_data[0]["orderId"] == str(order_in_prep.public_id)
+
+    resp_delivered = client.get("/orders?status=DELIVERED", headers=auth_headers("waiter"))
+    assert resp_delivered.status_code == 200
+    assert resp_delivered.json() == []
+
+
+def test_list_orders_invalid_status_rejects_422(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+) -> None:
+    """Invalid status query parameter value returns HTTP 422 (RF-18, RNF-03, CT-01)."""
+    response = client.get("/orders?status=NON_EXISTENT_STATUS", headers=auth_headers("waiter"))
+    assert response.status_code == 422
+    data = response.json()
+    assert data["error"]["code"] == ErrorCode.VALIDATION_ERROR
+
+
+def test_list_orders_role_matrix(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Waiters and admins can list orders; kitchen/chef roles are forbidden (CT-01)."""
+    order = Order(public_id=uuid4(), status=OrderStatus.CREATED)
+    test_db[order.public_id] = order
+
+    for role in ["waiter", "admin"]:
+        resp = client.get("/orders", headers=auth_headers(role))
+        assert resp.status_code == 200
+
+    for role in ["kitchen", "chef"]:
+        resp = client.get("/orders", headers=auth_headers(role))
+        assert resp.status_code == 403
+        assert resp.json()["error"]["code"] == ErrorCode.FORBIDDEN_ROLE
+
+    resp_unauth = client.get("/orders")
+    assert resp_unauth.status_code == 401
+    assert resp_unauth.json()["error"]["code"] == ErrorCode.UNAUTHENTICATED
+
+
+# ==============================================================================
+# PATCH /orders/{orderId}/transfer (RF-16, RNF-09, UT-BE-29, CT-04)
+# ==============================================================================
+
+
+def test_transfer_order_changes_table_success(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    spy_notifier: SpyOrderNotifier,
+) -> None:
+    """UT-BE-29 & CT-04: Transfer changes table, clears takeaway, increments version, notifies."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=5,
+        is_takeaway=True,
+        status=OrderStatus.CREATED,
+        version=1,
+    )
+    test_db[order.public_id] = order
+
+    payload = {"tableNumber": 12}
+    response = client.patch(
+        f"/orders/{order.public_id}/transfer",
+        headers=auth_headers("waiter"),
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["orderId"] == str(order.public_id)
+    assert data["tableNumber"] == 12
+    assert data["isTakeaway"] is False
+    assert data["version"] == 2
+
+    # Verify DB state
+    persisted = test_db[order.public_id]
+    assert persisted.table_number == 12
+    assert persisted.is_takeaway is False
+    assert persisted.version == 2
+
+    # Verify real-time notification broadcast (UT-BE-29)
+    assert len(spy_notifier.notified_orders) == 1
+    assert spy_notifier.notified_orders[0].public_id == order.public_id
+
+
+def test_transfer_order_with_matching_version(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Transfer succeeds when matching version is passed in payload (RNF-09, CT-04)."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=2,
+        is_takeaway=False,
+        status=OrderStatus.IN_PREPARATION,
+        version=3,
+    )
+    test_db[order.public_id] = order
+
+    payload = {"tableNumber": 9, "version": 3}
+    response = client.patch(
+        f"/orders/{order.public_id}/transfer",
+        headers=auth_headers("waiter"),
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["tableNumber"] == 9
+    assert data["version"] == 4
+
+
+def test_transfer_order_stale_version_conflict_409(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Transfer rejects with 409 Conflict if payload version does not match (RNF-09, CT-04)."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=2,
+        status=OrderStatus.CREATED,
+        version=3,
+    )
+    test_db[order.public_id] = order
+
+    payload = {"tableNumber": 9, "version": 1}
+    response = client.patch(
+        f"/orders/{order.public_id}/transfer",
+        headers=auth_headers("waiter"),
+        json=payload,
+    )
+
+    assert response.status_code == 409
+    data = response.json()
+    assert data["error"]["code"] == ErrorCode.VERSION_CONFLICT
+
+
+def test_transfer_order_with_if_match_header(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """If-Match header is parsed as optimistic lock version (RNF-09, CT-04)."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=4,
+        status=OrderStatus.CREATED,
+        version=1,
+    )
+    test_db[order.public_id] = order
+
+    # Matching If-Match header succeeds
+    headers = {**auth_headers("waiter"), "If-Match": '"1"'}
+    response = client.patch(
+        f"/orders/{order.public_id}/transfer",
+        headers=headers,
+        json={"tableNumber": 6},
+    )
+    assert response.status_code == 200
+    assert response.json()["tableNumber"] == 6
+    assert response.json()["version"] == 2
+
+    # Stale If-Match header rejects with 409
+    stale_headers = {**auth_headers("waiter"), "If-Match": '"1"'}
+    response2 = client.patch(
+        f"/orders/{order.public_id}/transfer",
+        headers=stale_headers,
+        json={"tableNumber": 7},
+    )
+    assert response2.status_code == 409
+    assert response2.json()["error"]["code"] == ErrorCode.VERSION_CONFLICT
+
+
+@pytest.mark.parametrize(
+    "terminal_status",
+    [
+        OrderStatus.PAID,
+        OrderStatus.CANCELLED,
+        OrderStatus.REJECTED,
+        OrderStatus.EXPIRED,
+        OrderStatus.VOIDED,
+    ],
+)
+def test_transfer_order_terminal_status_rejects_409(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    terminal_status: OrderStatus,
+) -> None:
+    """Orders in terminal status cannot be transferred to a new table (RF-16, CT-04)."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=4,
+        status=terminal_status,
+        version=1,
+    )
+    test_db[order.public_id] = order
+
+    response = client.patch(
+        f"/orders/{order.public_id}/transfer",
+        headers=auth_headers("waiter"),
+        json={"tableNumber": 8},
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == ErrorCode.INVALID_STATE_TRANSITION
+
+
+def test_transfer_order_not_found_404(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+) -> None:
+    """Transfer non-existent order returns 404 ORDER_NOT_FOUND (CT-04)."""
+    missing_id = uuid4()
+    response = client.patch(
+        f"/orders/{missing_id}/transfer",
+        headers=auth_headers("waiter"),
+        json={"tableNumber": 8},
+    )
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == ErrorCode.ORDER_NOT_FOUND
+
+
+def test_transfer_order_invalid_payload_422(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Invalid payload values or extra fields return HTTP 422 (RNF-03, CT-04)."""
+    order = Order(public_id=uuid4(), status=OrderStatus.CREATED, table_number=1)
+    test_db[order.public_id] = order
+
+    # tableNumber <= 0
+    resp_zero = client.patch(
+        f"/orders/{order.public_id}/transfer",
+        headers=auth_headers("waiter"),
+        json={"tableNumber": 0},
+    )
+    assert resp_zero.status_code == 422
+
+    # Extra fields forbidden
+    resp_extra = client.patch(
+        f"/orders/{order.public_id}/transfer",
+        headers=auth_headers("waiter"),
+        json={"tableNumber": 2, "forbiddenField": "not_allowed"},
+    )
+    assert resp_extra.status_code == 422
+
+    # version < 1
+    resp_ver_zero = client.patch(
+        f"/orders/{order.public_id}/transfer",
+        headers=auth_headers("waiter"),
+        json={"tableNumber": 2, "version": 0},
+    )
+    assert resp_ver_zero.status_code == 422
+
+
+def test_transfer_order_role_matrix(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Waiters and admins can transfer orders; kitchen/chef are forbidden (CT-04)."""
+    order = Order(public_id=uuid4(), status=OrderStatus.CREATED, table_number=1)
+    test_db[order.public_id] = order
+
+    payload = {"tableNumber": 15}
+
+    for role in ["waiter", "admin"]:
+        resp = client.patch(
+            f"/orders/{order.public_id}/transfer",
+            headers=auth_headers(role),
+            json=payload,
+        )
+        assert resp.status_code == 200
+
+    for role in ["kitchen", "chef"]:
+        resp = client.patch(
+            f"/orders/{order.public_id}/transfer",
+            headers=auth_headers(role),
+            json=payload,
+        )
+        assert resp.status_code == 403
+        assert resp.json()["error"]["code"] == ErrorCode.FORBIDDEN_ROLE
+
+    resp_unauth = client.patch(f"/orders/{order.public_id}/transfer", json=payload)
+    assert resp_unauth.status_code == 401
+    assert resp_unauth.json()["error"]["code"] == ErrorCode.UNAUTHENTICATED
+
+
+async def test_transfer_order_stale_data_error_raises_version_conflict(
+    fake_session: FakeAsyncSession,
+) -> None:
+    """StaleDataError from concurrent DB update is mapped to VersionConflictError (RNF-09)."""
+    order = Order(public_id=uuid4(), table_number=1, status=OrderStatus.CREATED, version=1)
+    fake_session.add(order)
+
+    service = OrderService(cast(AsyncSession, fake_session))
+
+    async def _failing_commit() -> None:
+        raise StaleDataError("Row was updated or deleted by another transaction")
+
+    fake_session.commit = _failing_commit  # type: ignore[method-assign]
+
+    with pytest.raises(VersionConflictError):
+        await service.transfer_order(order.public_id, new_table_number=2)

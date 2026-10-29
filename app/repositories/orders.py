@@ -141,6 +141,26 @@ class OrderRepository:
         )
         return list(result)
 
+    async def list_orders(
+        self,
+        *,
+        status: OrderStatus | None = None,
+    ) -> list[Order]:
+        """List orders optionally filtered by OrderStatus enum (RF-18).
+
+        Args:
+            status: Optional OrderStatus enum filter.
+
+        Returns:
+            List of matching Order aggregate roots.
+        """
+        query = select(Order).options(selectinload(Order.items))
+        if status is not None:
+            query = query.where(Order.status == status)
+        query = query.order_by(Order.created_at.desc(), Order.public_id.desc())
+        result = await self._session.scalars(query)
+        return list(result.unique().all())
+
     async def get_by_dining_session_id(self, session_id: UUID | str) -> Order | None:
         """Fetch the order associated with a dining session."""
         session_uuid = session_id if isinstance(session_id, UUID) else UUID(session_id)

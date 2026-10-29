@@ -104,6 +104,23 @@ class UpdateOrderItemsRequest(BaseModel):
     )
 
 
+class TransferOrderRequest(BaseModel):
+    """Payload for transferring an order to a different table (RF-16, RNF-09)."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    table_number: int = Field(
+        alias="tableNumber",
+        ge=1,
+        description="Target table number in the dining room.",
+    )
+    version: int | None = Field(
+        default=None,
+        ge=1,
+        description="Expected order version for optimistic concurrency (RNF-09).",
+    )
+
+
 class OrderItemResponse(BaseModel):
     """Public representation of an order item."""
 
