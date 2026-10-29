@@ -80,9 +80,13 @@ class FakeOrderNotifier:
 
     def __init__(self) -> None:
         self.notified_orders: list[Order] = []
+        self.notified_items: list[tuple[Order, Any]] = []
 
     async def notify_order_changed(self, order: Order) -> None:
         self.notified_orders.append(order)
+
+    async def notify_item_changed(self, order: Order, item: Any) -> None:
+        self.notified_items.append((order, item))
 
 
 # ---------------------------------------------------------------------------

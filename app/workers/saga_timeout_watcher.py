@@ -25,6 +25,7 @@ from app.core.config import SagaTimeoutSettings, get_saga_timeout_settings
 from app.db.models import Order
 from app.domain.order_status import OrderStatus
 from app.messaging.events import OrderExpiredEvent
+from app.messaging.notifications import notify_order_changed
 from app.repositories.orders import OrderRepository
 from app.repositories.outbox import OutboxRepository
 
@@ -120,6 +121,9 @@ class SagaTimeoutWatcher:
                 )
 
             await session.commit()
+
+        for order in stale_orders:
+            await notify_order_changed(order)
 
         return len(stale_orders)
 
