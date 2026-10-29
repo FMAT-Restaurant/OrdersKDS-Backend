@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://restaurant.example.com/contracts/events/ordenes.orden.cancelada.v1.json",
   "title": "OrderCancelledEvent",
-  "description": "Event emitted when an order is cancelled while created.",
+  "description": "Event emitted when an order is cancelled while created (RF-24, RF-25).",
   "type": "object",
   "required": [
     "eventId",
@@ -22,6 +22,28 @@
         "string",
         "null"
       ]
+    },
+    "itemsCancelados": {
+      "type": "array",
+      "description": "List of dishes and quantities cancelled with the order.",
+      "items": {
+        "type": "object",
+        "required": [
+          "offerId",
+          "quantity"
+        ],
+        "properties": {
+          "offerId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      }
     }
   },
   "additionalProperties": true

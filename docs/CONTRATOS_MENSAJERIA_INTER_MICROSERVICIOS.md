@@ -234,16 +234,33 @@ sequenceDiagram
 ---
 
 #### C) `ordenes.orden.cancelada` (Cancelación antes de Cocina — Liberar Reserva)
-- **Cuándo se emite:** Cuando una orden en estado `CREATED` se cancela (`POST /orders/{orderId}/cancel`).
+- **Cuándo se emite:** Cuando una orden en estado `CREATED` se cancela (`PATCH /orders/{orderId}/cancel` o alias `POST /orders/{orderId}/cancel`) antes de entrar a preparación en cocina (`RF-24`, `RF-25`, `OP-05`). Aplica tanto a borradores como a órdenes ya confirmadas que esperan reserva de stock de Inventario.
 - **Contrato JSON Schema:** `contracts/events/ordenes.orden.cancelada.v1.json`
+- **Modelo Interno Python:** `OrderCancelledEvent` (`app/messaging/events.py`)
 
 ```json
 {
   "eventId": "2c5ea4c0-4067-5019-8a3b-9b1e2f3c4d5e",
   "orderId": "9c25e121-8623-4084-9c25-52d1906d4dfb",
-  "correlationId": null
+  "correlationId": null,
+  "itemsCancelados": [
+    {
+      "offerId": "b57f7e2a-02a4-4fb7-bb41-55f2d974b101",
+      "quantity": 2
+    },
+    {
+      "offerId": "a12b34c5-67d8-49e0-f123-456789abcdef",
+      "quantity": 1
+    }
+  ]
 }
 ```
+
+> **Nota de Mapeo Interno (`OrdersKDS` → `Inventario`):**
+> - `itemsCancelados[].offerId` se extrae de `OrderItem.dish_id` (el ID de la oferta proveniente de Menú).
+> - `itemsCancelados[].quantity` corresponde a `OrderItem.quantity` de los renglones asociados a la comanda.
+> - Al consumir este evento con `itemsCancelados`, el microservicio de **Inventario** libera de inmediato los insumos reservados si la orden estaba confirmada esperando stock, o descarta la solicitud si aún no se había reservado.
+> - `eventId` se genera de forma determinista con `uuid5(NAMESPACE_URL, "ordenes.orden.cancelada:{order.public_id}")`.
 
 ---
 

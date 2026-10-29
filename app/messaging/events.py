@@ -158,6 +158,38 @@ class OrderExpiredEvent(OrderEvent):
     elapsed_seconds: int | None = Field(default=None, alias="elapsedSeconds")
 
 
+class OrderCancelledEvent(OrderEvent):
+    """Event emitted when an order in CREATED status is cancelled (RF-24, RF-25, OP-05).
+
+    Stages compensation in outbox so Inventory releases any reservation.
+    """
+
+    event_name: ClassVar[EventName] = EventName.ORDER_CANCELLED
+    items_cancelled: list[OrderCreatedItem] = Field(
+        default_factory=list,
+        alias="itemsCancelados",
+        validation_alias=AliasChoices("itemsCancelados", "itemsCancelled", "items"),
+        serialization_alias="itemsCancelados",
+    )
+
+    @classmethod
+    def for_order(
+        cls,
+        order_id: UUID,
+        *,
+        items: list[OrderCreatedItem] | None = None,
+        correlation_id: UUID | None = None,
+    ) -> OrderCancelledEvent:
+        """Build the deterministic cancellation event for an order."""
+        event_id = uuid5(NAMESPACE_URL, f"{cls.event_name}:{order_id}")
+        return cls(
+            eventId=event_id,
+            orderId=order_id,
+            correlationId=correlation_id,
+            itemsCancelados=items or [],
+        )
+
+
 # ---------------------------------------------------------------------------
 # Inbound event models (Anti-Corruption Layer)
 # Spanish external names exist exclusively as Field aliases here.

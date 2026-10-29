@@ -15,6 +15,7 @@ import pytest
 from app.messaging.events import (
     DishPreparedEvent,
     EventName,
+    OrderCancelledEvent,
     OrderCreatedEvent,
     OrderCreatedItem,
     OrderExpiredEvent,
@@ -112,3 +113,17 @@ def test_contract_rejects_empty_identifiers() -> None:
     empty_order_id = {"eventId": str(uuid4()), "orderId": ""}
     with pytest.raises(EventContractError, match="failed contract validation"):
         validate_event_payload(EventName.ORDER_CREATED, empty_order_id)
+
+
+@pytest.mark.contract
+@pytest.mark.requirement("RF-24", "RF-25", "RNF-13", "CT-23")
+def test_order_cancelled_event_satisfies_contract() -> None:
+    """Verify OrderCancelledEvent payload validates against its contract."""
+    event = OrderCancelledEvent.for_order(
+        uuid4(),
+        items=[OrderCreatedItem(offerId="dish-1", quantity=2)],
+    )
+    payload = event.model_dump(mode="json", by_alias=True)
+
+    validate_event_payload(EventName.ORDER_CANCELLED, payload)
+    assert payload["itemsCancelados"] == [{"offerId": "dish-1", "quantity": 2}]

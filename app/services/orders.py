@@ -1,6 +1,7 @@
 """Order domain service orchestrating lifecycle operations and transitions.
 
-Satisfies: RF-09, RF-10, RF-11, RF-16, RF-18, RNF-01, RNF-03, RNF-09, OP-05, OP-08
+Satisfies: RF-09, RF-10, RF-11, RF-16, RF-18, RF-24, RF-25, RNF-01, RNF-03,
+           RNF-09, OP-05, OP-08
 """
 
 from __future__ import annotations
@@ -26,7 +27,12 @@ from app.domain.errors import (
 )
 from app.domain.order_status import ItemStatus, OrderStatus
 from app.domain.roles import KITCHEN_ROLES
-from app.messaging.events import DishPreparedEvent, OrderCreatedEvent, OrderCreatedItem
+from app.messaging.events import (
+    DishPreparedEvent,
+    OrderCancelledEvent,
+    OrderCreatedEvent,
+    OrderCreatedItem,
+)
 from app.messaging.validator import validate_event_payload
 from app.repositories.orders import OrderRepository
 from app.repositories.outbox import OutboxRepository
@@ -199,6 +205,65 @@ class OrderService:
             await self._session.commit()
         except StaleDataError as exc:
             raise VersionConflictError(f"Concurrent update lost for order {order_id}.") from exc
+
+        await notify_order_changed(order, notifier=self._notifier)
+        return order
+
+    async def cancel_order(
+        self,
+        order_id: UUID,
+        auth: AuthContext,
+        reason: str | None = None,
+    ) -> Order:
+        """Cancel an order draft while still in CREATED status (RF-24, RF-25, OP-05).
+
+        An order can be cancelled even if confirmed_at is set (awaiting stock confirmation).
+        Transitioning to CANCELLED stages an 'ordenes.orden.cancelada' event in outbox
+        so Inventory frees reserved stock upon consuming it.
+
+        Args:
+            order_id: Public UUID of target order.
+            auth: Authenticated caller context from JWT.
+            reason: Optional human-readable cancellation reason.
+
+        Returns:
+            The cancelled Order aggregate representation.
+
+        Raises:
+            OrderNotFoundError: If order does not exist (404).
+            InvalidStateTransitionError: If order is not in CREATED status (409).
+        """
+        order = await self._orders.get_by_public_id(order_id)
+        if order is None:
+            raise OrderNotFoundError(f"Order with id={order_id} not found.")
+
+        if order.status != OrderStatus.CREATED:
+            raise InvalidStateTransitionError(order.status, OrderStatus.CANCELLED)
+
+        logger.info(
+            "Order %s cancelled by actor %s (role=%s). Reason: %s",
+            order.public_id,
+            auth.user_id,
+            auth.role,
+            reason or "No reason provided",
+        )
+
+        order.mark_cancelled()
+
+        cancelled_items = [
+            OrderCreatedItem(offerId=item.dish_id, quantity=item.quantity)
+            for item in order.items
+            if item.dish_id
+        ]
+        event = OrderCancelledEvent.for_order(
+            order.public_id,
+            items=cancelled_items,
+        )
+        payload = event.model_dump(mode="json", by_alias=True)
+        validate_event_payload(event.event_name, payload)
+        self._outbox.add(event)
+        self._orders.save(order)
+        await self._session.commit()
 
         await notify_order_changed(order, notifier=self._notifier)
         return order
