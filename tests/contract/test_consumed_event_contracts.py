@@ -50,7 +50,7 @@ def test_stock_reserved_schema_and_pydantic_compatibility() -> None:
         "eventId": event_id,
         "orderId": order_id,
         "correlationId": str(uuid4()),
-        "reservas": [{"plateId": "PLT-1", "quantity": 2}],
+        "reservas": [{"offerId": "PLT-1", "quantity": 2}],
     }
 
     # Validate against JSON schema

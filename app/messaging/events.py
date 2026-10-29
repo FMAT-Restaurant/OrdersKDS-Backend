@@ -13,7 +13,7 @@ from enum import StrEnum
 from typing import Any, ClassVar, Self, TypeGuard, cast
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 def _is_string_keyed_dict(value: object) -> TypeGuard[dict[str, object]]:
@@ -38,6 +38,10 @@ class EventName(StrEnum):
     MENU_CATALOG_UPDATED = "menu.catalogo.actualizado"
     MENU_DISH_AVAILABILITY_UPDATED = "menu.platillo.disponibilidad_actualizada"
     MENU_DISH_STATE_UPDATED = "menu.platillo.estado_actualizado"
+    MENU_OFFER_CREATED = "menu.oferta.creada"
+    MENU_OFFER_UPDATED = "menu.oferta.actualizada"
+    MENU_OFFER_CREATED_EN = "menu.offer.created"
+    MENU_OFFER_UPDATED_EN = "menu.offer.updated"
 
     # Consumed events
     STOCK_RESERVED = "inventario.stock.reservado"
@@ -73,12 +77,22 @@ class OrderEvent(BaseModel):
 
 
 class OrderCreatedItem(BaseModel):
-    """Inventory-facing dish and quantity included in an order-created event."""
+    """Inventory-facing offer and quantity included in an order-created event."""
 
     model_config = ConfigDict(populate_by_name=True)
 
-    plate_id: str = Field(alias="plateId", min_length=1)
+    offer_id: str = Field(
+        alias="offerId",
+        validation_alias=AliasChoices("offerId", "offer_id", "plateId", "plate_id"),
+        serialization_alias="offerId",
+        min_length=1,
+    )
     quantity: int = Field(gt=0)
+
+    @property
+    def plate_id(self) -> str:
+        """Backward-compatible property alias for offer_id."""
+        return self.offer_id
 
 
 class OrderCreatedEvent(OrderEvent):
@@ -112,6 +126,7 @@ class DishPreparedEvent(OrderEvent):
     unique_per_order: ClassVar[bool] = False
 
     item_id: UUID | None = Field(default=None, alias="itemId")
+    offer_id: str | None = Field(default=None, alias="offerId")
 
     @classmethod
     def for_item(
@@ -119,13 +134,15 @@ class DishPreparedEvent(OrderEvent):
         order_id: UUID,
         item_id: UUID,
         *,
+        offer_id: str | None = None,
         correlation_id: UUID | None = None,
     ) -> DishPreparedEvent:
-        """Build a repeatable event for an individual prepared dish (RF-10)."""
+        """Build a repeatable event for an individual prepared dish/offer (RF-10)."""
         return cls(
             eventId=uuid4(),
             orderId=order_id,
             itemId=item_id,
+            offerId=offer_id,
             correlationId=correlation_id,
         )
 

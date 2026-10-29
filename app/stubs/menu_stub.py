@@ -35,6 +35,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_CATALOG_ITEMS: list[dict[str, Any]] = [
     {
+        "id": "PLT-BURGER-01",
+        "offerId": "PLT-BURGER-01",
         "itemId": "ITEM-BURGER-01",
         "plateId": "PLT-BURGER-01",
         "name": "Hamburguesa Clásica FMAT",
@@ -44,6 +46,8 @@ DEFAULT_CATALOG_ITEMS: list[dict[str, Any]] = [
         "basePrice": 145.00,
     },
     {
+        "id": "PLT-SALAD-01",
+        "offerId": "PLT-SALAD-01",
         "itemId": "ITEM-SALAD-01",
         "plateId": "PLT-SALAD-01",
         "name": "Ensalada César con Pollo",
@@ -53,6 +57,8 @@ DEFAULT_CATALOG_ITEMS: list[dict[str, Any]] = [
         "basePrice": 110.00,
     },
     {
+        "id": "PLT-DRINK-01",
+        "offerId": "PLT-DRINK-01",
         "itemId": "ITEM-DRINK-01",
         "plateId": "PLT-DRINK-01",
         "name": "Limonada Natural",
@@ -62,6 +68,8 @@ DEFAULT_CATALOG_ITEMS: list[dict[str, Any]] = [
         "basePrice": 45.00,
     },
     {
+        "id": "PLT-NO-STATION",
+        "offerId": "PLT-NO-STATION",
         "itemId": "ITEM-NO-STATION",
         "plateId": "PLT-NO-STATION",
         "name": "Postre del Día Casero",
@@ -95,7 +103,12 @@ class MenuStub:
     def set_item_availability(self, plate_id: str, available: bool) -> None:
         """Update an item's availability in the catalog snapshot."""
         for item in self.items:
-            if item.get("plateId") == plate_id or item.get("itemId") == plate_id:
+            if plate_id in (
+                item.get("offerId"),
+                item.get("id"),
+                item.get("plateId"),
+                item.get("itemId"),
+            ):
                 item["available"] = available
 
     async def emit_catalog_updated(

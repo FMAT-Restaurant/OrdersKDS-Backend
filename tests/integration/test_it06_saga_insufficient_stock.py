@@ -153,7 +153,7 @@ async def test_it06_saga_insufficient_stock_transitions_to_rejected() -> None:
     order_created_payload = {
         "orderId": str(order_id),
         "correlationId": str(uuid4()),
-        "items": [{"plateId": "PLT-RARE-01", "quantity": 1}],
+        "items": [{"offerId": "PLT-RARE-01", "quantity": 1}],
     }
     rejection_event_id = await inventory_stub.handle_order_created(order_created_payload)
     assert rejection_event_id is not None

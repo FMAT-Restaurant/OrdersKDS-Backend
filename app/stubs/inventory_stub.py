@@ -171,7 +171,7 @@ class InventoryStub:
         reservations_data = (
             items
             if isinstance(items, list) and len(items) > 0
-            else [{"plateId": "PLATE-01", "quantity": 1}]
+            else [{"offerId": "PLATE-01", "quantity": 1}]
         )
 
         payload: dict[str, Any] = {

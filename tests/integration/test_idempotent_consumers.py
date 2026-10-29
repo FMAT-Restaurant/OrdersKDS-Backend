@@ -186,7 +186,7 @@ async def test_redelivered_message_is_applied_once() -> None:
             "eventId": str(event_id),
             "orderId": str(order_id),
             "eventType": EventName.STOCK_RESERVED,
-            "reservas": [{"plateId": "PLT-100", "quantity": 2}],
+            "reservas": [{"offerId": "PLT-100", "quantity": 2}],
         }
     )
 

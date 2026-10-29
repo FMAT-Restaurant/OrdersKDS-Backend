@@ -31,6 +31,14 @@
       "items": {
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string",
+            "description": "Canonical offer identifier emitted by Menu."
+          },
+          "offerId": {
+            "type": "string",
+            "description": "Offer identifier."
+          },
           "itemId": {
             "type": "string",
             "description": "Item identifier."
@@ -42,6 +50,10 @@
           "name": {
             "type": "string",
             "description": "Culinary item commercial name."
+          },
+          "status": {
+            "type": "string",
+            "description": "Menu offer status (e.g. ACTIVE, INACTIVE)."
           },
           "available": {
             "type": "boolean",

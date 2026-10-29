@@ -221,3 +221,54 @@ async def test_empty_update_is_not_written() -> None:
 
     assert stored is False
     redis.hset.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_catalog_consumer_projects_menu_offer_payload() -> None:
+    redis = AsyncMock()
+    redis.hgetall.return_value = {}
+    consumer = CatalogConsumer(CatalogRepository(redis))
+
+    menu_offer_payload = {
+        "data": {
+            "id": "b57f7e2a-02a4-4fb7-bb41-55f2d974b101",
+            "entryId": "7d19a8ce-402c-4bab-b383-9969b69fe101",
+            "presentationTag": "Individual",
+            "basePrice": 180,
+            "status": "ACTIVE",
+            "image": {
+                "id": "8c3f4365-1d1d-4a85-969a-c6c80757b201",
+                "url": "https://cdn.example.com/menu/hamburguesa-individual.jpg",
+                "thumbnailUrl": "https://cdn.example.com/menu/hamburguesa-individual-thumb.jpg",
+            },
+            "composition": {
+                "slots": [
+                    {
+                        "slotId": "b37c1bd7-17b2-47a2-a3a4-802559445301",
+                        "name": "Plato principal",
+                        "quantity": 1,
+                        "course": "plato fuerte",
+                        "options": [
+                            {
+                                "optionId": "89cce4da-2f19-4d27-942d-b2ee82fb5401",
+                                "sourceType": "RECIPE",
+                                "recipeId": "c4813f65-00b4-4921-874e-03c555796401",
+                                "displayName": "Hamburguesa Hawaiana",
+                            }
+                        ],
+                    }
+                ]
+            },
+        }
+    }
+
+    stored = await consumer.consume(EventName.MENU_OFFER_UPDATED, menu_offer_payload)
+    assert stored is True
+    redis.hset.assert_awaited_once_with(
+        "catalog:platillo:b57f7e2a-02a4-4fb7-bb41-55f2d974b101",
+        mapping={
+            "price": "180",
+            "available": "true",
+            "category": "plato fuerte",
+        },
+    )

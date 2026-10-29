@@ -1,6 +1,6 @@
 """Order domain service orchestrating lifecycle operations and transitions.
 
-Satisfies: RF-09, RF-10, RF-11, RF-18, RNF-01, RNF-03, OP-05, OP-08
+Satisfies: RF-09, RF-10, RF-11, RF-16, RF-18, RNF-01, RNF-03, RNF-09, OP-05, OP-08
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from uuid import UUID
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.api.dependencies.auth import AuthContext
 from app.db.models import Order
@@ -21,6 +22,7 @@ from app.domain.errors import (
     InvalidOrderItemError,
     InvalidStateTransitionError,
     OrderNotFoundError,
+    VersionConflictError,
 )
 from app.domain.order_status import ItemStatus, OrderStatus
 from app.domain.roles import KITCHEN_ROLES
@@ -93,7 +95,13 @@ class OrderService:
             if order.status != OrderStatus.IN_PREPARATION:
                 raise InvalidStateTransitionError(order.status, OrderStatus.DELIVERED)
             target_item.mark_ready()
-            self._outbox.add(DishPreparedEvent.for_item(order.public_id, target_item.public_id))
+            self._outbox.add(
+                DishPreparedEvent.for_item(
+                    order.public_id,
+                    target_item.public_id,
+                    offer_id=target_item.dish_id,
+                )
+            )
 
         delivered_now = self._sync_delivery_if_all_ready(order)
         self._orders.save(order)
@@ -122,7 +130,13 @@ class OrderService:
         for item in order.items:
             if item.status == ItemStatus.PENDING:
                 item.mark_ready()
-                self._outbox.add(DishPreparedEvent.for_item(order.public_id, item.public_id))
+                self._outbox.add(
+                    DishPreparedEvent.for_item(
+                        order.public_id,
+                        item.public_id,
+                        offer_id=item.dish_id,
+                    )
+                )
 
         order.mark_delivered()
         for item in order.items:
@@ -131,6 +145,61 @@ class OrderService:
 
         self._orders.save(order)
         await self._session.commit()
+        await notify_order_changed(order, notifier=self._notifier)
+        return order
+
+    async def transfer_order(
+        self,
+        order_id: UUID,
+        new_table_number: int,
+        expected_version: int | None = None,
+    ) -> Order:
+        """Transfer an active order to a different table (RF-16, RNF-09).
+
+        Args:
+            order_id: Public UUID identifier of the order.
+            new_table_number: Target table number in the dining room.
+            expected_version: Optional optimistic lock version to prevent lost updates.
+
+        Returns:
+            The updated Order aggregate.
+
+        Raises:
+            OrderNotFoundError: If the order does not exist (404).
+            VersionConflictError: If expected_version is stale or concurrent update lost (409).
+            InvalidStateTransitionError: If order is in a terminal status (409).
+        """
+        order = await self._orders.get_by_public_id(order_id)
+        if order is None:
+            raise OrderNotFoundError(f"Order with id={order_id} not found.")
+
+        terminal_statuses = {
+            OrderStatus.PAID,
+            OrderStatus.CANCELLED,
+            OrderStatus.REJECTED,
+            OrderStatus.EXPIRED,
+            OrderStatus.VOIDED,
+        }
+        if order.status in terminal_statuses:
+            raise InvalidStateTransitionError(order.status, "TRANSFER")
+
+        if expected_version is not None and order.version != expected_version:
+            raise VersionConflictError(
+                f"Stale version for order {order_id}: "
+                f"expected {expected_version}, found {order.version}."
+            )
+
+        order.table_number = new_table_number
+        order.is_takeaway = False
+        if hasattr(self._session, "db"):
+            order.version = (order.version or 1) + 1
+        self._orders.save(order)
+
+        try:
+            await self._session.commit()
+        except StaleDataError as exc:
+            raise VersionConflictError(f"Concurrent update lost for order {order_id}.") from exc
+
         await notify_order_changed(order, notifier=self._notifier)
         return order
 
@@ -145,7 +214,7 @@ class OrderService:
                     dish_id = item.dish_id
                     if dish_id is None or item.quantity < 1:
                         raise InvalidOrderItemError()
-                    event_items.append(OrderCreatedItem(plateId=dish_id, quantity=item.quantity))
+                    event_items.append(OrderCreatedItem(offerId=dish_id, quantity=item.quantity))
                 event = OrderCreatedEvent.for_order(
                     order.public_id,
                     items=event_items,

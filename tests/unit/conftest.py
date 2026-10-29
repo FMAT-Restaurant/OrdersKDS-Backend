@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.db.models import Order, Outbox
+from app.domain.order_status import OrderStatus
 from app.main import app
 
 # Any key works: the service never verifies signatures (ADR-0011).
@@ -40,6 +41,32 @@ class FakeAsyncSession:
 
     async def rollback(self) -> None:
         self.rolled_back = True
+
+    async def scalars(self, statement: Any, *args: Any, **kwargs: Any) -> Any:
+        params = statement.compile().params
+        status_val = next((v for v in params.values() if isinstance(v, OrderStatus)), None)
+        orders = list(self.db.values())
+        if status_val is not None:
+            orders = [o for o in orders if o.status == status_val]
+        orders.sort(
+            key=lambda o: (
+                o.created_at or datetime.min.replace(tzinfo=UTC),
+                o.public_id,
+            ),
+            reverse=True,
+        )
+
+        class _Result:
+            def unique(self) -> _Result:
+                return self
+
+            def all(self) -> list[Order]:
+                return orders
+
+            def __iter__(self) -> Any:
+                return iter(orders)
+
+        return _Result()
 
     async def scalar(self, statement: Any, *args: Any, **kwargs: Any) -> Any:
         params = statement.compile().params
