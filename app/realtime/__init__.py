@@ -12,6 +12,12 @@ from app.realtime.notifier import (
     notify_order_changed,
 )
 from app.realtime.router import (
+    CHANNEL_FLOOR,
+    CHANNEL_KDS_ALL,
+    CHANNEL_KDS_PREFIX,
+    CHANNEL_KDS_STATION_GENERAL,
+    CHANNEL_KDS_STATION_PREFIX,
+    CHANNEL_USER_PREFIX,
     KDS_WS_PATH,
     WAITER_WS_PATH,
     RealtimeChannelRouter,
@@ -31,6 +37,12 @@ from app.realtime.schemas import (
 )
 
 __all__ = [
+    "CHANNEL_FLOOR",
+    "CHANNEL_KDS_ALL",
+    "CHANNEL_KDS_PREFIX",
+    "CHANNEL_KDS_STATION_GENERAL",
+    "CHANNEL_KDS_STATION_PREFIX",
+    "CHANNEL_USER_PREFIX",
     "FORBIDDEN_CHANNEL",
     "FORBIDDEN_CHANNEL_ERROR",
     "ItemStatusChangedMessage",

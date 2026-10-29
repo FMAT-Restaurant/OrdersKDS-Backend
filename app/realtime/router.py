@@ -51,13 +51,21 @@ KDS_WS_PATH: Final = "/ws/kds"
 WAITER_WS_PATH: Final = "/ws/waiter"
 MAX_STATION_LENGTH: Final = 50
 
+# Channel constants and prefixes (Sonar maintainability & taxonomy)
+CHANNEL_KDS_ALL: Final = "kds:all"
+CHANNEL_KDS_STATION_PREFIX: Final = "kds:station:"
+CHANNEL_FLOOR: Final = "floor"
+CHANNEL_USER_PREFIX: Final = "user:"
+CHANNEL_KDS_PREFIX: Final = "kds:"
+CHANNEL_KDS_STATION_GENERAL: Final = f"{CHANNEL_KDS_STATION_PREFIX}general"
+
 
 def _parse_actor_uuid(user_id_str: str) -> UUID:
     """Parse string actor identifier into a valid UUID deterministically."""
     try:
         return UUID(user_id_str)
     except ValueError:
-        return uuid5(NAMESPACE_URL, f"user:{user_id_str}")
+        return uuid5(NAMESPACE_URL, f"{CHANNEL_USER_PREFIX}{user_id_str}")
 
 
 def is_valid_station(station: str) -> bool:
@@ -78,10 +86,10 @@ def is_valid_station(station: str) -> bool:
 def _can_subscribe_kds(channel: str, role: Role) -> bool:
     if role not in {Role.KITCHEN, Role.CHEF, Role.ADMIN}:
         return False
-    if channel == "kds:all":
+    if channel == CHANNEL_KDS_ALL:
         return True
-    if channel.startswith("kds:station:"):
-        station = channel.removeprefix("kds:station:")
+    if channel.startswith(CHANNEL_KDS_STATION_PREFIX):
+        station = channel.removeprefix(CHANNEL_KDS_STATION_PREFIX)
         return is_valid_station(station)
     return False
 
@@ -90,9 +98,9 @@ def _can_subscribe_waiter(channel: str, role: Role) -> bool:
     if role not in {Role.WAITER, Role.ADMIN}:
         return False
     # user:{userId} is automatic from JWT, client cannot request it (ADR-0002)
-    if channel.startswith("user:") or channel.startswith("kds:"):
+    if channel.startswith((CHANNEL_USER_PREFIX, CHANNEL_KDS_PREFIX)):
         return False
-    return channel == "floor"
+    return channel == CHANNEL_FLOOR
 
 
 def can_subscribe(channel: str, role: Role, path: str) -> bool:
@@ -120,6 +128,28 @@ def get_item_station(item: OrderItem) -> str | None:
         if fallback.get("station") is not None:
             return fallback["station"]
     return None
+
+
+def _resolve_user_channels(order: Order) -> set[str]:
+    """Resolve user channels for an order based on responsible waiter or creator."""
+    channels: set[str] = set()
+    resp = getattr(order, "responsible_waiter_id", None) or getattr(order, "created_by", None)
+    if resp is not None:
+        channels.add(f"{CHANNEL_USER_PREFIX}{resp}")
+        channels.add(f"{CHANNEL_USER_PREFIX}{str(resp)}")
+    return channels
+
+
+def _resolve_item_station_channels(item: OrderItem) -> set[str]:
+    """Resolve station channels for a single order item."""
+    channels: set[str] = set()
+    raw_station = get_item_station(item)
+    norm = normalize_station_name(raw_station)
+    if norm:
+        channels.add(f"{CHANNEL_KDS_STATION_PREFIX}{norm}")
+    if norm == "general" or norm is None:
+        channels.add(CHANNEL_KDS_STATION_GENERAL)
+    return channels
 
 
 @dataclass
@@ -150,10 +180,10 @@ class RealtimeChannelRouter:
                 path=path,
             )
             if path == WAITER_WS_PATH:
-                conn.channels.add("floor")
-                conn.channels.add(f"user:{auth_context.user_id}")
+                conn.channels.add(CHANNEL_FLOOR)
+                conn.channels.add(f"{CHANNEL_USER_PREFIX}{auth_context.user_id}")
                 actor_uuid = _parse_actor_uuid(auth_context.user_id)
-                conn.channels.add(f"user:{actor_uuid}")
+                conn.channels.add(f"{CHANNEL_USER_PREFIX}{actor_uuid}")
 
             self._connections[websocket] = conn
             logger.debug(
@@ -197,11 +227,15 @@ class RealtimeChannelRouter:
                     await websocket.send_json(FORBIDDEN_CHANNEL_ERROR)
                 return False
 
-            if channel.startswith("kds:station:"):
+            if channel.startswith(CHANNEL_KDS_STATION_PREFIX):
                 # Station switch without reconnecting: replace previous station
-                conn.channels = {c for c in conn.channels if not c.startswith("kds:station:")}
-                norm_station = normalize_station_name(channel.removeprefix("kds:station:"))
-                conn.channels.add(f"kds:station:{norm_station}")
+                conn.channels = {
+                    c for c in conn.channels if not c.startswith(CHANNEL_KDS_STATION_PREFIX)
+                }
+                norm_station = normalize_station_name(
+                    channel.removeprefix(CHANNEL_KDS_STATION_PREFIX)
+                )
+                conn.channels.add(f"{CHANNEL_KDS_STATION_PREFIX}{norm_station}")
             else:
                 conn.channels.add(channel)
 
@@ -241,21 +275,11 @@ class RealtimeChannelRouter:
         )
         envelope = msg.to_envelope()
 
-        target_channels: set[str] = {"floor", "kds:all"}
-
+        target_channels: set[str] = {CHANNEL_FLOOR, CHANNEL_KDS_ALL}
         items = getattr(order, "items", []) or []
         for item in items:
-            raw_station = get_item_station(item)
-            norm = normalize_station_name(raw_station)
-            if norm:
-                target_channels.add(f"kds:station:{norm}")
-            if norm == "general" or norm is None:
-                target_channels.add("kds:station:general")
-
-        resp = getattr(order, "responsible_waiter_id", None) or getattr(order, "created_by", None)
-        if resp is not None:
-            target_channels.add(f"user:{resp}")
-            target_channels.add(f"user:{str(resp)}")
+            target_channels.update(_resolve_item_station_channels(item))
+        target_channels.update(_resolve_user_channels(order))
 
         await self.broadcast_to_channels(target_channels, envelope)
 
@@ -270,19 +294,9 @@ class RealtimeChannelRouter:
         )
         envelope = msg.to_envelope()
 
-        target_channels: set[str] = {"floor", "kds:all"}
-
-        raw_station = get_item_station(item)
-        norm = normalize_station_name(raw_station)
-        if norm:
-            target_channels.add(f"kds:station:{norm}")
-        if norm == "general" or norm is None:
-            target_channels.add("kds:station:general")
-
-        resp = getattr(order, "responsible_waiter_id", None) or getattr(order, "created_by", None)
-        if resp is not None:
-            target_channels.add(f"user:{resp}")
-            target_channels.add(f"user:{str(resp)}")
+        target_channels: set[str] = {CHANNEL_FLOOR, CHANNEL_KDS_ALL}
+        target_channels.update(_resolve_item_station_channels(item))
+        target_channels.update(_resolve_user_channels(order))
 
         await self.broadcast_to_channels(target_channels, envelope)
 
@@ -303,7 +317,7 @@ async def _handle_incoming_text(websocket: WebSocket, raw_text: str) -> None:
     if action == "subscribe":
         channel = data.get("channel")
         if not channel and data.get("station"):
-            channel = f"kds:station:{data['station']}"
+            channel = f"{CHANNEL_KDS_STATION_PREFIX}{data['station']}"
 
         if not channel or not isinstance(channel, str):
             await websocket.send_json(FORBIDDEN_CHANNEL_ERROR)

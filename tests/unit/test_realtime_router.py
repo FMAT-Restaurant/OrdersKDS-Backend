@@ -273,3 +273,83 @@ async def test_order_and_item_notification_hooks() -> None:
 
     await default_impl.notify_order_changed(order)
     default_impl._realtime_notifier.notify_order_changed.assert_awaited_once_with(order)
+
+
+@pytest.mark.asyncio
+async def test_realtime_router_station_switching_and_reset() -> None:
+    import json
+
+    from app.realtime.router import (
+        CHANNEL_KDS_STATION_GENERAL,
+        _handle_incoming_text,
+        _resolve_item_station_channels,
+        _resolve_user_channels,
+        realtime_router,
+    )
+
+    router = RealtimeChannelRouter()
+    mock_ws = AsyncMock()
+    context = AuthContext(user_id="cook-1", role=Role.KITCHEN)
+    conn = await router.register(mock_ws, context, "/ws/kds")
+
+    # Subscribe to station plancha
+    assert await router.handle_subscribe(mock_ws, "kds:station:plancha")
+    assert "kds:station:plancha" in conn.channels
+
+    # Switch station to horno (replaces plancha)
+    assert await router.handle_subscribe(mock_ws, "kds:station:horno")
+    assert "kds:station:horno" in conn.channels
+    assert "kds:station:plancha" not in conn.channels
+
+    # Unregistered websocket subscribe returns False
+    unregistered_ws = AsyncMock()
+    assert await router.handle_subscribe(unregistered_ws, "kds:all") is False
+
+    # Broadcast to empty channels does nothing
+    await router.broadcast_to_channels([], {"msg": "noop"})
+
+    # Reset clears all connections
+    await router.reset()
+    assert len(router._connections) == 0
+
+    # Test helper resolvers
+    order_with_creator = Order(
+        public_id=uuid4(),
+        table_number=1,
+        status=OrderStatus.CREATED,
+        created_by="waiter-uuid-42",
+        responsible_waiter_id=None,
+        version=1,
+    )
+    user_chans = _resolve_user_channels(order_with_creator)
+    assert "user:waiter-uuid-42" in user_chans
+
+    # Item with fallback/general station
+    item_no_station = OrderItem(
+        public_id=uuid4(), dish_id=None, name="X", status=ItemStatus.PENDING, version=1
+    )
+    st_chans = _resolve_item_station_channels(item_no_station)
+    assert CHANNEL_KDS_STATION_GENERAL in st_chans
+
+    # Incoming text handling edge cases
+    await _handle_incoming_text(mock_ws, "not a json")
+    await _handle_incoming_text(mock_ws, json.dumps([1, 2, 3]))
+
+    # Register on global router to test _handle_incoming_text dispatch
+    await realtime_router.reset()
+    await realtime_router.register(mock_ws, context, "/ws/kds")
+
+    # Subscribe via station key
+    await _handle_incoming_text(mock_ws, json.dumps({"action": "subscribe", "station": "grill"}))
+    mock_ws.send_json.assert_not_called()
+
+    # Invalid channel type
+    mock_ws.reset_mock()
+    await _handle_incoming_text(mock_ws, json.dumps({"action": "subscribe", "channel": 123}))
+    mock_ws.send_json.assert_called_with({"error": "FORBIDDEN_CHANNEL"})
+
+    # Subscribe via raw channel key without action
+    mock_ws.reset_mock()
+    await _handle_incoming_text(mock_ws, json.dumps({"channel": "kds:all"}))
+
+    await realtime_router.reset()
