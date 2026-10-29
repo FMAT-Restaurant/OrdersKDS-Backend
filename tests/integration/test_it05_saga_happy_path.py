@@ -153,7 +153,7 @@ async def test_it05_saga_happy_path_transitions_to_in_preparation() -> None:
     order_created_payload = {
         "orderId": str(order_id),
         "correlationId": str(uuid4()),
-        "items": [{"plateId": "PLT-BURGER-01", "quantity": 2}],
+        "items": [{"offerId": "PLT-BURGER-01", "quantity": 2}],
     }
     reservation_event_id = await inventory_stub.handle_order_created(order_created_payload)
     assert reservation_event_id is not None

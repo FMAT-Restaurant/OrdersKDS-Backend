@@ -478,7 +478,7 @@ def test_confirm_order_stages_deterministic_event_and_records_actor(
     outbox = fake_session.outbox_rows[0]
     assert outbox.event_type == "ordenes.orden.creada"
     assert outbox.payload["orderId"] == str(order.public_id)
-    assert outbox.payload["items"] == [{"plateId": "dish-1", "quantity": 2}]
+    assert outbox.payload["items"] == [{"offerId": "dish-1", "quantity": 2}]
 
 
 def test_confirm_order_rejects_items_without_inventory_identifier(

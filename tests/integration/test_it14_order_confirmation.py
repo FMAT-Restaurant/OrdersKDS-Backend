@@ -116,7 +116,7 @@ def test_concurrent_confirm_requests_stage_exactly_one_event(
     assert order.confirmed_at is not None
     assert order.confirmed_by is not None
     assert len(database.outbox_rows) == 1
-    assert database.outbox_rows[0].payload["items"] == [{"plateId": "dish-1", "quantity": 1}]
+    assert database.outbox_rows[0].payload["items"] == [{"offerId": "dish-1", "quantity": 1}]
 
 
 @pytest.mark.integration

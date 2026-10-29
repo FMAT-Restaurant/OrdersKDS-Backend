@@ -43,12 +43,13 @@ def test_order_created_event_satisfies_contract() -> None:
     event = OrderCreatedEvent.for_order(
         uuid4(),
         correlation_id=uuid4(),
-        items=[OrderCreatedItem(plateId="dish-1", quantity=2)],
+        items=[OrderCreatedItem(offerId="dish-1", quantity=2)],
     )
     payload = event.model_dump(mode="json", by_alias=True)
 
     validate_event_payload(EventName.ORDER_CREATED, payload)
-    assert payload["items"] == [{"plateId": "dish-1", "quantity": 2}]
+    assert payload["items"] == [{"offerId": "dish-1", "quantity": 2}]
+    assert event.items[0].plate_id == "dish-1"
 
 
 @pytest.mark.contract
@@ -57,7 +58,7 @@ def test_order_created_contract_rejects_invalid_items() -> None:
     payload: dict[str, object] = {
         "eventId": str(uuid4()),
         "orderId": str(uuid4()),
-        "items": [{"plateId": "dish-1", "quantity": 0}],
+        "items": [{"offerId": "dish-1", "quantity": 0}],
     }
 
     with pytest.raises(EventContractError, match="failed contract validation"):

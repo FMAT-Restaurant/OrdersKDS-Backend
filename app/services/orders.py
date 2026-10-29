@@ -93,7 +93,13 @@ class OrderService:
             if order.status != OrderStatus.IN_PREPARATION:
                 raise InvalidStateTransitionError(order.status, OrderStatus.DELIVERED)
             target_item.mark_ready()
-            self._outbox.add(DishPreparedEvent.for_item(order.public_id, target_item.public_id))
+            self._outbox.add(
+                DishPreparedEvent.for_item(
+                    order.public_id,
+                    target_item.public_id,
+                    offer_id=target_item.dish_id,
+                )
+            )
 
         delivered_now = self._sync_delivery_if_all_ready(order)
         self._orders.save(order)
@@ -122,7 +128,13 @@ class OrderService:
         for item in order.items:
             if item.status == ItemStatus.PENDING:
                 item.mark_ready()
-                self._outbox.add(DishPreparedEvent.for_item(order.public_id, item.public_id))
+                self._outbox.add(
+                    DishPreparedEvent.for_item(
+                        order.public_id,
+                        item.public_id,
+                        offer_id=item.dish_id,
+                    )
+                )
 
         order.mark_delivered()
         for item in order.items:
@@ -145,7 +157,7 @@ class OrderService:
                     dish_id = item.dish_id
                     if dish_id is None or item.quantity < 1:
                         raise InvalidOrderItemError()
-                    event_items.append(OrderCreatedItem(plateId=dish_id, quantity=item.quantity))
+                    event_items.append(OrderCreatedItem(offerId=dish_id, quantity=item.quantity))
                 event = OrderCreatedEvent.for_order(
                     order.public_id,
                     items=event_items,
