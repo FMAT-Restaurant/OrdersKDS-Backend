@@ -55,16 +55,21 @@ sequenceDiagram
     Floor->>Orders: sala.dining_session.iniciada (sessionId, waiterId)
     Orders->>Orders: Crea Orden en estado CREATED
 
-    Note over Orders: 3. Confirmación de Orden y Saga de Inventario
-    Orders->>Inv: ordenes.orden.creada (orderId, offerId, quantity)
-    alt Stock suficiente
-        Inv->>Orders: inventario.stock.reservado (orderId, reservations)
+    Note over Orders: 3. Confirmación de Orden y Saga de Inventario (ADR-0012)
+    Orders->>Inv: ordenes.orden.creada (orderId, offerId, quantity, attempt_key)
+    alt Stock suficiente (Happy Path)
+        Inv->>Orders: inventario.stock.reservado (orderId, reservations con TTL)
+        Orders->>Orders: Orden pasa a RESERVED (aparece en cola KDS)
+        Orders->>Inv: ordenes.orden.en_preparacion (Chef inicia preparación -> consumo definitivo)
         Orders->>Orders: Orden pasa a IN_PREPARATION
-    else Stock insuficiente
-        Inv->>Orders: inventario.stock.insuficiente (orderId, missingIngredients)
-        Orders->>Orders: Orden pasa a REJECTED
-    else Timeout de 60s sin respuesta de Inventario
-        Orders->>Inv: ordenes.orden.expirada (orderId, elapsedSeconds)
+    else Stock insuficiente parcial (Opción A)
+        Inv->>Orders: inventario.stock.insuficiente (rejectedItems + reservedItems)
+        Orders->>Orders: Orden pasa a REJECTED (Mesero edita en CREATED y re-confirma)
+    else Rechazo físico en cocina (Kitchen Reject)
+        Orders->>Inv: ordenes.platillo.rechazado_cocina (Chef pulsa kitchen-reject)
+        Orders->>Orders: Bloqueo en Redis local + Orden pasa a REJECTED
+    else Timeout de 60s sin respuesta de Inventario (OP-04)
+        Orders->>Inv: ordenes.orden.expirada (orderId, elapsedSeconds, items)
         Orders->>Orders: Orden pasa a EXPIRED
     end
 

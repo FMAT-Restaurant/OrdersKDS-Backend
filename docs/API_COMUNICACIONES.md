@@ -39,6 +39,11 @@ Esta superficie comunica a los **dispositivos físicos del restaurante** (tablet
   - `OrderStatus`: `CREATED`, `RESERVED`, `IN_PREPARATION`, `DELIVERED`, `PAID`, `CANCELLED`, `REJECTED`, `WASTED`, `VOIDED`, `EXPIRED`.
   - `ItemStatus`: `PENDING`, `READY`, `DELIVERED`, `CANCELLED`.
 
+![Diagrama de Estados de la Comanda (OrderStatus)](./diagrama_estados_orden.svg)
+
+<details>
+<summary>Ver especificación en código Mermaid</summary>
+
 ```mermaid
 stateDiagram-v2
     [*] --> CREATED: POST /orders o sala.dining_session.iniciada
@@ -62,6 +67,8 @@ stateDiagram-v2
     DELIVERED --> PAID: Consume pagos.pago.completado
     WASTED --> PAID: Consume pagos.pago.completado
 ```
+
+</details>
 
 ---
 
@@ -178,6 +185,11 @@ Todas las transiciones de estado relevantes (tanto las disparadas por consumidor
 }
 ```
 
+![Diagrama de Flujo y Secuencia de Mensajería](./flujo_mensajeria.svg)
+
+<details>
+<summary>Ver especificación en código Mermaid</summary>
+
 ```mermaid
 sequenceDiagram
     participant W as Tablet Mesero
@@ -216,6 +228,8 @@ sequenceDiagram
         W->>API: POST /orders/{id}/confirm (re-confirma mismo orderId, nuevo eventId)
     end
 ```
+
+</details>
 
 ---
 
@@ -573,6 +587,11 @@ A partir del acuerdo formal con el equipo de Pagos y Facturación (`contrato_ord
 
 ### 2.5 Diagrama de Arquitectura de Comunicación Integral
 
+![Diagrama de Arquitectura de Comunicación Integral](./diagrama_arquitectura_comunicacion.svg)
+
+<details>
+<summary>Ver especificación en código Mermaid</summary>
+
 ```mermaid
 flowchart TB
     subgraph Clientes["Dispositivos del Restaurante"]
@@ -623,6 +642,8 @@ flowchart TB
     WS -.->|/ws/waiter| W
     WS -.->|/ws/kds| K
 ```
+
+</details>
 
 ---
 
