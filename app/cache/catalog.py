@@ -96,6 +96,11 @@ class CatalogRepository:
                 reason="Dish marked unavailable in catalog",
             )
 
+    async def set_availability(self, dish_id: UUID | str, available: bool) -> None:
+        """Explicitly override the availability flag in cache (e.g. kitchen rejection)."""
+        key = self.key(dish_id)
+        await self._redis.hset(key, mapping={"available": str(available).lower()})
+
     async def upsert(
         self,
         dish_id: UUID | str,

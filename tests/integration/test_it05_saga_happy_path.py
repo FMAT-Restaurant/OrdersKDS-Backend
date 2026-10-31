@@ -16,7 +16,7 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Order, ProcessedEvent
+from app.db.models import Order, OrderItem, ProcessedEvent
 from app.domain.order_status import OrderStatus
 from app.messaging.consumers.base import EventConsumerDispatcher, InMemoryDLQRouter
 from app.messaging.events import EventName
@@ -112,6 +112,9 @@ class TrackingNotifier:
     async def notify_order_changed(self, order: Order) -> None:
         self.notifications.append(order)
 
+    async def notify_item_changed(self, order: Order, item: OrderItem) -> None:
+        pass
+
 
 @pytest.mark.integration
 @pytest.mark.asyncio
@@ -150,7 +153,7 @@ async def test_it05_saga_happy_path_transitions_to_in_preparation() -> None:
     order_created_payload = {
         "orderId": str(order_id),
         "correlationId": str(uuid4()),
-        "items": [{"plateId": "PLT-BURGER-01", "quantity": 2}],
+        "items": [{"offerId": "PLT-BURGER-01", "quantity": 2}],
     }
     reservation_event_id = await inventory_stub.handle_order_created(order_created_payload)
     assert reservation_event_id is not None
@@ -170,9 +173,9 @@ async def test_it05_saga_happy_path_transitions_to_in_preparation() -> None:
     # 4. Assert order state transition
     assert applied is True
     persisted_order = db.orders[order_id]
-    assert persisted_order.status == OrderStatus.IN_PREPARATION
-    assert persisted_order.in_preparation_at is not None
-    initial_in_prep_at = persisted_order.in_preparation_at
+    assert persisted_order.status == OrderStatus.RESERVED
+    assert persisted_order.stock_reserved_at is not None
+    initial_reserved_at = persisted_order.stock_reserved_at
     assert len(notifier.notifications) == 1
 
     # 5. Idempotent Redelivery Check: repeating delivery does not change timestamp or re-notify
@@ -182,5 +185,5 @@ async def test_it05_saga_happy_path_transitions_to_in_preparation() -> None:
         event_type=EventName.STOCK_RESERVED,
     )
     assert reapplied is False
-    assert persisted_order.in_preparation_at == initial_in_prep_at
+    assert persisted_order.stock_reserved_at == initial_reserved_at
     assert len(notifier.notifications) == 1

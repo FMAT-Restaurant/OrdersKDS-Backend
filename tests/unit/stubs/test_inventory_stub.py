@@ -52,7 +52,7 @@ async def test_inventory_stub_reserve_mode_happy_path(
         {
             "orderId": order_id,
             "correlationId": correlation_id,
-            "items": [{"plateId": "PLT-01", "quantity": 2}],
+            "items": [{"offerId": "PLT-01", "quantity": 2}],
         }
     )
 
@@ -81,7 +81,7 @@ async def test_inventory_stub_reject_mode(
     event_id = await stub.handle_order_created(
         {
             "orderId": order_id,
-            "items": [{"plateId": "PLT-02", "quantity": 1}],
+            "items": [{"offerId": "PLT-02", "quantity": 1}],
         }
     )
 

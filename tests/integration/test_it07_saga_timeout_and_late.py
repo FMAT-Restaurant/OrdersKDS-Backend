@@ -15,7 +15,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import SagaTimeoutSettings
-from app.db.models import Order, Outbox, ProcessedEvent
+from app.db.models import Order, OrderItem, Outbox, ProcessedEvent
 from app.domain.order_status import OrderStatus
 from app.messaging.consumers.base import EventConsumerDispatcher, InMemoryDLQRouter
 from app.messaging.events import EventName
@@ -126,6 +126,9 @@ class TrackingNotifier:
     async def notify_order_changed(self, order: Order) -> None:
         self.notifications.append(order)
 
+    async def notify_item_changed(self, order: Order, item: OrderItem) -> None:
+        pass
+
 
 @pytest.mark.integration
 @pytest.mark.asyncio
@@ -175,6 +178,9 @@ async def test_it07_saga_timeout_and_late_reservation_ignored() -> None:
     assert len(db.outbox) == 1
     assert db.outbox[0].event_type == EventName.ORDER_EXPIRED
     assert db.outbox[0].payload["orderId"] == str(order_id)
+    assert db.outbox[0].payload["reason"] == "timeout"
+    assert db.outbox[0].payload["motivo"] == "timeout"
+    assert "items" in db.outbox[0].payload
 
     # 3. Late reservation arrives from delayed/late stub
     inventory_stub.set_mode(InventoryStubMode.RESERVE)
@@ -283,7 +289,7 @@ async def test_it07_multi_stub_e2e_flow_floor_inventory_billing() -> None:
     )
     assert len(stub_bus.get_events("sala.dining_session.iniciada")) == 1
 
-    # 2. Inventory stub confirms stock -> order transitions to IN_PREPARATION
+    # 2. Inventory stub confirms stock -> order transitions to RESERVED
     await inventory_stub.handle_order_created({"orderId": str(order_id)})
     res_msg = stub_bus.get_events(EventName.STOCK_RESERVED)[0]["payload"]
     await dispatcher.dispatch_raw(
@@ -291,7 +297,7 @@ async def test_it07_multi_stub_e2e_flow_floor_inventory_billing() -> None:
         queue_name="ordenes.stock_reserved.queue",
         event_type=EventName.STOCK_RESERVED,
     )
-    assert db.orders[order_id].status == OrderStatus.IN_PREPARATION
+    assert db.orders[order_id].status == OrderStatus.RESERVED
 
     # 3. Order is prepared and delivered
     db.orders[order_id].status = OrderStatus.DELIVERED

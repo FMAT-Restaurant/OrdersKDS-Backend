@@ -14,7 +14,7 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Order, ProcessedEvent
+from app.db.models import Order, OrderItem, ProcessedEvent
 from app.domain.order_status import OrderStatus
 from app.messaging.consumers.base import EventConsumerDispatcher, InMemoryDLQRouter
 from app.messaging.events import EventName
@@ -76,6 +76,9 @@ class TrackingNotifier:
 
     async def notify_order_changed(self, order: Order) -> None:
         self.notifications.append(order)
+
+    async def notify_item_changed(self, order: Order, item: OrderItem) -> None:
+        pass
 
 
 class StatefulOrderRepo(OrderRepository):
@@ -183,7 +186,7 @@ async def test_redelivered_message_is_applied_once() -> None:
             "eventId": str(event_id),
             "orderId": str(order_id),
             "eventType": EventName.STOCK_RESERVED,
-            "reservas": [{"plateId": "PLT-100", "quantity": 2}],
+            "reservas": [{"offerId": "PLT-100", "quantity": 2}],
         }
     )
 
@@ -194,9 +197,9 @@ async def test_redelivered_message_is_applied_once() -> None:
     )
 
     assert first_result is True
-    assert order.status is OrderStatus.IN_PREPARATION
-    assert order.in_preparation_at is not None
-    first_in_prep_timestamp = order.in_preparation_at
+    assert order.status is OrderStatus.RESERVED
+    assert order.stock_reserved_at is not None
+    first_reserved_timestamp = order.stock_reserved_at
     assert len(notifier.notifications) == 1
     assert (order_id, event_id) in db.processed_events
 
@@ -208,9 +211,9 @@ async def test_redelivered_message_is_applied_once() -> None:
 
     # Redelivery is safely swallowed / not re-applied
     assert second_result is False
-    assert order.status is OrderStatus.IN_PREPARATION
-    # in_preparation_at must remain identical (not overwritten)
-    assert order.in_preparation_at == first_in_prep_timestamp
+    assert order.status is OrderStatus.RESERVED
+    # stock_reserved_at must remain identical (not overwritten)
+    assert order.stock_reserved_at == first_reserved_timestamp
     # Notification was not duplicated
     assert len(notifier.notifications) == 1
     # No messages went to DLQ

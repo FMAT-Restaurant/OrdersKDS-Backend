@@ -20,11 +20,53 @@ def _as_bool(value: Any) -> bool | None:
     if value is None or isinstance(value, bool):
         return value
     if isinstance(value, str):
-        if value.strip().lower() in {"true", "1", "yes", "available", "disponible"}:
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "available", "disponible", "active", "activo"}:
             return True
-        if value.strip().lower() in {"false", "0", "no", "unavailable", "no_disponible"}:
+        if normalized in {
+            "false",
+            "0",
+            "no",
+            "unavailable",
+            "no_disponible",
+            "inactive",
+            "inactivo",
+        }:
             return False
     return bool(value)
+
+
+def _extract_available(item: Mapping[str, Any]) -> bool | None:
+    explicit = _first(item, "disponibilidad", "available", "disponible")
+    if explicit is not None:
+        return _as_bool(explicit)
+    state_val = _first(item, "status", "estado", "state")
+    if state_val is not None:
+        if isinstance(state_val, str):
+            norm = state_val.strip().upper()
+            if norm in {"UNAVAILABLE", "INACTIVE", "NO_DISPONIBLE", "INACTIVO", "DISABLED"}:
+                return False
+            if norm in {"ACTIVE", "AVAILABLE", "ACTIVO", "DISPONIBLE", "ENABLED"}:
+                return True
+        return _as_bool(state_val)
+    return None
+
+
+def _extract_category(item: Mapping[str, Any]) -> str | None:
+    direct = _first(item, "categoria", "category")
+    if isinstance(direct, str) and direct.strip():
+        return direct
+    composition = item.get("composition")
+    if isinstance(composition, Mapping):
+        slots = composition.get("slots")
+        if isinstance(slots, list) and slots and isinstance(slots[0], Mapping):
+            course = slots[0].get("course")
+            if isinstance(course, str) and course.strip():
+                return course
+    tag = item.get("presentationTag")
+    if isinstance(tag, str) and tag.strip():
+        return tag
+    return None
 
 
 def _catalog_item_payload(data: Mapping[str, Any]) -> list[Mapping[str, Any]]:
@@ -46,7 +88,17 @@ class CatalogConsumer:
         item: Mapping[str, Any],
         data: Mapping[str, Any],
     ) -> bool:
-        dish_id = _first(item, "platilloId", "dishId", "plateId", "itemId", "id")
+        dish_id = _first(
+            item,
+            "oferta",
+            "ofertaId",
+            "offerId",
+            "platilloId",
+            "dishId",
+            "plateId",
+            "itemId",
+            "id",
+        )
         if dish_id is None:
             return False
 
@@ -64,14 +116,18 @@ class CatalogConsumer:
                 ),
                 **common,
             )
-        if event_name == EventName.MENU_CATALOG_UPDATED:
+        if event_name in (
+            EventName.MENU_CATALOG_UPDATED,
+            EventName.MENU_OFFER_CREATED,
+            EventName.MENU_OFFER_UPDATED,
+        ):
             return await self._repository.upsert(
                 dish_id,
                 price=_first(
                     item, "precio_actualizado", "precioActualizado", "basePrice", "price"
                 ),
-                available=_as_bool(_first(item, "disponibilidad", "available", "disponible")),
-                category=_first(item, "categoria", "category"),
+                available=_extract_available(item),
+                category=_extract_category(item),
                 station=_first(item, "estacion", "station"),
                 preparation_time_text=_first(
                     item,
@@ -85,13 +141,8 @@ class CatalogConsumer:
             EventName.MENU_DISH_AVAILABILITY_UPDATED,
             EventName.MENU_DISH_STATE_UPDATED,
         ):
-            available = _first(item, "disponibilidad", "available", "disponible")
-            if available is None:
-                available = _first(item, "estado", "state") not in (
-                    "UNAVAILABLE",
-                    "unavailable",
-                )
-            return await self._repository.upsert(dish_id, available=_as_bool(available), **common)
+            available = _extract_available(item)
+            return await self._repository.upsert(dish_id, available=available, **common)
         return False
 
     async def consume(self, event_type: str | EventName, payload: Mapping[str, Any]) -> bool:

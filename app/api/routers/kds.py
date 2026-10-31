@@ -16,7 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies.auth import AuthContext, get_auth_context, require_roles
 from app.api.schemas.errors import ErrorResponse
-from app.api.schemas.order import MarkReadyRequest, OrderItemResponse, OrderResponse
+from app.api.schemas.order import (
+    KitchenRejectRequest,
+    MarkReadyRequest,
+    OrderItemResponse,
+    OrderResponse,
+)
 from app.db.models import Order, OrderItem
 from app.db.session import get_session
 from app.domain.roles import KITCHEN_ROLES
@@ -137,6 +142,68 @@ async def get_kds_queue(
             queue.append(OrderResponse.from_model(order, items=valid_items))
 
     return queue
+
+
+@router.patch(
+    "/orders/{orderId}/start-preparation",
+    status_code=status.HTTP_200_OK,
+    summary="Start preparation of a reserved order",
+    description="Kitchen/Chef starts preparation of an order in RESERVED status (OP-11).",
+)
+@router.post(
+    "/orders/{orderId}/start-preparation",
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+async def start_order_preparation(
+    order_id: OrderIdPath,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    order_service: Annotated[OrderService, Depends(get_order_service)],
+    body: MarkReadyRequest | None = None,
+) -> OrderResponse:
+    """Transition order from RESERVED to IN_PREPARATION and consume inventory stock."""
+    order = await order_service.start_order_preparation(order_id, auth)
+    return OrderResponse.from_model(order)
+
+
+@router.patch(
+    "/orders/{orderId}/items/{itemId}/kitchen-reject",
+    status_code=status.HTTP_200_OK,
+    summary="Kitchen rejects item due to physical lack of stock",
+    description=(
+        "Kitchen/Chef rejects item in RESERVED status; updates Redis and returns order "
+        "to REJECTED for waiter."
+    ),
+)
+async def kitchen_reject_item(
+    order_id: OrderIdPath,
+    item_id: ItemIdPath,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    order_service: Annotated[OrderService, Depends(get_order_service)],
+    body: KitchenRejectRequest | None = None,
+) -> OrderResponse:
+    """Kitchen rejects an individual dish item because of insufficient physical stock."""
+    reason = body.reason if body and body.reason else "Insumo físico insuficiente en cocina"
+    order = await order_service.kitchen_reject_item(order_id, item_id, auth, reason=reason)
+    return OrderResponse.from_model(order)
+
+
+@router.patch(
+    "/orders/{orderId}/items/{itemId}/cancel",
+    status_code=status.HTTP_200_OK,
+    summary="Cancel a single item in an order",
+    description="Cancels an item in CREATED or RESERVED status.",
+)
+async def cancel_order_item(
+    order_id: OrderIdPath,
+    item_id: ItemIdPath,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    order_service: Annotated[OrderService, Depends(get_order_service)],
+    body: MarkReadyRequest | None = None,
+) -> OrderResponse:
+    """Kitchen or waiter cancels a single item from an unstarted order."""
+    order = await order_service.cancel_item(order_id, item_id, auth)
+    return OrderResponse.from_model(order)
 
 
 @router.patch(

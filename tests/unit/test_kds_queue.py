@@ -71,8 +71,8 @@ class FakeKdsAsyncSession:
 
         matched: list[Order] = []
         for order in self.db.values():
-            # Discard any order where in_preparation_at is null
-            if order.in_preparation_at is None:
+            # Discard any order where neither in_preparation_at nor stock_reserved_at is set
+            if order.in_preparation_at is None and order.stock_reserved_at is None:
                 continue
             # Discard PAID orders explicitly
             if order.status == OrderStatus.PAID:
@@ -82,19 +82,19 @@ class FakeKdsAsyncSession:
                 if order.status == OrderStatus.DELIVERED:
                     matched.append(order)
             else:
-                # Active view: IN_PREPARATION or (DELIVERED with at least one PENDING item)
-                if order.status == OrderStatus.IN_PREPARATION:
+                # Active view: RESERVED, IN_PREPARATION or DELIVERED with PENDING items
+                if order.status in (OrderStatus.RESERVED, OrderStatus.IN_PREPARATION):
                     matched.append(order)
                 elif order.status == OrderStatus.DELIVERED:
                     has_pending = any(item.status == ItemStatus.PENDING for item in order.items)
                     if has_pending:
                         matched.append(order)
 
-        # Sort: in_preparation_at ASC, created_at ASC, public_id ASC
+        # Sort: COALESCE(in_prep, stock_reserved, created) ASC, created_at ASC, public_id ASC
         min_dt = datetime.min.replace(tzinfo=UTC)
         matched.sort(
             key=lambda o: (
-                o.in_preparation_at or min_dt,
+                o.in_preparation_at or o.stock_reserved_at or o.created_at or min_dt,
                 o.created_at or min_dt,
                 o.public_id,
             )
@@ -177,22 +177,19 @@ def test_get_catalog_info_mock_registered() -> None:
 
 
 def test_build_kds_queue_query_active_structure() -> None:
-    """Verify generated SQL clauses for view='active' (in_prep, PAID, DELIVERED+PENDING)."""
+    """Verify SQL clauses for view='active' (in_prep, RESERVED, PAID, DELIVERED+PENDING)."""
     stmt = build_kds_queue_query(view="active")
-    sql = str(stmt)
+    sql = str(stmt).lower()
     params = stmt.compile().params
 
-    assert "orders.in_preparation_at IS NOT NULL" in sql
     assert "orders.status !=" in sql
-    assert "EXISTS (SELECT 1" in sql
-    assert "FROM order_items" in sql
-    assert (
-        "ORDER BY orders.in_preparation_at ASC, orders.created_at ASC, orders.public_id ASC" in sql
-    )
+    assert "from order_items" in sql
+    assert "coalesce(orders.in_preparation_at, orders.stock_reserved_at, orders.created_at)" in sql
 
     # Verify bound parameter values
     param_values = set(params.values())
     assert OrderStatus.PAID in param_values
+    assert OrderStatus.RESERVED in param_values
     assert OrderStatus.IN_PREPARATION in param_values
     assert OrderStatus.DELIVERED in param_values
     assert ItemStatus.PENDING in param_values
@@ -201,14 +198,12 @@ def test_build_kds_queue_query_active_structure() -> None:
 def test_build_kds_queue_query_delivered_structure() -> None:
     """Verify generated SQL clauses for view='delivered'."""
     stmt = build_kds_queue_query(view="delivered")
-    sql = str(stmt)
+    sql = str(stmt).lower()
     params = stmt.compile().params
 
-    assert "orders.in_preparation_at IS NOT NULL" in sql
+    assert "orders.in_preparation_at is not null" in sql
     assert "orders.status !=" in sql
-    assert (
-        "ORDER BY orders.in_preparation_at ASC, orders.created_at ASC, orders.public_id ASC" in sql
-    )
+    assert "coalesce(orders.in_preparation_at, orders.stock_reserved_at, orders.created_at)" in sql
 
     param_values = set(params.values())
     assert OrderStatus.PAID in param_values
@@ -331,6 +326,31 @@ def test_kds_queue_equal_in_prep_breaks_ties_by_created_at_then_order_id(
 # ============================================================================
 
 
+def test_kds_queue_active_view_includes_reserved_orders(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Verify that orders in RESERVED status appear in the active queue (OP-11)."""
+    now = datetime.now(UTC)
+    order_id = uuid4()
+    order = Order(
+        public_id=order_id,
+        status=OrderStatus.RESERVED,
+        created_at=now - timedelta(minutes=5),
+        stock_reserved_at=now - timedelta(minutes=4),
+        items=[OrderItem(name="Tacos al Pastor", status=ItemStatus.PENDING, quantity=2)],
+    )
+    test_db[order_id] = order
+
+    response = client.get("/kds/queue", headers=auth_headers(Role.KITCHEN))
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["orderId"] == str(order_id)
+    assert data[0]["status"] == OrderStatus.RESERVED.value
+
+
 def test_kds_queue_active_view_includes_delivered_with_pending_and_excludes_paid(
     client: TestClient,
     auth_headers: Callable[[str], dict[str, str]],
@@ -383,12 +403,13 @@ def test_kds_queue_active_view_includes_delivered_with_pending_and_excludes_paid
         items=[OrderItem(name="Postre", status=ItemStatus.DELIVERED, quantity=1)],
     )
 
-    # 5. Order with null in_preparation_at (e.g. still CREATED) -> EXCLUDED
+    # 5. Order with null in_preparation_at and null stock_reserved_at -> EXCLUDED
     id_created = uuid4()
     order_created = Order(
         public_id=id_created,
         status=OrderStatus.CREATED,
         in_preparation_at=None,
+        stock_reserved_at=None,
         items=[OrderItem(name="Cafe", status=ItemStatus.PENDING, quantity=1)],
     )
 
@@ -472,7 +493,6 @@ def test_kds_queue_filters_by_normalized_station_without_accents(
     register_catalog_mock("dish-cold", station="Estación Fría", preparation_time_text="5-8 min")
     register_catalog_mock("dish-drinks", station="Bebidas", preparation_time_text="3 min")
     register_catalog_mock("dish-gen", station="general", preparation_time_text="10 min")
-    # dish-none has no entry -> mock returns station=None (Rule TASK-21a)
 
     id1 = uuid4()
     order1 = Order(
@@ -517,19 +537,16 @@ def test_kds_queue_filters_by_normalized_station_without_accents(
     data_grill = res_grill.json()
     assert len(data_grill) == 1
     assert data_grill[0]["orderId"] == str(id1)
-    # Order 1 items filtered to only grill
     assert len(data_grill[0]["items"]) == 1
     assert data_grill[0]["items"][0]["dishId"] == "dish-grill"
     assert data_grill[0]["items"][0]["station"] == "Parrilla"
     assert data_grill[0]["items"][0]["preparationTimeText"] == "20 min"
 
     # Query 2: Filter station without accents matches accented mock
-    # (estacion fria == Estación Fría)
     res_cold = client.get("/kds/queue?station=estacion%20fria", headers=auth_headers(Role.KITCHEN))
     assert res_cold.status_code == 200
     data_cold = res_cold.json()
     assert len(data_cold) == 2
-    # Both order1 and order2 contain dish-cold; drinks and grill items are filtered out
     for ord_data in data_cold:
         assert len(ord_data["items"]) == 1
         assert ord_data["items"][0]["dishId"] == "dish-cold"

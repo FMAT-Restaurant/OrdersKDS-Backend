@@ -486,20 +486,42 @@ Reglas derivadas que **deben** estar cubiertas por pruebas: *cancelar solo en `C
 Ningún endpoint ni consumer publica **directamente** a RabbitMQ. El cambio de estado y la fila de `outbox` se escriben en **la misma transacción**.
 
 ```python
-async def confirm_order(self, order_id: UUID, actor: AuthContext) -> Order:
-    """Confirm an order and request stock reservation.
-
-    Satisfies: RF-32, RNF-01
-    """
-    async with self._unit_of_work() as uow:
-        order = await uow.orders.get_for_update(order_id)
-        order.confirm(confirmed_by=actor.user_id)  # domain rule; idempotent (see OP-05)
-        uow.outbox.add(
-            OrderCreatedEvent.from_order(order)
-        )  # same transaction as the state change
-        await uow.commit()
-    return order
+async def confirm_order(self, order_id: UUID, confirmed_by: UUID) -> Order:
+    order = await self._orders.get_for_update(order_id)
+    if order.status == OrderStatus.CREATED:
+        if order.confirmed_at is None:
+            event_items: list[OrderCreatedItem] = []
+            for item in order.items:
+                if item.dish_id is None or item.quantity < 1:
+                    raise InvalidOrderItemError()
+                event_items.append(
+                    OrderCreatedItem(plateId=item.dish_id, quantity=item.quantity)
+                )
+            event = OrderCreatedEvent.for_order(order.public_id, items=event_items)
+            payload = event.model_dump(mode="json", by_alias=True)
+            validate_event_payload(event.event_name, payload)
+            order.confirmed_at = datetime.now(UTC)
+            order.confirmed_by = confirmed_by
+            self._outbox.add(event)
+            self._orders.save(order)
+            await self._session.commit()
+        elif order.confirmed_by is None:
+            order.confirmed_by = confirmed_by
+            self._orders.save(order)
+            await self._session.commit()
+        return order
+    if order.status in {
+        OrderStatus.IN_PREPARATION,
+        OrderStatus.DELIVERED,
+        OrderStatus.WASTED,
+        OrderStatus.PAID,
+    }:
+        return order
+    raise InvalidStateTransitionError(order.status, "CONFIRM")
 ```
+
+`inventory_items` convierte cada ítem a `{ "plateId": dish_id, "quantity": quantity }`;
+una orden con `confirmed_at` o ya avanzada no vuelve a encolar el evento.
 
 Reglas:
 
@@ -841,7 +863,7 @@ Los cambios de esquema **rompen compatibilidad** y exigen actualizar ambos lados
 | `POST` | `/orders` | waiter, admin | RF-12, RF-13 | Crea comanda (mesa o `takeaway`) → `CREATED` |
 | `PATCH` | `/orders/{orderId}/items` | waiter, admin | RF-14, RF-17, RF-23 | Agrega/edita ítems (solo `CREATED` y sin `confirmed_at`) |
 | `PATCH` | `/orders/{orderId}/transfer` | waiter, admin | RF-16 | Cambia la mesa |
-| `POST` | `/orders/{orderId}/confirm` | waiter, admin | RF-32 | Idempotente: fija `confirmed_at` y encola `ORDER_CREATED` (outbox) |
+| `POST` | `/orders/{orderId}/confirm` | waiter, admin | RF-32, OP-05 | Primera confirmación en `CREATED`: fija `confirmed_at`/`confirmed_by` y encola `{orderId, items[]}` con ID determinista en outbox; duplicados y estados ya confirmados responden `200` sin republicar; `CANCELLED`/`REJECTED`/`EXPIRED`/`VOIDED` responden `409` |
 | `PATCH` | `/orders/{orderId}/cancel` | waiter, admin | RF-24, RF-25 | `CREATED → CANCELLED` |
 | `PATCH` | `/orders/{orderId}/items/{itemId}/redo` | waiter, admin | RF-22 | Ítem `DELIVERED → PENDING`; `note` obligatoria (la orden conserva `DELIVERED`, OP-12) |
 | `POST` | `/orders/{orderId}/request-bill` | waiter, admin | RF-20 | Encola `BILL_REQUESTED` |

@@ -2,6 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://restaurant.example.com/contracts/events/ordenes.orden.expirada.v1.json",
   "title": "OrderExpiredEvent",
+  "description": "Event emitted when Inventory does not answer before the saga timeout (RF-35, OP-04).",
   "type": "object",
   "required": [
     "eventId",
@@ -10,21 +11,54 @@
   "properties": {
     "eventId": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "Deterministic event identifier per order."
     },
     "orderId": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "Public identifier of the expired order."
     },
     "correlationId": {
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "Correlation identifier propagated across microservices."
     },
     "elapsedSeconds": {
       "type": "integer",
-      "minimum": 0
+      "minimum": 0,
+      "description": "Elapsed seconds since confirmation before timing out."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Reason for expiration (English convention)."
+    },
+    "motivo": {
+      "type": "string",
+      "description": "Reason for expiration (Spanish convention)."
+    },
+    "items": {
+      "type": "array",
+      "description": "Consolidated active items affected by expiration to release Inventory reservations.",
+      "items": {
+        "type": "object",
+        "required": [
+          "offerId",
+          "quantity"
+        ],
+        "properties": {
+          "offerId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
     }
   },
   "additionalProperties": true

@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://restaurant.example.com/contracts/events/ordenes.orden.en_preparacion.v1.json",
+  "title": "OrderInPreparationEvent",
+  "description": "Event emitted when kitchen starts order preparation from RESERVED status (RF-10, RF-18, OP-11).",
+  "type": "object",
+  "required": [
+    "eventId",
+    "orderId",
+    "items"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "description": "Unique deterministic identifier of this event emission.",
+      "minLength": 1
+    },
+    "orderId": {
+      "type": "string",
+      "description": "Public identifier of the affected order.",
+      "minLength": 1
+    },
+    "correlationId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Correlation identifier propagated across microservices."
+    },
+    "items": {
+      "type": "array",
+      "description": "Active dishes consolidated by offerId and quantity.",
+      "items": {
+        "type": "object",
+        "required": [
+          "offerId",
+          "quantity"
+        ],
+        "properties": {
+          "offerId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "plateId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": true
+}

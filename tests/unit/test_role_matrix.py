@@ -3,11 +3,7 @@
 The expected matrices below are written out by hand on purpose: they must not be derived
 from the production tables, otherwise a wrong table would still pass.
 
-Satisfies: RNF-03, RF-15, RNF-04 (UT-BE-55, UT-BE-56, CT-18, CT-19, SEC-04)
-
-TODO(RNF-03, TASK-34): port this matrix to the Newman collection (CT-18, CT-19) and add the
-Gateway-level cases that this service cannot check (IT-16 tampered signature, SEC-03/SEC-09).
-TODO(RNF-04, TASK-29): extend the WebSocket cases with channel subscription (`FORBIDDEN_CHANNEL`).
+Satisfies: RNF-03, RF-15, RNF-04 (UT-BE-55, UT-BE-56, CT-18, CT-19, SEC-04, SEC-09)
 """
 
 from __future__ import annotations
@@ -29,7 +25,7 @@ from app.domain.roles import KITCHEN_ROLES, WAITER_ROLES, Role
 from app.main import app
 from tests.unit.conftest import FakeAsyncSession
 
-pytestmark = [pytest.mark.unit, pytest.mark.requirement("RNF-03", "RF-15", "RNF-04")]
+pytestmark = [pytest.mark.unit, pytest.mark.requirement("RNF-03", "RF-15", "RNF-04", "SEC-09")]
 
 ORDER_ID = UUID("00000000-0000-4000-8000-000000000001")
 ITEM_ID = UUID("00000000-0000-4000-8000-000000000002")
@@ -42,6 +38,9 @@ PATH_PARAMETER = re.compile(r"\{[^}]+\}")
 KITCHEN_ROUTES = [
     f"/orders/{ORDER_ID}/ready",
     f"/orders/{ORDER_ID}/items/{ITEM_ID}/ready",
+    f"/orders/{ORDER_ID}/start-preparation",
+    f"/orders/{ORDER_ID}/items/{ITEM_ID}/kitchen-reject",
+    f"/orders/{ORDER_ID}/items/{ITEM_ID}/cancel",
 ]
 KITCHEN_HTTP_MATRIX = [
     ("waiter", 403),
@@ -249,3 +248,29 @@ def test_websocket_role_table_matches_the_authorization_matrix() -> None:
     assert expected == WS_ROLES_BY_PATH
     assert WS_ROLES_BY_PATH[KDS_WS_PATH] == KITCHEN_ROLES
     assert WS_ROLES_BY_PATH[WAITER_WS_PATH] == WAITER_ROLES
+
+
+@pytest.mark.parametrize(
+    ("path", "role", "channel"),
+    [
+        (KDS_WS_PATH, "kitchen", "floor"),
+        (KDS_WS_PATH, "kitchen", "user:waiter-1"),
+        (KDS_WS_PATH, "kitchen", "kds:station:"),
+        (KDS_WS_PATH, "kitchen", "unknown_channel"),
+        (WAITER_WS_PATH, "waiter", "kds:all"),
+        (WAITER_WS_PATH, "waiter", "kds:station:parrilla"),
+        (WAITER_WS_PATH, "waiter", "user:waiter-2"),
+        (WAITER_WS_PATH, "waiter", "unknown_channel"),
+    ],
+)
+def test_websocket_subscribe_to_forbidden_channel_returns_error(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    path: str,
+    role: str,
+    channel: str,
+) -> None:
+    with client.websocket_connect(path, headers=auth_headers(role)) as websocket:
+        websocket.send_json({"action": "subscribe", "channel": channel})
+        response = websocket.receive_json()
+        assert response == {"error": "FORBIDDEN_CHANNEL"}

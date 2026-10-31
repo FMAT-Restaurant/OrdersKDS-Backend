@@ -9,7 +9,9 @@ Covers: UT-BE-30, UT-BE-31, CT-10, CT-11
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncGenerator, Callable
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, cast
 from uuid import UUID, uuid4
@@ -26,6 +28,7 @@ from app.domain.errors import ForbiddenRoleError, InvalidStateTransitionError
 from app.domain.order_status import ItemStatus, OrderStatus
 from app.domain.roles import Role
 from app.main import app
+from app.messaging.events import EventName
 from app.services.notifications import OrderNotifier
 from app.services.orders import OrderService, get_order_service
 from tests.unit.conftest import FakeAsyncSession
@@ -41,9 +44,13 @@ class SpyOrderNotifier(OrderNotifier):
 
     def __init__(self) -> None:
         self.notified_orders: list[Order] = []
+        self.notified_items: list[tuple[Order, OrderItem]] = []
 
     async def notify_order_changed(self, order: Order) -> None:
         self.notified_orders.append(order)
+
+    async def notify_item_changed(self, order: Order, item: OrderItem) -> None:
+        self.notified_items.append((order, item))
 
 
 @pytest.fixture
@@ -56,6 +63,25 @@ def fake_session(test_db: dict[UUID, Order]) -> FakeAsyncSession:
     return FakeAsyncSession(test_db)
 
 
+class FakeCatalogValidator:
+    def __init__(self) -> None:
+        self.availabilities: dict[str, bool] = {}
+
+    async def set_availability(self, dish_id: str, available: bool) -> None:
+        self.availabilities[dish_id] = available
+
+    async def is_dish_available(self, dish_id: str) -> bool:
+        return self.availabilities.get(dish_id, True)
+
+    async def validate_dishes(self, dish_ids: list[str]) -> list[str]:
+        return []
+
+
+@pytest.fixture
+def fake_catalog() -> FakeCatalogValidator:
+    return FakeCatalogValidator()
+
+
 @pytest.fixture
 def spy_notifier() -> SpyOrderNotifier:
     return SpyOrderNotifier()
@@ -65,6 +91,7 @@ def spy_notifier() -> SpyOrderNotifier:
 def override_dependencies(
     fake_session: FakeAsyncSession,
     spy_notifier: SpyOrderNotifier,
+    fake_catalog: FakeCatalogValidator,
 ) -> Any:
     async def _get_test_session() -> AsyncGenerator[FakeAsyncSession, None]:
         yield fake_session
@@ -73,6 +100,7 @@ def override_dependencies(
     app.dependency_overrides[get_order_service] = lambda: OrderService(
         session=cast(AsyncSession, fake_session),
         notifier=spy_notifier,
+        catalog_repo=fake_catalog,
     )
     yield
     app.dependency_overrides.clear()
@@ -136,8 +164,11 @@ def test_mark_item_ready_publishes_dish_prepared(
     assert event_row.payload["itemId"] == str(item1.public_id)
     assert fake_session.committed is True
 
-    # Order has not reached DELIVERED yet, so notification not sent
+    # Order has not reached DELIVERED yet, so order notification not sent
     assert len(spy_notifier.notified_orders) == 0
+    assert len(spy_notifier.notified_items) == 1
+    assert spy_notifier.notified_items[0][0].public_id == order.public_id
+    assert spy_notifier.notified_items[0][1].public_id == item1.public_id
 
 
 def test_mark_item_ready_idempotent_no_duplicate_publish(
@@ -193,6 +224,8 @@ def test_mark_item_ready_last_item_transitions_order_and_items_to_delivered(
     assert fake_session.outbox_rows[0].payload["itemId"] == str(item2.public_id)
 
     # Notification broadcast triggered after commit
+    assert len(spy_notifier.notified_items) == 1
+    assert spy_notifier.notified_items[0][1].public_id == item2.public_id
     assert len(spy_notifier.notified_orders) == 1
     assert spy_notifier.notified_orders[0].public_id == order.public_id
 
@@ -514,3 +547,299 @@ async def test_order_service_sync_delivery_when_order_has_no_items(
     order = Order(public_id=uuid4(), status=OrderStatus.IN_PREPARATION)
     service = OrderService(session=cast(AsyncSession, fake_session))
     assert service._sync_delivery_if_all_ready(order) is False
+
+
+# ==============================================================================
+# Sprint 4 (RF-09, RF-10, RF-18, OP-11): Start preparation, Kitchen reject & Cancel item
+# ==============================================================================
+
+
+def test_start_order_preparation_success(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+    spy_notifier: SpyOrderNotifier,
+) -> None:
+    """Transition order from RESERVED to IN_PREPARATION and stage OrderInPreparationEvent."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=3,
+        status=OrderStatus.RESERVED,
+        stock_reserved_at=datetime.now(UTC),
+    )
+    item1 = OrderItem(
+        public_id=uuid4(),
+        dish_id="dish-1",
+        name="Burger",
+        quantity=2,
+        unit_price=Decimal("100.00"),
+        status=ItemStatus.PENDING,
+    )
+    order.items.append(item1)
+    order.recalculate_total()
+    test_db[order.public_id] = order
+
+    resp = client.patch(
+        f"/orders/{order.public_id}/start-preparation",
+        headers=auth_headers("kitchen"),
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "IN_PREPARATION"
+    assert data["inPreparationAt"] is not None
+
+    # Verify DB state
+    assert test_db[order.public_id].status == OrderStatus.IN_PREPARATION
+    assert test_db[order.public_id].in_preparation_at is not None
+
+    # Verify Outbox event staged
+    assert len(fake_session.outbox_rows) == 1
+    event_row = fake_session.outbox_rows[0]
+    assert event_row.event_type == EventName.ORDER_IN_PREPARATION
+    payload = (
+        event_row.payload if isinstance(event_row.payload, dict) else json.loads(event_row.payload)
+    )
+    assert payload["orderId"] == str(order.public_id)
+    assert payload["items"] == [{"offerId": "dish-1", "quantity": 2}]
+
+    # Verify WebSocket notification
+    assert len(spy_notifier.notified_orders) == 1
+    assert spy_notifier.notified_orders[0].public_id == order.public_id
+
+
+def test_start_order_preparation_post_alias_success(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+) -> None:
+    """POST alias also initiates order preparation."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=3,
+        status=OrderStatus.RESERVED,
+        stock_reserved_at=datetime.now(UTC),
+    )
+    test_db[order.public_id] = order
+
+    resp = client.post(
+        f"/orders/{order.public_id}/start-preparation",
+        headers=auth_headers("chef"),
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "IN_PREPARATION"
+    assert len(fake_session.outbox_rows) == 1
+
+
+def test_start_order_preparation_idempotent_when_already_in_preparation(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+) -> None:
+    """Already IN_PREPARATION order is a safe no-op (200 OK without re-staging event)."""
+    order = _create_in_prep_order(num_items=1)
+    test_db[order.public_id] = order
+
+    resp = client.patch(
+        f"/orders/{order.public_id}/start-preparation",
+        headers=auth_headers("kitchen"),
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "IN_PREPARATION"
+    assert len(fake_session.outbox_rows) == 0
+
+
+def test_start_order_preparation_forbidden_for_waiter(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Waiters are rejected with 403 FORBIDDEN_ROLE."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=3,
+        status=OrderStatus.RESERVED,
+    )
+    test_db[order.public_id] = order
+
+    resp = client.patch(
+        f"/orders/{order.public_id}/start-preparation",
+        headers=auth_headers("waiter"),
+    )
+
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == ErrorCode.FORBIDDEN_ROLE
+
+
+def test_start_order_preparation_invalid_state_conflict(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Orders in CREATED status cannot start preparation (409 Conflict)."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=1,
+        status=OrderStatus.CREATED,
+    )
+    test_db[order.public_id] = order
+
+    resp = client.patch(
+        f"/orders/{order.public_id}/start-preparation",
+        headers=auth_headers("kitchen"),
+    )
+
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == ErrorCode.INVALID_STATE_TRANSITION
+
+
+def test_kitchen_reject_item_success(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+    spy_notifier: SpyOrderNotifier,
+    fake_catalog: FakeCatalogValidator,
+) -> None:
+    """Kitchen rejects item from RESERVED: sets catalog False, stages event, sets REJECTED."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=7,
+        status=OrderStatus.RESERVED,
+        stock_reserved_at=datetime.now(UTC),
+    )
+    item = OrderItem(
+        public_id=uuid4(),
+        dish_id="dish-avocado-salad",
+        name="Avocado Salad",
+        quantity=1,
+        unit_price=Decimal("80.00"),
+        status=ItemStatus.PENDING,
+    )
+    order.items.append(item)
+    order.recalculate_total()
+    test_db[order.public_id] = order
+
+    resp = client.patch(
+        f"/orders/{order.public_id}/items/{item.public_id}/kitchen-reject",
+        headers=auth_headers("chef"),
+        json={"reason": "Se acabaron los aguacates frescos"},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "REJECTED"
+    assert data["rejectionDetails"] is not None
+    assert data["rejectionDetails"]["source"] == "kitchen"
+    assert len(data["rejectionDetails"]["rejectedItems"]) == 1
+    assert data["rejectionDetails"]["rejectedItems"][0]["offerId"] == "dish-avocado-salad"
+
+    # Catalog availability in Redis set to False
+    assert fake_catalog.availabilities.get("dish-avocado-salad") is False
+
+    # Outbox contains KitchenDishRejectedEvent
+    assert len(fake_session.outbox_rows) == 1
+    event_row = fake_session.outbox_rows[0]
+    assert event_row.event_type == EventName.KITCHEN_DISH_REJECTED
+    payload = (
+        event_row.payload if isinstance(event_row.payload, dict) else json.loads(event_row.payload)
+    )
+    assert payload["orderId"] == str(order.public_id)
+    assert payload["itemId"] == str(item.public_id)
+    assert payload["offerId"] == "dish-avocado-salad"
+    assert payload["quantity"] == 1
+    assert payload["reason"] == "Se acabaron los aguacates frescos"
+
+    # WebSocket notified
+    assert len(spy_notifier.notified_orders) == 1
+
+
+def test_kitchen_reject_item_forbidden_for_waiter(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Waiters cannot execute kitchen reject (403 Forbidden)."""
+    order = Order(public_id=uuid4(), status=OrderStatus.RESERVED)
+    item = OrderItem(public_id=uuid4(), dish_id="dish-1", name="Dish", quantity=1)
+    order.items.append(item)
+    test_db[order.public_id] = order
+
+    resp = client.patch(
+        f"/orders/{order.public_id}/items/{item.public_id}/kitchen-reject",
+        headers=auth_headers("waiter"),
+    )
+    assert resp.status_code == 403
+
+
+def test_kitchen_reject_item_when_order_not_reserved_raises_409(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Cannot reject item from an order that is already IN_PREPARATION (409 Conflict)."""
+    order = _create_in_prep_order(num_items=1)
+    test_db[order.public_id] = order
+
+    resp = client.patch(
+        f"/orders/{order.public_id}/items/{order.items[0].public_id}/kitchen-reject",
+        headers=auth_headers("kitchen"),
+    )
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == ErrorCode.INVALID_STATE_TRANSITION
+
+
+def test_cancel_item_success(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    spy_notifier: SpyOrderNotifier,
+) -> None:
+    """Kitchen cancels a pending item in RESERVED order; order total is recalculated."""
+    order = _create_in_prep_order(num_items=2)
+    order.status = OrderStatus.RESERVED
+    order.recalculate_total()
+    assert order.total_amount == Decimal("100.00")
+    test_db[order.public_id] = order
+    item_to_cancel = order.items[0]
+
+    resp = client.patch(
+        f"/orders/{order.public_id}/items/{item_to_cancel.public_id}/cancel",
+        headers=auth_headers("kitchen"),
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert Decimal(str(data["totalAmount"])) == Decimal("50.00")
+    cancelled_item = next(i for i in data["items"] if i["itemId"] == str(item_to_cancel.public_id))
+    assert cancelled_item["status"] == "CANCELLED"
+    assert test_db[order.public_id].items[0].status == ItemStatus.CANCELLED
+    assert test_db[order.public_id].total_amount == Decimal("50.00")
+
+    # Item and order change notifications sent
+    assert len(spy_notifier.notified_items) == 1
+    assert len(spy_notifier.notified_orders) == 1
+
+
+def test_cancel_item_already_ready_conflict(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Cannot cancel an item that is already READY (409 Conflict)."""
+    order = _create_in_prep_order(num_items=1)
+    order.items[0].status = ItemStatus.READY
+    test_db[order.public_id] = order
+
+    resp = client.patch(
+        f"/orders/{order.public_id}/items/{order.items[0].public_id}/cancel",
+        headers=auth_headers("kitchen"),
+    )
+
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == ErrorCode.INVALID_STATE_TRANSITION

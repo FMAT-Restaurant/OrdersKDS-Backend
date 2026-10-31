@@ -16,7 +16,7 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Order, ProcessedEvent
+from app.db.models import Order, OrderItem, ProcessedEvent
 from app.domain.order_status import OrderStatus
 from app.messaging.consumers.base import EventConsumerDispatcher, InMemoryDLQRouter
 from app.messaging.events import EventName
@@ -112,6 +112,9 @@ class TrackingNotifier:
     async def notify_order_changed(self, order: Order) -> None:
         self.notifications.append(order)
 
+    async def notify_item_changed(self, order: Order, item: OrderItem) -> None:
+        pass
+
 
 @pytest.mark.integration
 @pytest.mark.asyncio
@@ -150,7 +153,7 @@ async def test_it06_saga_insufficient_stock_transitions_to_rejected() -> None:
     order_created_payload = {
         "orderId": str(order_id),
         "correlationId": str(uuid4()),
-        "items": [{"plateId": "PLT-RARE-01", "quantity": 1}],
+        "items": [{"offerId": "PLT-RARE-01", "quantity": 1}],
     }
     rejection_event_id = await inventory_stub.handle_order_created(order_created_payload)
     assert rejection_event_id is not None
