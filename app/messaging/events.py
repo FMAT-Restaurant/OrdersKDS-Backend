@@ -110,9 +110,13 @@ class OrderCreatedEvent(OrderEvent):
         *,
         items: list[OrderCreatedItem] | None = None,
         correlation_id: UUID | None = None,
+        attempt_key: str | int | None = None,
     ) -> OrderCreatedEvent:
         """Build the deterministic inventory-reservation event for an order."""
-        event_id = uuid5(NAMESPACE_URL, f"{cls.event_name}:{order_id}")
+        seed = f"{cls.event_name}:{order_id}"
+        if attempt_key is not None:
+            seed = f"{seed}:{attempt_key}"
+        event_id = uuid5(NAMESPACE_URL, seed)
         return cls(
             eventId=event_id,
             orderId=order_id,
@@ -187,6 +191,7 @@ class DishPreparedEvent(OrderEvent):
 
     item_id: UUID | None = Field(default=None, alias="itemId")
     offer_id: str | None = Field(default=None, alias="offerId")
+    quantity: int = Field(default=1, gt=0, alias="quantity")
 
     @classmethod
     def for_item(
@@ -195,6 +200,7 @@ class DishPreparedEvent(OrderEvent):
         item_id: UUID,
         *,
         offer_id: str | None = None,
+        quantity: int = 1,
         correlation_id: UUID | None = None,
     ) -> DishPreparedEvent:
         """Build a repeatable event for an individual prepared dish/offer (RF-10)."""
@@ -203,6 +209,7 @@ class DishPreparedEvent(OrderEvent):
             orderId=order_id,
             itemId=item_id,
             offerId=offer_id,
+            quantity=quantity,
             correlationId=correlation_id,
         )
 
@@ -270,6 +277,31 @@ class StockReservedMessage(BaseModel):
     )
 
 
+class RejectedItemDetail(BaseModel):
+    """Detail of a single item that could not be fully reserved by Inventory."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    offer_id: str = Field(
+        validation_alias=AliasChoices("offerId", "offer_id", "plateId", "plate_id", "dishId"),
+        serialization_alias="offerId",
+    )
+    requested_quantity: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "requestedQuantity", "requested_quantity", "requested", "solicitado"
+        ),
+        serialization_alias="requestedQuantity",
+    )
+    available_quantity: int = Field(
+        default=0,
+        validation_alias=AliasChoices(
+            "availableQuantity", "available_quantity", "available", "disponible"
+        ),
+        serialization_alias="availableQuantity",
+    )
+
+
 class StockInsufficientMessage(BaseModel):
     """Inbound message from Inventory rejecting order due to lack of stock."""
 
@@ -280,7 +312,17 @@ class StockInsufficientMessage(BaseModel):
     correlation_id: UUID | None = Field(default=None, alias="correlationId")
     missing_ingredients: list[str] = Field(
         default_factory=list,
-        alias="faltantes",
+        validation_alias=AliasChoices("faltantes", "missingIngredients", "missing_ingredients"),
+    )
+    rejected_items: list[RejectedItemDetail] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("rejectedItems", "rejected_items", "itemsRechazados"),
+    )
+    reserved_items: list[OrderCreatedItem] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices(
+            "reservedItems", "reserved_items", "itemsReservados", "reservations", "reservas"
+        ),
     )
 
 

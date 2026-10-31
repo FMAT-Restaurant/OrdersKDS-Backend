@@ -68,7 +68,7 @@ def _parse_actor_uuid(user_id_str: str) -> UUID:
     "",
     status_code=status.HTTP_200_OK,
     summary="List orders",
-    description="List orders optionally filtered by status enum (RF-18).",
+    description="List orders optionally filtered by status enum or dining session (RF-18).",
 )
 async def list_orders(
     auth: Annotated[AuthContext, Depends(require_roles(Role.WAITER, Role.ADMIN))],
@@ -76,19 +76,23 @@ async def list_orders(
     status: Annotated[
         OrderStatus | None, Query(description="Filter by order status enum.")
     ] = None,
+    dining_session_id: Annotated[
+        UUID | None, Query(alias="diningSessionId", description="Filter by dining session UUID.")
+    ] = None,
 ) -> list[OrderResponse]:
-    """List orders optionally filtered by OrderStatus (RF-18).
+    """List orders optionally filtered by OrderStatus or dining session (RF-18).
 
     Args:
         auth: Authenticated caller context from JWT.
         session: Active database session.
         status: Optional OrderStatus filter.
+        dining_session_id: Optional dining session filter.
 
     Returns:
         List of matching Order representations.
     """
     repo = OrderRepository(session)
-    orders = await repo.list_orders(status=status)
+    orders = await repo.list_orders(status=status, dining_session_id=dining_session_id)
     return [OrderResponse.from_model(order) for order in orders]
 
 
@@ -165,6 +169,7 @@ async def create_order(
         public_id=uuid4(),
         table_number=payload.table_number,
         is_takeaway=payload.is_takeaway,
+        dining_session_id=payload.dining_session_id,
         status=OrderStatus.CREATED,
         created_by=actor_uuid,
         responsible_waiter_id=actor_uuid,
@@ -222,7 +227,9 @@ async def update_order_items(
     if order is None:
         raise OrderNotFoundError(f"Order with id={order_id} not found.")
 
-    if order.status != OrderStatus.CREATED:
+    if order.status == OrderStatus.REJECTED:
+        order.reopen_as_draft()
+    elif order.status != OrderStatus.CREATED:
         raise InvalidStateTransitionError(order.status, "ITEMS_MODIFIED")
 
     if order.confirmed_at is not None:

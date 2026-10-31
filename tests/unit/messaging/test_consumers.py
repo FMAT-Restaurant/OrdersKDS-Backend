@@ -409,3 +409,34 @@ async def test_malformed_message_is_rejected_without_state_change(
     assert reason_snippet.lower() in str(dlq_entry["reason"]).lower()
     # Ensured no DB transaction was committed
     session.commit.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_stock_insufficient_with_option_a_partial_reservation() -> None:
+    order_id = uuid4()
+    order = _build_order(status=OrderStatus.CREATED, order_id=order_id)
+    uow, _, processed_repo = _build_mock_uow(order, is_duplicate=False)
+    notifier = FakeOrderNotifier()
+
+    event = StockInsufficientMessage(
+        eventId=uuid4(),
+        orderId=order_id,
+        faltantes=["carne_res"],
+        rejectedItems=[{"offerId": "PLT-BURGER", "requestedQuantity": 3, "availableQuantity": 1}],
+        reservedItems=[{"offerId": "PLT-FRIES", "quantity": 2}],
+    )
+
+    applied = await handle_stock_insufficient(event, uow, notifier=notifier)
+
+    assert applied is True
+    assert order.status is OrderStatus.REJECTED
+    assert order.rejection_details is not None
+    assert order.rejection_details["missingIngredients"] == ["carne_res"]
+    assert len(order.rejection_details["rejectedItems"]) == 1
+    assert order.rejection_details["rejectedItems"][0]["offerId"] == "PLT-BURGER"
+    assert order.rejection_details["rejectedItems"][0]["requestedQuantity"] == 3
+    assert order.rejection_details["rejectedItems"][0]["availableQuantity"] == 1
+    assert len(order.rejection_details["reservedItems"]) == 1
+    assert order.rejection_details["reservedItems"][0]["offerId"] == "PLT-FRIES"
+    assert order.rejection_details["reservedItems"][0]["quantity"] == 2

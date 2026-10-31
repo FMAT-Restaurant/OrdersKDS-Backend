@@ -11,6 +11,7 @@ Covers: UT-BE-11, UT-BE-15, UT-BE-25, UT-BE-26, UT-BE-27, UT-BE-28, UT-BE-29,
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -78,9 +79,12 @@ class FakeAsyncSession:
     async def scalars(self, statement: Any, *args: Any, **kwargs: Any) -> Any:
         params = statement.compile().params
         status_val = next((v for v in params.values() if isinstance(v, OrderStatus)), None)
+        session_val = next((v for v in params.values() if isinstance(v, UUID)), None)
         orders = list(self.db.values())
         if status_val is not None:
             orders = [o for o in orders if o.status == status_val]
+        if session_val is not None:
+            orders = [o for o in orders if o.dining_session_id == session_val]
         orders.sort(
             key=lambda o: (
                 o.created_at or datetime.min.replace(tzinfo=UTC),
@@ -737,7 +741,8 @@ def test_confirm_order_role_matrix(
         OrderStatus.DELIVERED,
         OrderStatus.CANCELLED,
         OrderStatus.PAID,
-        OrderStatus.REJECTED,
+        OrderStatus.EXPIRED,
+        OrderStatus.VOIDED,
     ],
 )
 def test_update_order_items_rejected_when_status_not_created(
@@ -1733,3 +1738,152 @@ def test_cancel_order_role_matrix(
     resp_unauth = client.patch(f"/orders/{order_unauth.public_id}/cancel")
     assert resp_unauth.status_code == 401
     assert resp_unauth.json()["error"]["code"] == ErrorCode.UNAUTHENTICATED
+
+
+# ==============================================================================
+# Sprint 4 Phase 3: Reopening REJECTED orders, Re-confirmation and 1:N Dining Session
+# ==============================================================================
+
+
+def test_update_order_items_on_rejected_order_reopens_to_created(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Modifying items on a REJECTED order reopens it to CREATED and clears rejection details."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=3,
+        status=OrderStatus.REJECTED,
+        rejection_details={"source": "kitchen", "reason": "No stock"},
+    )
+    test_db[order.public_id] = order
+
+    resp = client.patch(
+        f"/orders/{order.public_id}/items",
+        headers=auth_headers("waiter"),
+        json={
+            "items": [
+                {
+                    "dishId": "dish-101",
+                    "name": "Guacamole",
+                    "quantity": 1,
+                    "unitPrice": "50.00",
+                }
+            ]
+        },
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "CREATED"
+    assert data["rejectionDetails"] is None
+    assert data["confirmedAt"] is None
+    assert test_db[order.public_id].status == OrderStatus.CREATED
+    assert test_db[order.public_id].rejection_details is None
+
+
+def test_reconfirm_reopened_order_generates_distinct_event_id(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+) -> None:
+    """Re-confirming a reopened order (version > 1) stages a new event with distinct eventId."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=5,
+        status=OrderStatus.CREATED,
+        version=1,
+    )
+    item = OrderItem(
+        public_id=uuid4(),
+        dish_id="dish-101",
+        name="Guacamole",
+        quantity=2,
+        unit_price=Decimal("50.00"),
+    )
+    order.items.append(item)
+    test_db[order.public_id] = order
+
+    # First confirmation (attempt 1)
+    resp1 = client.post(
+        f"/orders/{order.public_id}/confirm",
+        headers=auth_headers("waiter"),
+    )
+    assert resp1.status_code == 200
+    assert len(fake_session.outbox_rows) == 1
+    event_1 = fake_session.outbox_rows[0]
+    payload_1 = (
+        event_1.payload if isinstance(event_1.payload, dict) else json.loads(event_1.payload)
+    )
+    event_id_1 = payload_1["eventId"]
+
+    # Order gets rejected, version increments and order reopens
+    order.mark_rejected(details={"reason": "Parcial"})
+    order.reopen_as_draft()
+    order.version = 2
+    order.items[0].quantity = 1  # Waiter lowers quantity from 2 to 1
+
+    # Second confirmation (attempt 2)
+    resp2 = client.post(
+        f"/orders/{order.public_id}/confirm",
+        headers=auth_headers("waiter"),
+    )
+    assert resp2.status_code == 200
+    assert len(fake_session.outbox_rows) == 2
+    event_2 = fake_session.outbox_rows[1]
+    payload_2 = (
+        event_2.payload if isinstance(event_2.payload, dict) else json.loads(event_2.payload)
+    )
+    event_id_2 = payload_2["eventId"]
+
+    assert event_id_1 != event_id_2
+    assert payload_2["items"] == [{"offerId": "dish-101", "quantity": 1}]
+
+
+def test_create_and_list_orders_with_dining_session_id(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Orders can be created with diningSessionId and filtered via GET /orders?diningSessionId=."""
+    session_a = uuid4()
+    session_b = uuid4()
+
+    # Create order 1 for session A
+    resp1 = client.post(
+        "/orders",
+        headers=auth_headers("waiter"),
+        json={"tableNumber": 1, "diningSessionId": str(session_a)},
+    )
+    assert resp1.status_code == 201
+    assert resp1.json()["diningSessionId"] == str(session_a)
+
+    # Create order 2 for session A
+    resp2 = client.post(
+        "/orders",
+        headers=auth_headers("waiter"),
+        json={"tableNumber": 1, "diningSessionId": str(session_a)},
+    )
+    assert resp2.status_code == 201
+    assert resp2.json()["diningSessionId"] == str(session_a)
+
+    # Create order 3 for session B
+    resp3 = client.post(
+        "/orders",
+        headers=auth_headers("waiter"),
+        json={"tableNumber": 2, "diningSessionId": str(session_b)},
+    )
+    assert resp3.status_code == 201
+    assert resp3.json()["diningSessionId"] == str(session_b)
+
+    # Filter by session A
+    list_resp = client.get(
+        f"/orders?diningSessionId={session_a}",
+        headers=auth_headers("waiter"),
+    )
+    assert list_resp.status_code == 200
+    results = list_resp.json()
+    assert len(results) == 2
+    assert all(r["diningSessionId"] == str(session_a) for r in results)

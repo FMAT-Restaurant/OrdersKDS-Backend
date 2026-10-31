@@ -107,10 +107,16 @@ def test_order_created_contract_rejects_invalid_items() -> None:
 @pytest.mark.requirement("RNF-13", "CT-23")
 def test_dish_prepared_event_satisfies_contract() -> None:
     """Verify DishPreparedEvent payload validates against its contract."""
-    event = DishPreparedEvent.for_order(uuid4())
+    event = DishPreparedEvent.for_item(
+        uuid4(),
+        uuid4(),
+        offer_id="dish-1",
+        quantity=2,
+    )
     payload = event.model_dump(mode="json", by_alias=True)
 
     validate_event_payload(EventName.DISH_PREPARED, payload)
+    assert payload["quantity"] == 2
 
 
 @pytest.mark.contract

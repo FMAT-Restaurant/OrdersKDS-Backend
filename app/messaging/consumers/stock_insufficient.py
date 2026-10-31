@@ -64,7 +64,16 @@ async def handle_stock_insufficient(
             )
             return False
 
-        order.mark_rejected()
+        details: dict[str, object] = {
+            "missingIngredients": message.missing_ingredients,
+            "rejectedItems": [
+                i.model_dump(mode="json", by_alias=True) for i in message.rejected_items
+            ],
+            "reservedItems": [
+                i.model_dump(mode="json", by_alias=True) for i in message.reserved_items
+            ],
+        }
+        order.mark_rejected(details=details)
         uow.processed_events.add(
             event_id=message.event_id,
             order_id=message.order_id,

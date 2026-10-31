@@ -49,6 +49,15 @@ from app.services.notifications import (
 logger = logging.getLogger(__name__)
 
 
+_IDEMPOTENT_CONFIRM_STATUSES = {
+    OrderStatus.RESERVED,
+    OrderStatus.IN_PREPARATION,
+    OrderStatus.DELIVERED,
+    OrderStatus.WASTED,
+    OrderStatus.PAID,
+}
+
+
 def _consolidate_order_items(items: list[OrderItem]) -> list[OrderCreatedItem]:
     """Group active non-cancelled items by dish_id (offerId) and sum quantities."""
     quantities: dict[str, int] = {}
@@ -57,6 +66,13 @@ def _consolidate_order_items(items: list[OrderItem]) -> list[OrderCreatedItem]:
             continue
         quantities[item.dish_id] = quantities.get(item.dish_id, 0) + item.quantity
     return [OrderCreatedItem(offerId=dish_id, quantity=qty) for dish_id, qty in quantities.items()]
+
+
+def _validate_order_items(items: list[OrderItem]) -> None:
+    """Ensure each item has an assigned dish_id and quantity >= 1."""
+    for item in items:
+        if item.dish_id is None or item.quantity < 1:
+            raise InvalidOrderItemError()
 
 
 class OrderService:
@@ -121,6 +137,7 @@ class OrderService:
                     order.public_id,
                     target_item.public_id,
                     offer_id=target_item.dish_id,
+                    quantity=target_item.quantity,
                 )
             )
 
@@ -156,6 +173,7 @@ class OrderService:
                         order.public_id,
                         item.public_id,
                         offer_id=item.dish_id,
+                        quantity=item.quantity,
                     )
                 )
 
@@ -274,6 +292,7 @@ class OrderService:
         reason: str | None = None,
     ) -> Order:
         """Cancel a single item in an order while still in CREATED or RESERVED status."""
+        self._verify_kitchen_role(auth)
         order = await self._orders.get_by_public_id(order_id)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
@@ -284,6 +303,15 @@ class OrderService:
         target_item = next((i for i in order.items if i.public_id == item_id), None)
         if target_item is None:
             raise OrderNotFoundError(f"Item with id={item_id} not found in order {order_id}.")
+
+        logger.info(
+            "Item %s of order %s cancelled by actor %s (role=%s). Reason: %s",
+            item_id,
+            order_id,
+            auth.user_id,
+            auth.role,
+            reason or "No reason provided",
+        )
 
         target_item.mark_cancelled()
         order.recalculate_total()
@@ -379,43 +407,40 @@ class OrderService:
         await notify_order_changed(order, notifier=self._notifier)
         return order
 
+    def _stage_order_confirmation(self, order: Order, confirmed_by: UUID) -> None:
+        """Validate items, consolidate quantities, build event and stage to outbox."""
+        _validate_order_items(order.items)
+        event_items = _consolidate_order_items(order.items)
+        attempt_key = order.version if (order.version is not None and order.version > 1) else None
+        event = OrderCreatedEvent.for_order(
+            order.public_id,
+            items=event_items,
+            attempt_key=attempt_key,
+        )
+        payload = event.model_dump(mode="json", by_alias=True)
+        validate_event_payload(event.event_name, payload)
+        order.confirmed_at = datetime.now(UTC)
+        order.confirmed_by = confirmed_by
+        self._outbox.add(event)
+
     async def confirm_order(self, order_id: UUID, confirmed_by: UUID) -> Order:
         """Confirm an order and atomically stage its inventory event (OP-05, TASK-11)."""
         order = await self._orders.get_for_update(order_id)
 
-        if order.status == OrderStatus.CREATED:
-            if order.confirmed_at is None:
-                for item in order.items:
-                    if item.dish_id is None or item.quantity < 1:
-                        raise InvalidOrderItemError()
-                event_items = _consolidate_order_items(order.items)
-                event = OrderCreatedEvent.for_order(
-                    order.public_id,
-                    items=event_items,
-                )
-                payload = event.model_dump(mode="json", by_alias=True)
-                validate_event_payload(event.event_name, payload)
-                order.confirmed_at = datetime.now(UTC)
-                order.confirmed_by = confirmed_by
-                self._outbox.add(event)
-                self._orders.save(order)
-                await self._session.commit()
-            elif order.confirmed_by is None:
-                order.confirmed_by = confirmed_by
-                self._orders.save(order)
-                await self._session.commit()
+        if order.status in _IDEMPOTENT_CONFIRM_STATUSES:
             return order
 
-        if order.status in {
-            OrderStatus.RESERVED,
-            OrderStatus.IN_PREPARATION,
-            OrderStatus.DELIVERED,
-            OrderStatus.WASTED,
-            OrderStatus.PAID,
-        }:
-            return order
+        if order.status != OrderStatus.CREATED:
+            raise InvalidStateTransitionError(order.status, "CONFIRM")
 
-        raise InvalidStateTransitionError(order.status, "CONFIRM")
+        if order.confirmed_at is None:
+            self._stage_order_confirmation(order, confirmed_by)
+        elif order.confirmed_by is None:
+            order.confirmed_by = confirmed_by
+
+        self._orders.save(order)
+        await self._session.commit()
+        return order
 
 
 def get_order_service(
