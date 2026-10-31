@@ -37,6 +37,7 @@ def _build_order(
     status: OrderStatus = OrderStatus.CREATED,
     order_id: UUID | None = None,
     in_preparation_at: datetime | None = None,
+    stock_reserved_at: datetime | None = None,
 ) -> Order:
     return Order(
         public_id=order_id or uuid4(),
@@ -44,6 +45,7 @@ def _build_order(
         version=1,
         total_amount=Decimal("150.00"),
         in_preparation_at=in_preparation_at,
+        stock_reserved_at=stock_reserved_at,
     )
 
 
@@ -96,10 +98,10 @@ class FakeOrderNotifier:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_stock_reserved_moves_order_to_in_preparation_and_notifies() -> None:
+async def test_stock_reserved_moves_order_to_reserved_and_notifies() -> None:
     order_id = uuid4()
     order = _build_order(status=OrderStatus.CREATED, order_id=order_id)
-    assert order.in_preparation_at is None
+    assert order.stock_reserved_at is None
 
     uow, _, processed_repo = _build_mock_uow(order, is_duplicate=False)
     notifier = FakeOrderNotifier()
@@ -113,10 +115,11 @@ async def test_stock_reserved_moves_order_to_in_preparation_and_notifies() -> No
     applied = await handle_stock_reserved(event, uow, notifier=notifier)
 
     assert applied is True
-    assert order.status is OrderStatus.IN_PREPARATION
-    assert order.in_preparation_at is not None
-    assert isinstance(order.in_preparation_at, datetime)
-    assert order.in_preparation_at.tzinfo is UTC
+    assert order.status is OrderStatus.RESERVED
+    assert order.stock_reserved_at is not None
+    assert isinstance(order.stock_reserved_at, datetime)
+    assert order.stock_reserved_at.tzinfo is UTC
+    assert order.in_preparation_at is None
     assert len(notifier.notified_orders) == 1
     assert notifier.notified_orders[0].public_id == order_id
     processed_repo.add.assert_called_once_with(
@@ -128,13 +131,13 @@ async def test_stock_reserved_moves_order_to_in_preparation_and_notifies() -> No
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_stock_reserved_does_not_overwrite_existing_in_preparation_at() -> None:
+async def test_stock_reserved_does_not_overwrite_existing_stock_reserved_at() -> None:
     order_id = uuid4()
     original_time = datetime.now(UTC) - timedelta(minutes=5)
     order = _build_order(
         status=OrderStatus.CREATED,
         order_id=order_id,
-        in_preparation_at=original_time,
+        stock_reserved_at=original_time,
     )
 
     uow, _, _ = _build_mock_uow(order, is_duplicate=False)
@@ -143,8 +146,8 @@ async def test_stock_reserved_does_not_overwrite_existing_in_preparation_at() ->
     event = StockReservedMessage(eventId=uuid4(), orderId=order_id)
     await handle_stock_reserved(event, uow, notifier=notifier)
 
-    assert order.status is OrderStatus.IN_PREPARATION
-    assert order.in_preparation_at == original_time
+    assert order.status is OrderStatus.RESERVED
+    assert order.stock_reserved_at == original_time
 
 
 # ---------------------------------------------------------------------------

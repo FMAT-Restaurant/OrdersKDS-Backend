@@ -286,7 +286,7 @@ async def test_it07_multi_stub_e2e_flow_floor_inventory_billing() -> None:
     )
     assert len(stub_bus.get_events("sala.dining_session.iniciada")) == 1
 
-    # 2. Inventory stub confirms stock -> order transitions to IN_PREPARATION
+    # 2. Inventory stub confirms stock -> order transitions to RESERVED
     await inventory_stub.handle_order_created({"orderId": str(order_id)})
     res_msg = stub_bus.get_events(EventName.STOCK_RESERVED)[0]["payload"]
     await dispatcher.dispatch_raw(
@@ -294,7 +294,7 @@ async def test_it07_multi_stub_e2e_flow_floor_inventory_billing() -> None:
         queue_name="ordenes.stock_reserved.queue",
         event_type=EventName.STOCK_RESERVED,
     )
-    assert db.orders[order_id].status == OrderStatus.IN_PREPARATION
+    assert db.orders[order_id].status == OrderStatus.RESERVED
 
     # 3. Order is prepared and delivered
     db.orders[order_id].status = OrderStatus.DELIVERED

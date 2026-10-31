@@ -1514,11 +1514,11 @@ def test_cancel_order_when_in_preparation_raises_409(
 @pytest.mark.parametrize(
     "forbidden_status",
     [
+        OrderStatus.IN_PREPARATION,
         OrderStatus.DELIVERED,
         OrderStatus.WASTED,
         OrderStatus.PAID,
         OrderStatus.CANCELLED,
-        OrderStatus.REJECTED,
         OrderStatus.EXPIRED,
         OrderStatus.VOIDED,
     ],
@@ -1529,7 +1529,7 @@ def test_cancel_order_in_non_created_status_raises_409(
     test_db: dict[UUID, Order],
     forbidden_status: OrderStatus,
 ) -> None:
-    """CT-06: Only CREATED orders can be cancelled; any other status yields 409."""
+    """CT-06: IN_PREPARATION and terminal orders cannot be cancelled; yields 409."""
     order = Order(
         public_id=uuid4(),
         status=forbidden_status,
@@ -1544,6 +1544,56 @@ def test_cancel_order_in_non_created_status_raises_409(
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == ErrorCode.INVALID_STATE_TRANSITION
+
+
+def test_cancel_order_in_reserved_status_success(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+) -> None:
+    """RF-24: RESERVED orders can be cancelled by waiter, staging OrderCancelledEvent."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=2,
+        status=OrderStatus.RESERVED,
+    )
+    test_db[order.public_id] = order
+
+    response = client.patch(
+        f"/orders/{order.public_id}/cancel",
+        headers=auth_headers("waiter"),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "CANCELLED"
+    assert test_db[order.public_id].status == OrderStatus.CANCELLED
+    assert len(fake_session.outbox_rows) == 1
+
+
+def test_cancel_order_in_rejected_status_success(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+) -> None:
+    """RF-24: REJECTED orders can be cancelled by waiter, staging OrderCancelledEvent."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=4,
+        status=OrderStatus.REJECTED,
+    )
+    test_db[order.public_id] = order
+
+    response = client.patch(
+        f"/orders/{order.public_id}/cancel",
+        headers=auth_headers("waiter"),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "CANCELLED"
+    assert test_db[order.public_id].status == OrderStatus.CANCELLED
+    assert len(fake_session.outbox_rows) == 1
 
 
 def test_cancel_order_then_edit_items_raises_409(

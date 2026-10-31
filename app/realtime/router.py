@@ -272,6 +272,7 @@ class RealtimeChannelRouter:
             tableId=order.table_number,
             status=order.status.value,
             version=getattr(order, "version", 1) or 1,
+            rejectionDetails=getattr(order, "rejection_details", None),
         )
         envelope = msg.to_envelope()
 

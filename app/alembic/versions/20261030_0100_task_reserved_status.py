@@ -45,4 +45,3 @@ def downgrade() -> None:
     )
     op.drop_column("orders", "rejection_details")
     op.drop_column("orders", "stock_reserved_at")
-

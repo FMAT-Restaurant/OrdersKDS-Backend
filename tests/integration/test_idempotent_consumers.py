@@ -197,9 +197,9 @@ async def test_redelivered_message_is_applied_once() -> None:
     )
 
     assert first_result is True
-    assert order.status is OrderStatus.IN_PREPARATION
-    assert order.in_preparation_at is not None
-    first_in_prep_timestamp = order.in_preparation_at
+    assert order.status is OrderStatus.RESERVED
+    assert order.stock_reserved_at is not None
+    first_reserved_timestamp = order.stock_reserved_at
     assert len(notifier.notifications) == 1
     assert (order_id, event_id) in db.processed_events
 
@@ -211,9 +211,9 @@ async def test_redelivered_message_is_applied_once() -> None:
 
     # Redelivery is safely swallowed / not re-applied
     assert second_result is False
-    assert order.status is OrderStatus.IN_PREPARATION
-    # in_preparation_at must remain identical (not overwritten)
-    assert order.in_preparation_at == first_in_prep_timestamp
+    assert order.status is OrderStatus.RESERVED
+    # stock_reserved_at must remain identical (not overwritten)
+    assert order.stock_reserved_at == first_reserved_timestamp
     # Notification was not duplicated
     assert len(notifier.notifications) == 1
     # No messages went to DLQ

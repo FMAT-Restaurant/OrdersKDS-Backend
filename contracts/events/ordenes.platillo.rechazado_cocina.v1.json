@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://restaurant.example.com/contracts/events/ordenes.platillo.rechazado_cocina.v1.json",
+  "title": "KitchenDishRejectedEvent",
+  "description": "Event emitted when kitchen rejects an item in RESERVED status due to physical lack of ingredients.",
+  "type": "object",
+  "required": [
+    "eventId",
+    "orderId",
+    "itemId",
+    "offerId",
+    "quantity",
+    "reason"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "description": "Unique identifier of this event emission.",
+      "minLength": 1
+    },
+    "orderId": {
+      "type": "string",
+      "description": "Public identifier of the affected order.",
+      "minLength": 1
+    },
+    "correlationId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Correlation identifier propagated across microservices."
+    },
+    "itemId": {
+      "type": "string",
+      "description": "Public identifier of the rejected item line.",
+      "minLength": 1
+    },
+    "offerId": {
+      "type": "string",
+      "description": "Offer identifier from Menu.",
+      "minLength": 1
+    },
+    "quantity": {
+      "type": "integer",
+      "description": "Quantity of the rejected item line.",
+      "minimum": 1
+    },
+    "reason": {
+      "type": "string",
+      "description": "Human-readable reason for the rejection.",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": true
+}

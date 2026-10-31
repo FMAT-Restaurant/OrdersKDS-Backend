@@ -22,7 +22,7 @@ async def handle_stock_reserved(
 ) -> bool:
     """React to Inventory confirming ingredient reservation.
 
-    Transitions order from CREATED to IN_PREPARATION and sets in_preparation_at
+    Transitions order from CREATED to RESERVED and records stock_reserved_at
     in the same transaction once (redelivery preserves the original timestamp).
     Late reservations on EXPIRED and CANCELLED orders are ignored.
 
@@ -65,7 +65,16 @@ async def handle_stock_reserved(
             )
             return False
 
-        order.mark_in_preparation()
+        if order.status != OrderStatus.CREATED:
+            logger.info(
+                "Order %s not in CREATED status (%s); ignoring stock_reserved",
+                order.public_id,
+                order.status,
+                extra={"event_id": str(message.event_id), "order_id": str(order.public_id)},
+            )
+            return False
+
+        order.mark_reserved()
         uow.processed_events.add(
             event_id=message.event_id,
             order_id=message.order_id,

@@ -3,7 +3,7 @@
 Spanish field names appear strictly inside Anti-Corruption Layer (ACL) aliases
 on inbound Pydantic models. Domain and persistence code only use English names.
 
-Satisfies: RF-10, RF-21, RF-33, RF-34, RNF-02, RNF-13
+Satisfies: RF-10, RF-18, RF-21, RF-33, RF-34, RNF-02, RNF-13, OP-11
 """
 
 from __future__ import annotations
@@ -28,6 +28,8 @@ class EventName(StrEnum):
 
     # Published events
     ORDER_CREATED = "ordenes.orden.creada"
+    ORDER_IN_PREPARATION = "ordenes.orden.en_preparacion"
+    KITCHEN_DISH_REJECTED = "ordenes.platillo.rechazado_cocina"
     ORDER_CANCELLED = "ordenes.orden.cancelada"
     DISH_PREPARED = "ordenes.platillo.preparado"
     ORDER_WASTED = "ordenes.comanda.mermada"
@@ -119,6 +121,64 @@ class OrderCreatedEvent(OrderEvent):
         )
 
 
+class OrderInPreparationEvent(OrderEvent):
+    """Event emitted when kitchen starts order preparation (moves to IN_PREPARATION)."""
+
+    event_name: ClassVar[EventName] = EventName.ORDER_IN_PREPARATION
+    items: list[OrderCreatedItem] = Field(default_factory=list, alias="items")
+
+    @classmethod
+    def for_order(
+        cls,
+        order_id: UUID,
+        *,
+        items: list[OrderCreatedItem] | None = None,
+        correlation_id: UUID | None = None,
+    ) -> OrderInPreparationEvent:
+        """Build the deterministic order in preparation event."""
+        event_id = uuid5(NAMESPACE_URL, f"{cls.event_name}:{order_id}")
+        return cls(
+            eventId=event_id,
+            orderId=order_id,
+            correlationId=correlation_id,
+            items=items or [],
+        )
+
+
+class KitchenDishRejectedEvent(OrderEvent):
+    """Event emitted when kitchen rejects an item in RESERVED due to physical lack of stock."""
+
+    event_name: ClassVar[EventName] = EventName.KITCHEN_DISH_REJECTED
+    unique_per_order: ClassVar[bool] = False
+
+    item_id: UUID = Field(alias="itemId")
+    offer_id: str = Field(alias="offerId")
+    quantity: int = Field(alias="quantity", gt=0)
+    reason: str = Field(alias="reason", min_length=1)
+
+    @classmethod
+    def for_item(
+        cls,
+        order_id: UUID,
+        item_id: UUID,
+        *,
+        offer_id: str,
+        quantity: int,
+        reason: str,
+        correlation_id: UUID | None = None,
+    ) -> KitchenDishRejectedEvent:
+        """Build a repeatable event for item rejected by kitchen."""
+        return cls(
+            eventId=uuid4(),
+            orderId=order_id,
+            itemId=item_id,
+            offerId=offer_id,
+            quantity=quantity,
+            reason=reason,
+            correlationId=correlation_id,
+        )
+
+
 class DishPreparedEvent(OrderEvent):
     """Repeatable event: each preparation emission gets a new identifier (RF-10)."""
 
@@ -159,7 +219,7 @@ class OrderExpiredEvent(OrderEvent):
 
 
 class OrderCancelledEvent(OrderEvent):
-    """Event emitted when an order in CREATED status is cancelled (RF-24, RF-25, OP-05).
+    """Event emitted when an order in CREATED/RESERVED status is cancelled (RF-24, RF-25, OP-05).
 
     Stages compensation in outbox so Inventory releases any reservation.
     """

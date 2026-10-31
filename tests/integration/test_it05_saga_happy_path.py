@@ -173,9 +173,9 @@ async def test_it05_saga_happy_path_transitions_to_in_preparation() -> None:
     # 4. Assert order state transition
     assert applied is True
     persisted_order = db.orders[order_id]
-    assert persisted_order.status == OrderStatus.IN_PREPARATION
-    assert persisted_order.in_preparation_at is not None
-    initial_in_prep_at = persisted_order.in_preparation_at
+    assert persisted_order.status == OrderStatus.RESERVED
+    assert persisted_order.stock_reserved_at is not None
+    initial_reserved_at = persisted_order.stock_reserved_at
     assert len(notifier.notifications) == 1
 
     # 5. Idempotent Redelivery Check: repeating delivery does not change timestamp or re-notify
@@ -185,5 +185,5 @@ async def test_it05_saga_happy_path_transitions_to_in_preparation() -> None:
         event_type=EventName.STOCK_RESERVED,
     )
     assert reapplied is False
-    assert persisted_order.in_preparation_at == initial_in_prep_at
+    assert persisted_order.stock_reserved_at == initial_reserved_at
     assert len(notifier.notifications) == 1

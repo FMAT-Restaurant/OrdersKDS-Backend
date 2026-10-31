@@ -63,21 +63,28 @@ def get_catalog_info_mock(item_id: str) -> dict[str, str | None]:
 
 
 class CatalogValidatorProtocol(Protocol):
-    """Protocol for checking catalog dish availability."""
+    """Protocol for checking and updating catalog dish availability."""
 
     async def validate_dish_available(self, dish_id: str) -> None:
         """Raise DishUnavailableError if dish_id is not available or inactive."""
+        ...
+
+    async def set_availability(self, dish_id: str, available: bool) -> None:
+        """Explicitly set dish availability flag in the catalog view."""
         ...
 
 
 class CatalogRepositoryValidator:
     """Adapt the Redis catalog projection to the order API validator contract."""
 
-    def __init__(self, repository: CatalogValidatorProtocol) -> None:
+    def __init__(self, repository: CatalogRepository) -> None:
         self._repository = repository
 
     async def validate_dish_available(self, dish_id: str) -> None:
         await self._repository.validate_dish_available(dish_id)
+
+    async def set_availability(self, dish_id: str, available: bool) -> None:
+        await self._repository.set_availability(dish_id, available)
 
 
 class DefaultCatalogValidator:
@@ -106,6 +113,13 @@ class DefaultCatalogValidator:
                 dish_id=dish_id,
                 reason="Dish marked unavailable in catalog",
             )
+
+    async def set_availability(self, dish_id: str, available: bool) -> None:
+        await asyncio.sleep(0)
+        if available:
+            self.set_available(dish_id)
+        else:
+            self.set_unavailable(dish_id)
 
 
 _default_catalog_validator = DefaultCatalogValidator()

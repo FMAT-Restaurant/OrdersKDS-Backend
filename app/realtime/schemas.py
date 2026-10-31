@@ -56,6 +56,13 @@ class OrderStatusChangedMessage(RealtimeMessage):
 
     type: Literal["order.status_changed"] = "order.status_changed"
     item_id: None = Field(default=None, alias="itemId")
+    rejection_details: dict[str, Any] | None = Field(default=None, alias="rejectionDetails")
+
+    def to_envelope(self) -> dict[str, Any]:
+        payload = super().to_envelope()
+        if self.rejection_details is not None:
+            payload["rejectionDetails"] = self.rejection_details
+        return payload
 
 
 class ItemStatusChangedMessage(RealtimeMessage):
