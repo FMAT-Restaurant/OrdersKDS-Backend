@@ -14,7 +14,7 @@ from typing import cast
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import DateTime, Enum, Numeric, Table, Uuid
+from sqlalchemy import JSON, DateTime, Enum, Numeric, Table, Uuid
 
 from app.db.base import Base
 from app.db.models import Order, OrderItem, ProcessedEvent, _utcnow
@@ -57,9 +57,18 @@ def test_order_column_contracts() -> None:
     assert table.c.confirmed_at.nullable
     assert isinstance(table.c.confirmed_by.type, Uuid)
     assert table.c.confirmed_by.nullable
+    assert isinstance(table.c.stock_reserved_at.type, DateTime)
+    assert table.c.stock_reserved_at.type.timezone is True
+    assert table.c.stock_reserved_at.nullable
     assert isinstance(table.c.in_preparation_at.type, DateTime)
     assert table.c.in_preparation_at.type.timezone is True
     assert table.c.in_preparation_at.nullable
+    assert isinstance(table.c.rejection_details.type, JSON)
+    assert table.c.rejection_details.nullable
+    assert isinstance(table.c.dining_session_id.type, Uuid)
+    assert table.c.dining_session_id.nullable
+    assert not table.c.dining_session_id.unique
+    assert table.c.dining_session_id.index is True
     assert isinstance(table.c.responsible_waiter_id.type, Uuid)
     assert table.c.responsible_waiter_id.nullable
     assert table.c.table_number.nullable
@@ -101,7 +110,7 @@ def test_order_awaiting_stock_confirmation() -> None:
 
 
 @pytest.mark.unit
-def test_order_recalculate_total() -> None:
+def test_order_recalculate_total_excludes_cancelled_items() -> None:
     order = Order(public_id=uuid4(), status=OrderStatus.CREATED)
     order.recalculate_total()
     assert order.total_amount == Decimal("0.00")
@@ -112,6 +121,7 @@ def test_order_recalculate_total() -> None:
         name="Tacos al Pastor",
         quantity=2,
         unit_price=Decimal("45.00"),
+        status=ItemStatus.PENDING,
     )
     item2 = OrderItem(
         public_id=uuid4(),
@@ -119,10 +129,16 @@ def test_order_recalculate_total() -> None:
         name="Agua de Horchata",
         quantity=3,
         unit_price=Decimal("15.50"),
+        status=ItemStatus.PENDING,
     )
     order.items.extend([item1, item2])
     order.recalculate_total()
     assert order.total_amount == Decimal("136.50")
+
+    item2.mark_cancelled()
+    assert item2.status is ItemStatus.CANCELLED
+    order.recalculate_total()
+    assert order.total_amount == Decimal("90.00")
 
 
 @pytest.mark.unit
@@ -139,8 +155,48 @@ def test_processed_event_column_contracts() -> None:
 
 
 @pytest.mark.unit
+def test_order_mark_reserved_sets_timestamp_once_and_clears_rejection_details() -> None:
+    order = Order(
+        public_id=uuid4(),
+        status=OrderStatus.CREATED,
+        rejection_details={"missingIngredients": ["pan"]},
+    )
+    assert order.stock_reserved_at is None
+    fixed_time = datetime(2026, 10, 20, 11, 0, tzinfo=UTC)
+
+    order.mark_reserved(at=fixed_time)
+    assert order.status is OrderStatus.RESERVED
+    assert order.stock_reserved_at == fixed_time
+    assert order.rejection_details is None
+
+
+@pytest.mark.unit
+def test_order_reopen_as_draft_and_preserve_stock_reserved_at() -> None:
+    fixed_time = datetime(2026, 10, 20, 11, 0, tzinfo=UTC)
+    order = Order(
+        public_id=uuid4(),
+        status=OrderStatus.RESERVED,
+        stock_reserved_at=fixed_time,
+        confirmed_at=fixed_time,
+    )
+    order.mark_rejected(details={"source": "kitchen"})
+    assert order.status == "REJECTED"
+    assert order.rejection_details == {"source": "kitchen"}
+
+    order.reopen_as_draft()
+    assert order.status == "CREATED"
+    assert order.confirmed_at is None
+    assert order.rejection_details is None
+
+    later_time = datetime(2026, 10, 20, 11, 30, tzinfo=UTC)
+    order.mark_reserved(at=later_time)
+    assert order.status == "RESERVED"
+    assert order.stock_reserved_at == fixed_time
+
+
+@pytest.mark.unit
 def test_order_mark_in_preparation_sets_timestamp_only_once() -> None:
-    order = Order(public_id=uuid4(), status=OrderStatus.CREATED)
+    order = Order(public_id=uuid4(), status=OrderStatus.RESERVED)
     assert order.in_preparation_at is None
     fixed_time = datetime(2026, 10, 20, 12, 0, tzinfo=UTC)
 
@@ -178,8 +234,9 @@ def test_order_item_mark_ready_and_delivered() -> None:
 @pytest.mark.unit
 def test_order_mark_rejected_and_mark_paid() -> None:
     order_rej = Order(public_id=uuid4(), status=OrderStatus.CREATED)
-    order_rej.mark_rejected()
+    order_rej.mark_rejected(details={"missingIngredients": ["limon"]})
     assert order_rej.status is OrderStatus.REJECTED
+    assert order_rej.rejection_details == {"missingIngredients": ["limon"]}
 
     order_paid = Order(public_id=uuid4(), status=OrderStatus.DELIVERED)
     order_paid.mark_paid()

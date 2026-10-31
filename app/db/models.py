@@ -61,10 +61,14 @@ class Order(Base):
     )
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     confirmed_by: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    stock_reserved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     in_preparation_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    dining_session_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True, unique=True)
+    rejection_details: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    dining_session_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True, index=True)
     responsible_waiter_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     table_number: Mapped[int | None] = mapped_column(nullable=True, index=True)
     is_takeaway: Mapped[bool] = mapped_column(nullable=False, default=False)
@@ -82,11 +86,23 @@ class Order(Base):
         return self.status == OrderStatus.CREATED and self.confirmed_at is not None
 
     def recalculate_total(self) -> None:
-        """Recalculate total_amount from current item prices and quantities."""
+        """Recalculate total_amount from active (non-cancelled) item prices and quantities."""
         self.total_amount = sum(
-            (item.unit_price * item.quantity for item in self.items),
+            (
+                item.unit_price * item.quantity
+                for item in self.items
+                if item.status != ItemStatus.CANCELLED
+            ),
             start=Decimal("0.00"),
         )
+
+    def mark_reserved(self, at: datetime | None = None) -> None:
+        """Transition order to RESERVED and record timestamp once for KDS priority."""
+        ensure_transition_allowed(self.status, OrderStatus.RESERVED)
+        self.status = OrderStatus.RESERVED
+        if self.stock_reserved_at is None:
+            self.stock_reserved_at = at or _utcnow()
+        self.rejection_details = None
 
     def mark_in_preparation(self, at: datetime | None = None) -> None:
         """Transition order to IN_PREPARATION and record timestamp once (OP-11)."""
@@ -100,10 +116,19 @@ class Order(Base):
         ensure_transition_allowed(self.status, OrderStatus.DELIVERED)
         self.status = OrderStatus.DELIVERED
 
-    def mark_rejected(self) -> None:
-        """Transition order to REJECTED."""
+    def mark_rejected(self, details: dict[str, object] | None = None) -> None:
+        """Transition order to REJECTED and record optional rejection details."""
         ensure_transition_allowed(self.status, OrderStatus.REJECTED)
         self.status = OrderStatus.REJECTED
+        self.rejection_details = details
+
+    def reopen_as_draft(self) -> None:
+        """Reopen a REJECTED order back to CREATED draft state for editing."""
+        ensure_transition_allowed(self.status, OrderStatus.CREATED)
+        self.status = OrderStatus.CREATED
+        self.confirmed_at = None
+        self.confirmed_by = None
+        self.rejection_details = None
 
     def mark_expired(self) -> None:
         """Transition order to EXPIRED after the saga timeout (RF-35)."""
@@ -165,6 +190,11 @@ class OrderItem(Base):
         """Transition item to DELIVERED (OP-08)."""
         ensure_item_transition_allowed(self.status, ItemStatus.DELIVERED)
         self.status = ItemStatus.DELIVERED
+
+    def mark_cancelled(self) -> None:
+        """Transition item to CANCELLED."""
+        ensure_item_transition_allowed(self.status, ItemStatus.CANCELLED)
+        self.status = ItemStatus.CANCELLED
 
 
 class Outbox(Base):
