@@ -19,6 +19,7 @@ class OrderStatus(StrEnum):
     """Lifecycle states of an order (normative codes, Guidelines 2.4)."""
 
     CREATED = "CREATED"
+    RESERVED = "RESERVED"
     IN_PREPARATION = "IN_PREPARATION"
     DELIVERED = "DELIVERED"
     PAID = "PAID"
@@ -35,15 +36,30 @@ class ItemStatus(StrEnum):
     PENDING = "PENDING"
     READY = "READY"
     DELIVERED = "DELIVERED"
+    CANCELLED = "CANCELLED"
 
 
 _ALLOWED_TRANSITIONS: dict[OrderStatus, frozenset[OrderStatus]] = {
     OrderStatus.CREATED: frozenset(
         {
+            OrderStatus.RESERVED,
             OrderStatus.IN_PREPARATION,
             OrderStatus.REJECTED,
             OrderStatus.CANCELLED,
             OrderStatus.EXPIRED,
+        }
+    ),
+    OrderStatus.RESERVED: frozenset(
+        {
+            OrderStatus.IN_PREPARATION,
+            OrderStatus.REJECTED,
+            OrderStatus.CANCELLED,
+        }
+    ),
+    OrderStatus.REJECTED: frozenset(
+        {
+            OrderStatus.CREATED,
+            OrderStatus.CANCELLED,
         }
     ),
     OrderStatus.IN_PREPARATION: frozenset(
@@ -58,15 +74,15 @@ _ALLOWED_TRANSITIONS: dict[OrderStatus, frozenset[OrderStatus]] = {
     # Final states: no outgoing transitions.
     OrderStatus.PAID: frozenset(),
     OrderStatus.CANCELLED: frozenset(),
-    OrderStatus.REJECTED: frozenset(),
     OrderStatus.VOIDED: frozenset(),
     OrderStatus.EXPIRED: frozenset(),
 }
 
 _ALLOWED_ITEM_TRANSITIONS: dict[ItemStatus, frozenset[ItemStatus]] = {
-    ItemStatus.PENDING: frozenset({ItemStatus.READY}),
+    ItemStatus.PENDING: frozenset({ItemStatus.READY, ItemStatus.CANCELLED}),
     ItemStatus.READY: frozenset({ItemStatus.DELIVERED}),
     ItemStatus.DELIVERED: frozenset({ItemStatus.PENDING}),
+    ItemStatus.CANCELLED: frozenset(),
 }
 
 
@@ -89,6 +105,7 @@ def ensure_item_transition_allowed(current: ItemStatus, target: ItemStatus) -> N
 
     Allowed item transitions:
     - PENDING -> READY (kitchen marks item ready)
+    - PENDING -> CANCELLED (individual item cancellation before preparation)
     - READY -> DELIVERED (automatic when all items ready and order transitions)
     - DELIVERED -> PENDING (redo dish from kitchen, TASK-32)
 

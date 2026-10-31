@@ -3,7 +3,7 @@
 Spanish field names appear strictly inside Anti-Corruption Layer (ACL) aliases
 on inbound Pydantic models. Domain and persistence code only use English names.
 
-Satisfies: RF-10, RF-21, RF-33, RF-34, RNF-02, RNF-13
+Satisfies: RF-10, RF-18, RF-21, RF-33, RF-34, RNF-02, RNF-13, OP-11
 """
 
 from __future__ import annotations
@@ -28,6 +28,8 @@ class EventName(StrEnum):
 
     # Published events
     ORDER_CREATED = "ordenes.orden.creada"
+    ORDER_IN_PREPARATION = "ordenes.orden.en_preparacion"
+    KITCHEN_DISH_REJECTED = "ordenes.platillo.rechazado_cocina"
     ORDER_CANCELLED = "ordenes.orden.cancelada"
     DISH_PREPARED = "ordenes.platillo.preparado"
     ORDER_WASTED = "ordenes.comanda.mermada"
@@ -108,14 +110,76 @@ class OrderCreatedEvent(OrderEvent):
         *,
         items: list[OrderCreatedItem] | None = None,
         correlation_id: UUID | None = None,
+        attempt_key: str | int | None = None,
     ) -> OrderCreatedEvent:
         """Build the deterministic inventory-reservation event for an order."""
+        seed = f"{cls.event_name}:{order_id}"
+        if attempt_key is not None:
+            seed = f"{seed}:{attempt_key}"
+        event_id = uuid5(NAMESPACE_URL, seed)
+        return cls(
+            eventId=event_id,
+            orderId=order_id,
+            correlationId=correlation_id,
+            items=items or [],
+        )
+
+
+class OrderInPreparationEvent(OrderEvent):
+    """Event emitted when kitchen starts order preparation (moves to IN_PREPARATION)."""
+
+    event_name: ClassVar[EventName] = EventName.ORDER_IN_PREPARATION
+    items: list[OrderCreatedItem] = Field(default_factory=list, alias="items")
+
+    @classmethod
+    def for_order(
+        cls,
+        order_id: UUID,
+        *,
+        items: list[OrderCreatedItem] | None = None,
+        correlation_id: UUID | None = None,
+    ) -> OrderInPreparationEvent:
+        """Build the deterministic order in preparation event."""
         event_id = uuid5(NAMESPACE_URL, f"{cls.event_name}:{order_id}")
         return cls(
             eventId=event_id,
             orderId=order_id,
             correlationId=correlation_id,
             items=items or [],
+        )
+
+
+class KitchenDishRejectedEvent(OrderEvent):
+    """Event emitted when kitchen rejects an item in RESERVED due to physical lack of stock."""
+
+    event_name: ClassVar[EventName] = EventName.KITCHEN_DISH_REJECTED
+    unique_per_order: ClassVar[bool] = False
+
+    item_id: UUID = Field(alias="itemId")
+    offer_id: str = Field(alias="offerId")
+    quantity: int = Field(alias="quantity", gt=0)
+    reason: str = Field(alias="reason", min_length=1)
+
+    @classmethod
+    def for_item(
+        cls,
+        order_id: UUID,
+        item_id: UUID,
+        *,
+        offer_id: str,
+        quantity: int,
+        reason: str,
+        correlation_id: UUID | None = None,
+    ) -> KitchenDishRejectedEvent:
+        """Build a repeatable event for item rejected by kitchen."""
+        return cls(
+            eventId=uuid4(),
+            orderId=order_id,
+            itemId=item_id,
+            offerId=offer_id,
+            quantity=quantity,
+            reason=reason,
+            correlationId=correlation_id,
         )
 
 
@@ -127,6 +191,7 @@ class DishPreparedEvent(OrderEvent):
 
     item_id: UUID | None = Field(default=None, alias="itemId")
     offer_id: str | None = Field(default=None, alias="offerId")
+    quantity: int = Field(default=1, gt=0, alias="quantity")
 
     @classmethod
     def for_item(
@@ -135,6 +200,7 @@ class DishPreparedEvent(OrderEvent):
         item_id: UUID,
         *,
         offer_id: str | None = None,
+        quantity: int = 1,
         correlation_id: UUID | None = None,
     ) -> DishPreparedEvent:
         """Build a repeatable event for an individual prepared dish/offer (RF-10)."""
@@ -143,6 +209,7 @@ class DishPreparedEvent(OrderEvent):
             orderId=order_id,
             itemId=item_id,
             offerId=offer_id,
+            quantity=quantity,
             correlationId=correlation_id,
         )
 
@@ -151,15 +218,40 @@ class OrderExpiredEvent(OrderEvent):
     """Event emitted when Inventory does not answer before the saga timeout.
 
     The identifier is deterministic per order, so retries or concurrent scans
-    stage at most one outbox row for the same expiration (RNF-02, OP-01).
+    stage at most one outbox row for the same expiration (RNF-02, OP-01, OP-04).
     """
 
     event_name: ClassVar[EventName] = EventName.ORDER_EXPIRED
     elapsed_seconds: int | None = Field(default=None, alias="elapsedSeconds")
+    reason: str = Field(default="timeout", alias="reason")
+    motivo: str = Field(default="timeout", alias="motivo")
+    items: list[OrderCreatedItem] = Field(default_factory=list, alias="items")
+
+    @classmethod
+    def for_order(
+        cls,
+        order_id: UUID,
+        *,
+        items: list[OrderCreatedItem] | None = None,
+        elapsed_seconds: int | None = None,
+        reason: str = "timeout",
+        correlation_id: UUID | None = None,
+    ) -> OrderExpiredEvent:
+        """Build the deterministic expiration event for an order."""
+        event_id = uuid5(NAMESPACE_URL, f"{cls.event_name}:{order_id}")
+        return cls(
+            eventId=event_id,
+            orderId=order_id,
+            correlationId=correlation_id,
+            elapsedSeconds=elapsed_seconds,
+            reason=reason,
+            motivo=reason,
+            items=items or [],
+        )
 
 
 class OrderCancelledEvent(OrderEvent):
-    """Event emitted when an order in CREATED status is cancelled (RF-24, RF-25, OP-05).
+    """Event emitted when an order in CREATED/RESERVED status is cancelled (RF-24, RF-25, OP-05).
 
     Stages compensation in outbox so Inventory releases any reservation.
     """
@@ -210,6 +302,31 @@ class StockReservedMessage(BaseModel):
     )
 
 
+class RejectedItemDetail(BaseModel):
+    """Detail of a single item that could not be fully reserved by Inventory."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    offer_id: str = Field(
+        validation_alias=AliasChoices("offerId", "offer_id", "plateId", "plate_id", "dishId"),
+        serialization_alias="offerId",
+    )
+    requested_quantity: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "requestedQuantity", "requested_quantity", "requested", "solicitado"
+        ),
+        serialization_alias="requestedQuantity",
+    )
+    available_quantity: int = Field(
+        default=0,
+        validation_alias=AliasChoices(
+            "availableQuantity", "available_quantity", "available", "disponible"
+        ),
+        serialization_alias="availableQuantity",
+    )
+
+
 class StockInsufficientMessage(BaseModel):
     """Inbound message from Inventory rejecting order due to lack of stock."""
 
@@ -220,7 +337,17 @@ class StockInsufficientMessage(BaseModel):
     correlation_id: UUID | None = Field(default=None, alias="correlationId")
     missing_ingredients: list[str] = Field(
         default_factory=list,
-        alias="faltantes",
+        validation_alias=AliasChoices("faltantes", "missingIngredients", "missing_ingredients"),
+    )
+    rejected_items: list[RejectedItemDetail] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("rejectedItems", "rejected_items", "itemsRechazados"),
+    )
+    reserved_items: list[OrderCreatedItem] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices(
+            "reservedItems", "reserved_items", "itemsReservados", "reservations", "reservas"
+        ),
     )
 
 

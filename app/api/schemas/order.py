@@ -29,6 +29,19 @@ class MarkReadyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class KitchenRejectRequest(BaseModel):
+    """Payload for kitchen rejecting an item due to physical lack of stock."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    reason: str = Field(
+        default="Insumo físico insuficiente en cocina",
+        min_length=1,
+        max_length=500,
+        description="Reason why the kitchen cannot prepare this item.",
+    )
+
+
 class CreateOrderRequest(BaseModel):
     """Payload for creating a new order at a table or for takeaway (RF-12, RF-13).
 
@@ -47,6 +60,11 @@ class CreateOrderRequest(BaseModel):
         default=False,
         alias="isTakeaway",
         description="Whether this order is for takeaway/pickup without an assigned table.",
+    )
+    dining_session_id: UUID | None = Field(
+        default=None,
+        alias="diningSessionId",
+        description="Optional dining session correlation ID.",
     )
 
     @model_validator(mode="after")
@@ -195,7 +213,10 @@ class OrderResponse(BaseModel):
     items: list[OrderItemResponse] = Field(default_factory=list)
     confirmed_at: datetime | None = Field(default=None, alias="confirmedAt")
     confirmed_by: UUID | None = Field(default=None, alias="confirmedBy")
+    stock_reserved_at: datetime | None = Field(default=None, alias="stockReservedAt")
     in_preparation_at: datetime | None = Field(default=None, alias="inPreparationAt")
+    rejection_details: dict[str, object] | None = Field(default=None, alias="rejectionDetails")
+    dining_session_id: UUID | None = Field(default=None, alias="diningSessionId")
     responsible_waiter_id: UUID | None = Field(default=None, alias="responsibleWaiterId")
     awaiting_stock_confirmation: bool = Field(alias="awaitingStockConfirmation")
     created_at: datetime = Field(alias="createdAt")
@@ -226,7 +247,10 @@ class OrderResponse(BaseModel):
             ),
             confirmedAt=order.confirmed_at,
             confirmedBy=order.confirmed_by,
+            stockReservedAt=order.stock_reserved_at,
             inPreparationAt=order.in_preparation_at,
+            rejectionDetails=order.rejection_details,
+            diningSessionId=order.dining_session_id,
             responsibleWaiterId=order.responsible_waiter_id,
             awaitingStockConfirmation=order.awaiting_stock_confirmation,
             createdAt=order.created_at or now,

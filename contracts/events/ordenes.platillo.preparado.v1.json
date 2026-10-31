@@ -33,6 +33,11 @@
       ],
       "description": "Catalog offer identifier prepared for Inventory consumption."
     },
+    "quantity": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Quantity of the dish prepared."
+    },
     "correlationId": {
       "type": [
         "string",

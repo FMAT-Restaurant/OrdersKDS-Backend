@@ -1,0 +1,234 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 860" width="100%" height="100%" style="background:#ffffff; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <defs>
+    <!-- Arrow markers -->
+    <marker id="arr-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#2563eb" />
+    </marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#059669" />
+    </marker>
+    <marker id="arr-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#d97706" />
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#dc2626" />
+    </marker>
+    <marker id="arr-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#7c3aed" />
+    </marker>
+    <marker id="arr-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#64748b" />
+    </marker>
+    <marker id="arr-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#0d9488" />
+    </marker>
+
+    <!-- Drop shadow -->
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.08" />
+    </filter>
+  </defs>
+
+  <style>
+    .title { font-size: 20px; font-weight: 700; fill: #0f172a; text-anchor: middle; }
+    .subtitle { font-size: 13px; fill: #64748b; text-anchor: middle; }
+    .container-box { rx: 12px; stroke-width: 1.5px; filter: url(#shadow); }
+    .container-title { font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+    .node-box { rx: 8px; stroke-width: 1.5px; filter: url(#shadow); }
+    .node-title { font-size: 12.5px; font-weight: 700; text-anchor: middle; }
+    .node-sub { font-size: 10px; text-anchor: middle; }
+    .db-box { rx: 6px; stroke-width: 1.5px; }
+    .conn-label { font-size: 10px; font-weight: 600; fill: #334155; }
+    .conn-sub { font-size: 9px; fill: #64748b; font-family: 'Consolas', 'Monaco', monospace; }
+  </style>
+
+  <!-- Title & Subtitle -->
+  <text x="560" y="32" class="title">Diagrama de Arquitectura de Comunicación Integral</text>
+  <text x="560" y="52" class="subtitle">Interacción entre Clientes Frontend, Capa Síncrona REST, Almacenamiento, Workers Asíncronos y Broker RabbitMQ</text>
+
+  <!-- ================= 1. DISPOSITIVOS FRONTEND ================= -->
+  <rect x="30" y="80" width="250" height="270" class="container-box" fill="#f8fafc" stroke="#cbd5e1" />
+  <text x="45" y="105" class="container-title" fill="#1e40af">Dispositivos del Restaurante</text>
+
+  <!-- Node: App Mesero -->
+  <rect x="50" y="125" width="210" height="90" class="node-box" fill="#eff6ff" stroke="#3b82f6" />
+  <text x="155" y="152" class="node-title" fill="#1d4ed8">App Mesero</text>
+  <text x="155" y="170" class="node-sub" fill="#3b82f6">OrderTicketWidget (Tablet)</text>
+  <text x="155" y="186" class="node-sub" fill="#64748b">Crea, edita, reabre y confirma</text>
+  <text x="155" y="200" class="node-sub" fill="#64748b">Canal WS: user:{id} &amp; floor</text>
+
+  <!-- Node: Monitor KDS -->
+  <rect x="50" y="235" width="210" height="95" class="node-box" fill="#f0fdfa" stroke="#14b8a6" />
+  <text x="155" y="262" class="node-title" fill="#0f766e">Monitor Táctil KDS</text>
+  <text x="155" y="280" class="node-sub" fill="#14b8a6">KdsBoard (Cocina 1080p + Bump Bar)</text>
+  <text x="155" y="296" class="node-sub" fill="#64748b">start-prep, ready, kitchen-reject</text>
+  <text x="155" y="310" class="node-sub" fill="#64748b">Canal WS: kds:station &amp; kds:all</text>
+
+
+  <!-- ================= 2. CAPA SÍNCRONA (orders-backend) ================= -->
+  <rect x="320" y="80" width="460" height="370" class="container-box" fill="#f0fdf4" stroke="#86efac" />
+  <text x="335" y="105" class="container-title" fill="#166534">Capa Síncrona — REST &amp; Dominio (orders-backend)</text>
+
+  <!-- Routers FastAPI -->
+  <rect x="340" y="125" width="420" height="60" class="node-box" fill="#ecfdf5" stroke="#10b981" />
+  <text x="550" y="148" class="node-title" fill="#047857">Routers FastAPI (HTTP/REST)</text>
+  <text x="550" y="167" class="node-sub" fill="#059669">app/routers/orders.py &amp; app/routers/kds.py (JWT Gateway Verification, Zero Mass-Assignment)</text>
+
+  <!-- Service Layer -->
+  <rect x="340" y="215" width="420" height="65" class="node-box" fill="#ffffff" stroke="#10b981" />
+  <text x="550" y="238" class="node-title" fill="#047857">Capa de Servicios de Dominio</text>
+  <text x="550" y="255" class="node-sub" fill="#334155">OrderService &amp; CatalogService (Máquina de 10 Estados, Reglas de Negocio y Outbox Enqueue)</text>
+  <text x="550" y="268" class="node-sub" fill="#64748b">reopen_as_draft(), consolidate_items(), kitchen_reject(), mark_reserved()</text>
+
+  <!-- Redis Local -->
+  <rect x="340" y="305" width="200" height="125" class="db-box" fill="#fef2f2" stroke="#ef4444" />
+  <text x="440" y="330" class="node-title" fill="#b91c1c">Redis Local</text>
+  <text x="440" y="348" class="node-sub" fill="#dc2626">CatalogRepository (&lt; 1 ms)</text>
+  <text x="440" y="365" class="node-sub" fill="#64748b">catalog:platillo:{offerId}</text>
+  <text x="440" y="380" class="node-sub" fill="#64748b">available: true/false</text>
+  <text x="440" y="395" class="node-sub" fill="#64748b">station, prepTime, basePrice</text>
+  <text x="440" y="415" class="node-sub" fill="#991b1b">Bloqueo local instantáneo</text>
+
+  <!-- PostgreSQL -->
+  <rect x="560" y="305" width="200" height="125" class="db-box" fill="#eff6ff" stroke="#3b82f6" />
+  <text x="660" y="330" class="node-title" fill="#1d4ed8">PostgreSQL 16</text>
+  <text x="660" y="348" class="node-sub" fill="#2563eb">orders, order_items</text>
+  <text x="660" y="365" class="node-sub" fill="#64748b">outbox (Eventos pendientes)</text>
+  <text x="660" y="380" class="node-sub" fill="#64748b">processed_events (Idempotencia)</text>
+  <text x="660" y="405" class="node-sub" fill="#1e40af">Transacción Atómica</text>
+  <text x="660" y="418" class="node-sub" fill="#1e40af">Estado + Outbox en 1 COMMIT</text>
+
+
+  <!-- ================= 3. CAPA ASÍNCRONA, WORKERS Y WEBSOCKET ================= -->
+  <rect x="30" y="475" width="750" height="355" class="container-box" fill="#f8fafc" stroke="#94a3b8" />
+  <text x="45" y="500" class="container-title" fill="#334155">Capa Asíncrona, Workers en Background y Tiempo Real</text>
+
+  <!-- Outbox Worker -->
+  <rect x="50" y="520" width="220" height="85" class="node-box" fill="#fffbeb" stroke="#f59e0b" />
+  <text x="160" y="545" class="node-title" fill="#b45309">Event Outbox Worker</text>
+  <text x="160" y="563" class="node-sub" fill="#f59e0b">app/messaging/outbox_worker.py</text>
+  <text x="160" y="580" class="node-sub" fill="#64748b">Polling SKIP LOCKED outbox</text>
+  <text x="160" y="594" class="node-sub" fill="#64748b">Publica a RabbitMQ at-least-once</text>
+
+  <!-- Saga Timeout Watcher -->
+  <rect x="290" y="520" width="220" height="85" class="node-box" fill="#f1f5f9" stroke="#64748b" />
+  <text x="400" y="545" class="node-title" fill="#334155">Saga Timeout Watcher</text>
+  <text x="400" y="563" class="node-sub" fill="#475569">app/services/saga_timeout.py</text>
+  <text x="400" y="580" class="node-sub" fill="#64748b">Evalúa órdenes &gt;= 60s en CREATED</text>
+  <text x="400" y="594" class="node-sub" fill="#64748b">Pasa a EXPIRED + ordenes.orden.expirada</text>
+
+  <!-- Consumers Idempotentes + ACL -->
+  <rect x="530" y="520" width="230" height="85" class="node-box" fill="#faf5ff" stroke="#a855f7" />
+  <text x="645" y="545" class="node-title" fill="#7e22ce">Consumers Idempotentes + ACL</text>
+  <text x="645" y="563" class="node-sub" fill="#a855f7">app/messaging/consumers/*</text>
+  <text x="645" y="580" class="node-sub" fill="#64748b">Deduplicación processed_events</text>
+  <text x="645" y="594" class="node-sub" fill="#64748b">Traduce AliasChoices ES/EN</text>
+
+  <!-- Realtime WebSocket Router -->
+  <rect x="50" y="635" width="710" height="80" class="node-box" fill="#ecfdf5" stroke="#10b981" />
+  <text x="405" y="660" class="node-title" fill="#047857">Realtime WebSocket Router (app/realtime/notifier.py)</text>
+  <text x="405" y="678" class="node-sub" fill="#059669">Endpoints: /ws/kds (canales kds:station y kds:all) y /ws/waiter (canales user:{userId} y floor)</text>
+  <text x="405" y="694" class="node-sub" fill="#64748b">Disparo post-commit tras mutaciones REST y consumo de RabbitMQ (order.status_changed, item.status_changed)</text>
+
+  <!-- Worker / WebSocket legend -->
+  <rect x="50" y="730" width="710" height="80" rx="6" fill="#f1f5f9" stroke="#cbd5e1" />
+  <text x="65" y="750" class="conn-label">Garantías Arquitectónicas Implementadas:</text>
+  <text x="65" y="770" class="conn-sub">• Zero llamadas HTTP salientes a otros microservicios en el camino crítico del usuario (100 % Event-Driven).</text>
+  <text x="65" y="785" class="conn-sub">• Doble frontera de aislamiento: Fallo en broker RabbitMQ no detiene respuesta 200 OK al mesero (Outbox transaccional).</text>
+  <text x="65" y="800" class="conn-sub">• Validación de disponibilidad instantánea contra Redis local (&lt; 1 ms) sin sobrecargar a Menú ni a Inventario.</text>
+
+
+  <!-- ================= 4. BROKER Y MICROSERVICIOS EXTERNOS ================= -->
+  <rect x="815" y="80" width="275" height="750" class="container-box" fill="#fffbeb" stroke="#fde68a" />
+  <text x="830" y="105" class="container-title" fill="#92400e">Broker y Microservicios</text>
+
+  <!-- RabbitMQ Exchange -->
+  <rect x="835" y="125" width="235" height="80" class="node-box" fill="#ffedd5" stroke="#f97316" stroke-width="2px" />
+  <text x="952" y="153" class="node-title" fill="#c2410c">RabbitMQ Broker</text>
+  <text x="952" y="172" class="node-sub" fill="#ea580c">Exchange Topic: amq.topic</text>
+  <text x="952" y="188" class="node-sub" fill="#64748b">Pub/Sub AMQP 0-9-1 Confiable</text>
+
+  <!-- Microservicio Inventario -->
+  <rect x="835" y="240" width="235" height="105" class="node-box" fill="#ffffff" stroke="#f59e0b" />
+  <text x="952" y="265" class="node-title" fill="#b45309">Microservicio Inventario</text>
+  <text x="952" y="283" class="node-sub" fill="#d97706">Caché Redis interna (&lt; 20 ms)</text>
+  <text x="952" y="300" class="node-sub" fill="#64748b">Consume: ordenes.orden.creada, en_prep</text>
+  <text x="952" y="315" class="node-sub" fill="#64748b">Publica: stock.reservado (con TTL)</text>
+  <text x="952" y="330" class="node-sub" fill="#64748b">Publica: stock.insuficiente (Opción A)</text>
+
+  <!-- Microservicio Catálogo y Menú -->
+  <rect x="835" y="375" width="235" height="95" class="node-box" fill="#ffffff" stroke="#6366f1" />
+  <text x="952" y="400" class="node-title" fill="#4338ca">Catálogo y Menú</text>
+  <text x="952" y="418" class="node-sub" fill="#6366f1">Gestión comercial de platillos</text>
+  <text x="952" y="435" class="node-sub" fill="#64748b">Publica: menu.catalogo.actualizado</text>
+  <text x="952" y="450" class="node-sub" fill="#64748b">Consume: ordenes.platillo.rechazado</text>
+
+  <!-- Microservicio Sala -->
+  <rect x="835" y="500" width="235" height="85" class="node-box" fill="#ffffff" stroke="#ec4899" />
+  <text x="952" y="525" class="node-title" fill="#9d174d">Microservicio Sala (Floor)</text>
+  <text x="952" y="543" class="node-sub" fill="#ec4899">Mesas, asignación y comensales</text>
+  <text x="952" y="560" class="node-sub" fill="#64748b">Publica: sala.dining_session.iniciada</text>
+  <text x="952" y="573" class="node-sub" fill="#64748b">Relación 1:N DiningSession / Order</text>
+
+  <!-- Microservicio Pagos -->
+  <rect x="835" y="615" width="235" height="95" class="node-box" fill="#ffffff" stroke="#a855f7" />
+  <text x="952" y="640" class="node-title" fill="#7e22ce">Pagos y Facturación</text>
+  <text x="952" y="658" class="node-sub" fill="#a855f7">Cuentas, tickets y terminales (Edwin)</text>
+  <text x="952" y="675" class="node-sub" fill="#64748b">Consume: ordenes.cuenta.solicitada</text>
+  <text x="952" y="690" class="node-sub" fill="#64748b">Consume: ordenes.cobro.solicitado</text>
+  <text x="952" y="703" class="node-sub" fill="#64748b">Publica: pagos.pago.completado</text>
+
+
+  <!-- ================= ARROWS AND CONNECTIONS ================= -->
+
+  <!-- Frontend -> FastAPI Routers -->
+  <line x1="260" y1="150" x2="336" y2="150" stroke="#2563eb" stroke-width="1.8" marker-end="url(#arr-blue)" />
+  <text x="295" y="142" class="conn-sub" text-anchor="middle">REST+JWT</text>
+
+  <line x1="260" y1="265" x2="336" y2="170" stroke="#14b8a6" stroke-width="1.8" marker-end="url(#arr-teal)" />
+
+  <!-- FastAPI Routers -> Services -->
+  <line x1="550" y1="185" x2="550" y2="211" stroke="#059669" stroke-width="1.8" marker-end="url(#arr-green)" />
+
+  <!-- Services <-> Redis -->
+  <line x1="440" y1="280" x2="440" y2="301" stroke="#dc2626" stroke-width="1.8" marker-end="url(#arr-red)" />
+  <text x="405" y="295" class="conn-sub">&lt; 1 ms</text>
+
+  <!-- Services -> PostgreSQL -->
+  <line x1="660" y1="280" x2="660" y2="301" stroke="#2563eb" stroke-width="1.8" marker-end="url(#arr-blue)" />
+  <text x="670" y="295" class="conn-sub">COMMIT</text>
+
+  <!-- PostgreSQL -> Outbox Worker -->
+  <path d="M 600 430 C 600 470, 200 470, 180 516" fill="none" stroke="#f59e0b" stroke-width="1.8" stroke-dasharray="4 2" marker-end="url(#arr-amber)" />
+  <text x="320" y="465" class="conn-sub">Polling SKIP LOCKED</text>
+
+  <!-- Saga Timeout Watcher -> DB -->
+  <path d="M 400 520 C 400 460, 580 460, 580 434" fill="none" stroke="#64748b" stroke-width="1.8" marker-end="url(#arr-gray)" />
+  <text x="490" y="465" class="conn-sub">Expira &gt;= 60s</text>
+
+  <!-- Outbox Worker -> RabbitMQ -->
+  <path d="M 270 560 C 500 560, 830 300, 890 209" fill="none" stroke="#f59e0b" stroke-width="1.8" marker-end="url(#arr-amber)" />
+  <text x="800" y="210" class="conn-sub" text-anchor="end">Publish</text>
+
+  <!-- RabbitMQ -> Consumers -->
+  <path d="M 900 205 C 800 240, 750 450, 680 516" fill="none" stroke="#a855f7" stroke-width="1.8" marker-end="url(#arr-purple)" />
+  <text x="760" y="490" class="conn-sub">Consume</text>
+
+  <!-- Consumers -> DB & Redis -->
+  <line x1="645" y1="520" x2="655" y2="434" stroke="#a855f7" stroke-width="1.8" marker-end="url(#arr-purple)" />
+  <path d="M 600 520 C 580 480, 500 460, 480 434" fill="none" stroke="#a855f7" stroke-width="1.8" marker-end="url(#arr-purple)" />
+
+  <!-- RabbitMQ <-> External Services -->
+  <line x1="952" y1="205" x2="952" y2="236" stroke="#f59e0b" stroke-width="1.8" marker-end="url(#arr-amber)" />
+  <line x1="952" y1="345" x2="952" y2="371" stroke="#6366f1" stroke-width="1.8" marker-end="url(#arr-blue)" />
+  <line x1="952" y1="470" x2="952" y2="496" stroke="#ec4899" stroke-width="1.8" marker-end="url(#arr-red)" />
+  <line x1="952" y1="585" x2="952" y2="611" stroke="#a855f7" stroke-width="1.8" marker-end="url(#arr-purple)" />
+
+  <!-- WebSocket Push to Frontends -->
+  <path d="M 100 635 C 100 480, 100 300, 100 219" fill="none" stroke="#059669" stroke-width="1.8" stroke-dasharray="4 2" marker-end="url(#arr-green)" />
+  <text x="85" y="380" class="conn-sub" text-anchor="end">WS /ws/waiter</text>
+
+  <path d="M 230 635 C 230 480, 230 380, 230 334" fill="none" stroke="#14b8a6" stroke-width="1.8" stroke-dasharray="4 2" marker-end="url(#arr-teal)" />
+  <text x="245" y="380" class="conn-sub">WS /ws/kds</text>
+
+</svg>

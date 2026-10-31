@@ -39,6 +39,50 @@
       "items": {
         "type": "string"
       }
+    },
+    "rejectedItems": {
+      "type": "array",
+      "description": "List of dishes that could not be fully reserved with requested and available quantities.",
+      "items": {
+        "type": "object",
+        "required": [
+          "offerId"
+        ],
+        "properties": {
+          "offerId": {
+            "type": "string"
+          },
+          "requestedQuantity": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "availableQuantity": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "reservedItems": {
+      "type": "array",
+      "description": "List of dishes that Inventory pre-reserved in the first attempt.",
+      "items": {
+        "type": "object",
+        "required": [
+          "offerId",
+          "quantity"
+        ],
+        "properties": {
+          "offerId": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
     }
   },
   "additionalProperties": true

@@ -38,6 +38,9 @@ PATH_PARAMETER = re.compile(r"\{[^}]+\}")
 KITCHEN_ROUTES = [
     f"/orders/{ORDER_ID}/ready",
     f"/orders/{ORDER_ID}/items/{ITEM_ID}/ready",
+    f"/orders/{ORDER_ID}/start-preparation",
+    f"/orders/{ORDER_ID}/items/{ITEM_ID}/kitchen-reject",
+    f"/orders/{ORDER_ID}/items/{ITEM_ID}/cancel",
 ]
 KITCHEN_HTTP_MATRIX = [
     ("waiter", 403),

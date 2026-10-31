@@ -1,7 +1,7 @@
 """Order domain service orchestrating lifecycle operations and transitions.
 
 Satisfies: RF-09, RF-10, RF-11, RF-16, RF-18, RF-24, RF-25, RNF-01, RNF-03,
-           RNF-09, OP-05, OP-08
+           RNF-09, OP-05, OP-08, OP-11
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.api.dependencies.auth import AuthContext
-from app.db.models import Order
+from app.db.models import Order, OrderItem
 from app.db.session import get_session
 from app.domain.errors import (
     ForbiddenRoleError,
@@ -29,13 +29,16 @@ from app.domain.order_status import ItemStatus, OrderStatus
 from app.domain.roles import KITCHEN_ROLES
 from app.messaging.events import (
     DishPreparedEvent,
+    KitchenDishRejectedEvent,
     OrderCancelledEvent,
     OrderCreatedEvent,
     OrderCreatedItem,
+    OrderInPreparationEvent,
 )
 from app.messaging.validator import validate_event_payload
 from app.repositories.orders import OrderRepository
 from app.repositories.outbox import OutboxRepository
+from app.services.catalog import CatalogValidatorProtocol, get_catalog_validator
 from app.services.notifications import (
     OrderNotifier,
     default_notifier,
@@ -46,6 +49,32 @@ from app.services.notifications import (
 logger = logging.getLogger(__name__)
 
 
+_IDEMPOTENT_CONFIRM_STATUSES = {
+    OrderStatus.RESERVED,
+    OrderStatus.IN_PREPARATION,
+    OrderStatus.DELIVERED,
+    OrderStatus.WASTED,
+    OrderStatus.PAID,
+}
+
+
+def _consolidate_order_items(items: list[OrderItem]) -> list[OrderCreatedItem]:
+    """Group active non-cancelled items by dish_id (offerId) and sum quantities."""
+    quantities: dict[str, int] = {}
+    for item in items:
+        if item.status == ItemStatus.CANCELLED or not item.dish_id:
+            continue
+        quantities[item.dish_id] = quantities.get(item.dish_id, 0) + item.quantity
+    return [OrderCreatedItem(offerId=dish_id, quantity=qty) for dish_id, qty in quantities.items()]
+
+
+def _validate_order_items(items: list[OrderItem]) -> None:
+    """Ensure each item has an assigned dish_id and quantity >= 1."""
+    for item in items:
+        if item.dish_id is None or item.quantity < 1:
+            raise InvalidOrderItemError()
+
+
 class OrderService:
     """Service encapsulating order operations, outbox staging, and lifecycle events."""
 
@@ -53,11 +82,13 @@ class OrderService:
         self,
         session: AsyncSession,
         notifier: OrderNotifier | None = None,
+        catalog_repo: CatalogValidatorProtocol | None = None,
     ) -> None:
         self._session = session
         self._orders = OrderRepository(session)
         self._outbox = OutboxRepository(session)
         self._notifier = notifier or default_notifier
+        self._catalog_repo = catalog_repo
 
     def _verify_kitchen_role(self, auth: AuthContext) -> None:
         if auth.role not in KITCHEN_ROLES:
@@ -106,6 +137,7 @@ class OrderService:
                     order.public_id,
                     target_item.public_id,
                     offer_id=target_item.dish_id,
+                    quantity=target_item.quantity,
                 )
             )
 
@@ -141,6 +173,7 @@ class OrderService:
                         order.public_id,
                         item.public_id,
                         offer_id=item.dish_id,
+                        quantity=item.quantity,
                     )
                 )
 
@@ -154,27 +187,148 @@ class OrderService:
         await notify_order_changed(order, notifier=self._notifier)
         return order
 
+    async def start_order_preparation(
+        self,
+        order_id: UUID,
+        auth: AuthContext,
+    ) -> Order:
+        """Transition order from RESERVED to IN_PREPARATION and publish OrderInPreparationEvent.
+
+        Roles: kitchen, chef, admin.
+        Inventory consumes reserved stock and closes reservation TTL upon receiving this event.
+        """
+        self._verify_kitchen_role(auth)
+        order = await self._orders.get_by_public_id(order_id)
+        if order is None:
+            raise OrderNotFoundError(f"Order with id={order_id} not found.")
+
+        if order.status == OrderStatus.IN_PREPARATION:
+            return order
+
+        if order.status != OrderStatus.RESERVED:
+            raise InvalidStateTransitionError(order.status, OrderStatus.IN_PREPARATION)
+
+        order.mark_in_preparation()
+        active_items = _consolidate_order_items(order.items)
+        event = OrderInPreparationEvent.for_order(order.public_id, items=active_items)
+        payload = event.model_dump(mode="json", by_alias=True)
+        validate_event_payload(event.event_name, payload)
+        self._outbox.add(event)
+
+        self._orders.save(order)
+        await self._session.commit()
+        await notify_order_changed(order, notifier=self._notifier)
+        return order
+
+    async def kitchen_reject_item(
+        self,
+        order_id: UUID,
+        item_id: UUID,
+        auth: AuthContext,
+        reason: str = "Insumo físico insuficiente en cocina",
+    ) -> Order:
+        """Kitchen rejects an item from RESERVED order due to lack of physical stock.
+
+        Updates local Redis catalog availability (available: false), publishes
+        KitchenDishRejectedEvent to Inventory/Menu, and transitions order to REJECTED
+        so the waiter can edit and re-confirm the order.
+        """
+        self._verify_kitchen_role(auth)
+        order = await self._orders.get_by_public_id(order_id)
+        if order is None:
+            raise OrderNotFoundError(f"Order with id={order_id} not found.")
+
+        if order.status != OrderStatus.RESERVED:
+            raise InvalidStateTransitionError(order.status, OrderStatus.REJECTED)
+
+        target_item = next((i for i in order.items if i.public_id == item_id), None)
+        if target_item is None:
+            raise OrderNotFoundError(f"Item with id={item_id} not found in order {order_id}.")
+
+        dish_id = target_item.dish_id or str(target_item.public_id)
+
+        # 1. Update local Redis catalog to immediately block new additions
+        if self._catalog_repo is not None:
+            await self._catalog_repo.set_availability(dish_id, False)
+
+        # 2. Stage KitchenDishRejectedEvent into Outbox for Inventory and Menu
+        event = KitchenDishRejectedEvent.for_item(
+            order_id=order.public_id,
+            item_id=target_item.public_id,
+            offer_id=dish_id,
+            quantity=target_item.quantity,
+            reason=reason,
+        )
+        payload = event.model_dump(mode="json", by_alias=True)
+        validate_event_payload(event.event_name, payload)
+        self._outbox.add(event)
+
+        # 3. Transition order to REJECTED (recording details for waiter)
+        rejection_details: dict[str, object] = {
+            "source": "kitchen",
+            "rejectedItems": [
+                {
+                    "itemId": str(target_item.public_id),
+                    "offerId": dish_id,
+                    "name": target_item.name,
+                    "requestedQuantity": target_item.quantity,
+                    "availableQuantity": 0,
+                    "reason": reason,
+                }
+            ],
+        }
+        order.mark_rejected(details=rejection_details)
+        self._orders.save(order)
+        await self._session.commit()
+
+        await notify_order_changed(order, notifier=self._notifier)
+        return order
+
+    async def cancel_item(
+        self,
+        order_id: UUID,
+        item_id: UUID,
+        auth: AuthContext,
+        reason: str | None = None,
+    ) -> Order:
+        """Cancel a single item in an order while still in CREATED or RESERVED status."""
+        self._verify_kitchen_role(auth)
+        order = await self._orders.get_by_public_id(order_id)
+        if order is None:
+            raise OrderNotFoundError(f"Order with id={order_id} not found.")
+
+        if order.status not in (OrderStatus.CREATED, OrderStatus.RESERVED):
+            raise InvalidStateTransitionError(order.status, ItemStatus.CANCELLED)
+
+        target_item = next((i for i in order.items if i.public_id == item_id), None)
+        if target_item is None:
+            raise OrderNotFoundError(f"Item with id={item_id} not found in order {order_id}.")
+
+        logger.info(
+            "Item %s of order %s cancelled by actor %s (role=%s). Reason: %s",
+            item_id,
+            order_id,
+            auth.user_id,
+            auth.role,
+            reason or "No reason provided",
+        )
+
+        target_item.mark_cancelled()
+        order.recalculate_total()
+        self._orders.save(order)
+        await self._session.commit()
+
+        await notify_item_changed(order, target_item, notifier=self._notifier)
+        await notify_order_changed(order, notifier=self._notifier)
+        return order
+
     async def transfer_order(
         self,
         order_id: UUID,
         new_table_number: int,
         expected_version: int | None = None,
     ) -> Order:
-        """Transfer an active order to a different table (RF-16, RNF-09).
-
-        Args:
-            order_id: Public UUID identifier of the order.
-            new_table_number: Target table number in the dining room.
-            expected_version: Optional optimistic lock version to prevent lost updates.
-
-        Returns:
-            The updated Order aggregate.
-
-        Raises:
-            OrderNotFoundError: If the order does not exist (404).
-            VersionConflictError: If expected_version is stale or concurrent update lost (409).
-            InvalidStateTransitionError: If order is in a terminal status (409).
-        """
+        """Transfer an active order to a different table (RF-16, RNF-09)."""
         order = await self._orders.get_by_public_id(order_id)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
@@ -215,29 +369,17 @@ class OrderService:
         auth: AuthContext,
         reason: str | None = None,
     ) -> Order:
-        """Cancel an order draft while still in CREATED status (RF-24, RF-25, OP-05).
-
-        An order can be cancelled even if confirmed_at is set (awaiting stock confirmation).
-        Transitioning to CANCELLED stages an 'ordenes.orden.cancelada' event in outbox
-        so Inventory frees reserved stock upon consuming it.
-
-        Args:
-            order_id: Public UUID of target order.
-            auth: Authenticated caller context from JWT.
-            reason: Optional human-readable cancellation reason.
-
-        Returns:
-            The cancelled Order aggregate representation.
-
-        Raises:
-            OrderNotFoundError: If order does not exist (404).
-            InvalidStateTransitionError: If order is not in CREATED status (409).
-        """
+        """Cancel an order while in CREATED, RESERVED, or REJECTED status (RF-24, RF-25, OP-05)."""
         order = await self._orders.get_by_public_id(order_id)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
 
-        if order.status != OrderStatus.CREATED:
+        allowed_cancel_statuses = {
+            OrderStatus.CREATED,
+            OrderStatus.RESERVED,
+            OrderStatus.REJECTED,
+        }
+        if order.status not in allowed_cancel_statuses:
             raise InvalidStateTransitionError(order.status, OrderStatus.CANCELLED)
 
         logger.info(
@@ -250,11 +392,7 @@ class OrderService:
 
         order.mark_cancelled()
 
-        cancelled_items = [
-            OrderCreatedItem(offerId=item.dish_id, quantity=item.quantity)
-            for item in order.items
-            if item.dish_id
-        ]
+        cancelled_items = _consolidate_order_items(order.items)
         event = OrderCancelledEvent.for_order(
             order.public_id,
             items=cancelled_items,
@@ -262,54 +400,52 @@ class OrderService:
         payload = event.model_dump(mode="json", by_alias=True)
         validate_event_payload(event.event_name, payload)
         self._outbox.add(event)
+
         self._orders.save(order)
         await self._session.commit()
 
         await notify_order_changed(order, notifier=self._notifier)
         return order
 
+    def _stage_order_confirmation(self, order: Order, confirmed_by: UUID) -> None:
+        """Validate items, consolidate quantities, build event and stage to outbox."""
+        _validate_order_items(order.items)
+        event_items = _consolidate_order_items(order.items)
+        attempt_key = order.version if (order.version is not None and order.version > 1) else None
+        event = OrderCreatedEvent.for_order(
+            order.public_id,
+            items=event_items,
+            attempt_key=attempt_key,
+        )
+        payload = event.model_dump(mode="json", by_alias=True)
+        validate_event_payload(event.event_name, payload)
+        order.confirmed_at = datetime.now(UTC)
+        order.confirmed_by = confirmed_by
+        self._outbox.add(event)
+
     async def confirm_order(self, order_id: UUID, confirmed_by: UUID) -> Order:
         """Confirm an order and atomically stage its inventory event (OP-05, TASK-11)."""
         order = await self._orders.get_for_update(order_id)
 
-        if order.status == OrderStatus.CREATED:
-            if order.confirmed_at is None:
-                event_items: list[OrderCreatedItem] = []
-                for item in order.items:
-                    dish_id = item.dish_id
-                    if dish_id is None or item.quantity < 1:
-                        raise InvalidOrderItemError()
-                    event_items.append(OrderCreatedItem(offerId=dish_id, quantity=item.quantity))
-                event = OrderCreatedEvent.for_order(
-                    order.public_id,
-                    items=event_items,
-                )
-                payload = event.model_dump(mode="json", by_alias=True)
-                validate_event_payload(event.event_name, payload)
-                order.confirmed_at = datetime.now(UTC)
-                order.confirmed_by = confirmed_by
-                self._outbox.add(event)
-                self._orders.save(order)
-                await self._session.commit()
-            elif order.confirmed_by is None:
-                order.confirmed_by = confirmed_by
-                self._orders.save(order)
-                await self._session.commit()
+        if order.status in _IDEMPOTENT_CONFIRM_STATUSES:
             return order
 
-        if order.status in {
-            OrderStatus.IN_PREPARATION,
-            OrderStatus.DELIVERED,
-            OrderStatus.WASTED,
-            OrderStatus.PAID,
-        }:
-            return order
+        if order.status != OrderStatus.CREATED:
+            raise InvalidStateTransitionError(order.status, "CONFIRM")
 
-        raise InvalidStateTransitionError(order.status, "CONFIRM")
+        if order.confirmed_at is None:
+            self._stage_order_confirmation(order, confirmed_by)
+        elif order.confirmed_by is None:
+            order.confirmed_by = confirmed_by
+
+        self._orders.save(order)
+        await self._session.commit()
+        return order
 
 
 def get_order_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    catalog_repo: Annotated[CatalogValidatorProtocol, Depends(get_catalog_validator)],
 ) -> OrderService:
     """FastAPI dependency yielding an OrderService bound to active session."""
-    return OrderService(session)
+    return OrderService(session, catalog_repo=catalog_repo)

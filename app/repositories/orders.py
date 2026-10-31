@@ -4,7 +4,7 @@ The caller sends the ``version`` it read; if it is stale the update is
 rejected with ``VersionConflictError`` (HTTP 409, RNF-09) instead of
 silently overwriting another writer.
 
-Satisfies: RF-24, RNF-09
+Satisfies: RF-24, RNF-09, OP-11
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import Select, and_, or_, select
+from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.exc import StaleDataError
@@ -23,23 +23,21 @@ from app.domain.order_status import ItemStatus, OrderStatus, ensure_transition_a
 
 
 def build_kds_queue_query(view: str = "active") -> Select[Order]:
-    """Build SQLAlchemy query for KDS preparation queue (TASK-12).
+    """Build SQLAlchemy query for KDS preparation queue (TASK-12, OP-11).
 
-    Discards any order where in_preparation_at is null, and explicitly excludes PAID status.
-    - view='active': filters IN_PREPARATION or (DELIVERED with at least one PENDING item).
+    Discards orders in PAID status.
+    - view='active': filters RESERVED, IN_PREPARATION, or DELIVERED with PENDING items.
     - view='delivered': filters pure DELIVERED orders, excluding PAID.
-    Orders by in_preparation_at ASC (oldest in kitchen first),
+    Orders by COALESCE(in_preparation_at, stock_reserved_at, created_at) ASC,
     tie-breaking by created_at ASC, then order_id ASC.
     """
     query = (
-        select(Order)
-        .options(selectinload(Order.items))
-        .where(Order.in_preparation_at.isnot(None))
-        .where(Order.status != OrderStatus.PAID)
+        select(Order).options(selectinload(Order.items)).where(Order.status != OrderStatus.PAID)
     )
     if view == "active":
         query = query.where(
             or_(
+                Order.status == OrderStatus.RESERVED,
                 Order.status == OrderStatus.IN_PREPARATION,
                 and_(
                     Order.status == OrderStatus.DELIVERED,
@@ -48,10 +46,13 @@ def build_kds_queue_query(view: str = "active") -> Select[Order]:
             )
         )
     elif view == "delivered":
-        query = query.where(Order.status == OrderStatus.DELIVERED)
+        query = query.where(
+            Order.status == OrderStatus.DELIVERED,
+            Order.in_preparation_at.isnot(None),
+        )
 
     return query.order_by(
-        Order.in_preparation_at.asc(),
+        func.coalesce(Order.in_preparation_at, Order.stock_reserved_at, Order.created_at).asc(),
         Order.created_at.asc(),
         Order.public_id.asc(),
     )
@@ -130,6 +131,7 @@ class OrderRepository:
         """
         result = await self._session.scalars(
             select(Order)
+            .options(selectinload(Order.items))
             .where(
                 Order.status == OrderStatus.CREATED,
                 Order.confirmed_at.is_not(None),
@@ -139,17 +141,21 @@ class OrderRepository:
             .limit(limit)
             .with_for_update(skip_locked=True)
         )
+        if hasattr(result, "unique"):
+            return list(result.unique().all())
         return list(result)
 
     async def list_orders(
         self,
         *,
         status: OrderStatus | None = None,
+        dining_session_id: UUID | None = None,
     ) -> list[Order]:
-        """List orders optionally filtered by OrderStatus enum (RF-18).
+        """List orders optionally filtered by OrderStatus enum or dining session (RF-18).
 
         Args:
             status: Optional OrderStatus enum filter.
+            dining_session_id: Optional dining session filter.
 
         Returns:
             List of matching Order aggregate roots.
@@ -157,6 +163,8 @@ class OrderRepository:
         query = select(Order).options(selectinload(Order.items))
         if status is not None:
             query = query.where(Order.status == status)
+        if dining_session_id is not None:
+            query = query.where(Order.dining_session_id == dining_session_id)
         query = query.order_by(Order.created_at.desc(), Order.public_id.desc())
         result = await self._session.scalars(query)
         return list(result.unique().all())
@@ -169,18 +177,19 @@ class OrderRepository:
         )
 
     async def get_kds_queue(self, view: str = "active") -> list[Order]:
-        """Fetch orders for KDS queue matching view and in_preparation_at.
+        """Fetch orders for KDS queue matching view and elapsed time.
 
-        Orders by in_preparation_at ASC (oldest in kitchen first),
+        Orders by COALESCE(in_preparation_at, stock_reserved_at, created_at) ASC,
         then created_at ASC, then order_id (public_id) ASC.
         """
         query = build_kds_queue_query(view=view)
         result = await self._session.scalars(query)
         orders = list(result.unique().all())
+        min_dt = datetime.min.replace(tzinfo=UTC)
         orders.sort(
             key=lambda o: (
-                o.in_preparation_at or datetime.min.replace(tzinfo=UTC),
-                o.created_at or datetime.min.replace(tzinfo=UTC),
+                o.in_preparation_at or o.stock_reserved_at or o.created_at or min_dt,
+                o.created_at or min_dt,
                 o.public_id,
             )
         )

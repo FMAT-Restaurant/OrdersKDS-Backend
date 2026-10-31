@@ -45,9 +45,12 @@ class FakeAsyncSession:
     async def scalars(self, statement: Any, *args: Any, **kwargs: Any) -> Any:
         params = statement.compile().params
         status_val = next((v for v in params.values() if isinstance(v, OrderStatus)), None)
+        session_val = next((v for v in params.values() if isinstance(v, UUID)), None)
         orders = list(self.db.values())
         if status_val is not None:
             orders = [o for o in orders if o.status == status_val]
+        if session_val is not None:
+            orders = [o for o in orders if o.dining_session_id == session_val]
         orders.sort(
             key=lambda o: (
                 o.created_at or datetime.min.replace(tzinfo=UTC),

@@ -91,6 +91,26 @@ def test_stock_insufficient_schema_and_pydantic_compatibility() -> None:
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance={"orderId": order_id}, schema=schema)
 
+    # Option A enriched stock insufficient schema & model validation
+    enriched_payload = {
+        "eventId": str(uuid4()),
+        "orderId": order_id,
+        "missingIngredients": ["carne"],
+        "rejectedItems": [
+            {"offerId": "dish-burger", "requestedQuantity": 3, "availableQuantity": 1}
+        ],
+        "reservedItems": [{"offerId": "dish-fries", "quantity": 2}],
+    }
+    jsonschema.validate(instance=enriched_payload, schema=schema)
+    enriched_model = StockInsufficientMessage.model_validate(enriched_payload)
+    assert len(enriched_model.rejected_items) == 1
+    assert enriched_model.rejected_items[0].offer_id == "dish-burger"
+    assert enriched_model.rejected_items[0].requested_quantity == 3
+    assert enriched_model.rejected_items[0].available_quantity == 1
+    assert len(enriched_model.reserved_items) == 1
+    assert enriched_model.reserved_items[0].offer_id == "dish-fries"
+    assert enriched_model.reserved_items[0].quantity == 2
+
 
 @pytest.mark.contract
 def test_payment_completed_schema_and_pydantic_compatibility() -> None:
