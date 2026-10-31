@@ -131,6 +131,7 @@ class OrderRepository:
         """
         result = await self._session.scalars(
             select(Order)
+            .options(selectinload(Order.items))
             .where(
                 Order.status == OrderStatus.CREATED,
                 Order.confirmed_at.is_not(None),
@@ -140,6 +141,8 @@ class OrderRepository:
             .limit(limit)
             .with_for_update(skip_locked=True)
         )
+        if hasattr(result, "unique"):
+            return list(result.unique().all())
         return list(result)
 
     async def list_orders(

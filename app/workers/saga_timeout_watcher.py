@@ -26,8 +26,10 @@ from app.db.models import Order
 from app.domain.order_status import OrderStatus
 from app.messaging.events import OrderExpiredEvent
 from app.messaging.notifications import notify_order_changed
+from app.messaging.validator import validate_event_payload
 from app.repositories.orders import OrderRepository
 from app.repositories.outbox import OutboxRepository
+from app.services.orders import _consolidate_order_items
 
 logger = logging.getLogger(__name__)
 
@@ -109,8 +111,15 @@ class SagaTimeoutWatcher:
                     0 if confirmed_at is None else int((now - confirmed_at).total_seconds())
                 )
                 order.mark_expired()
-                event = OrderExpiredEvent.for_order(order.public_id)
-                event.elapsed_seconds = elapsed_seconds
+                event_items = _consolidate_order_items(order.items)
+                event = OrderExpiredEvent.for_order(
+                    order.public_id,
+                    elapsed_seconds=elapsed_seconds,
+                    items=event_items,
+                    reason="timeout",
+                )
+                payload = event.model_dump(mode="json", by_alias=True)
+                validate_event_payload(event.event_name, payload)
                 outbox_repo.add(event)
                 logger.info(
                     "Order %s expired after %d seconds in CREATED (confirmed_at=%s)",

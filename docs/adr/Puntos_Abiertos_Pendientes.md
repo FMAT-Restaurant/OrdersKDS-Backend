@@ -13,10 +13,10 @@
 | ID | Tema | Estado Actual | Dueño / Contraparte | Hito Objetivo de Cierre | Impacto / Tareas Afectadas |
 |---|---|:---:|---|:---:|---|
 | **OP-10** | Topología de RabbitMQ, vhost, colas y credenciales del broker | **En curso** *(Retrasado de S2)* | Infra / Broker + Backend | Sprint 5 (TASK-38) / Prevención S6 | TASK-07, TASK-05, TASK-38, INT-01..12 |
-| **OP-04** | Contrato de `ordenes.orden.expirada` y campo `motivo` | **Pendiente** | Backend + Inventario | Sprint 6 (INT-01) | TASK-06, TASK-18/19, TASK-34 |
+| **OP-04** | Contrato de `ordenes.orden.expirada` y campo `motivo`/`items` | **Cerrado** *(Sprint 4)* | Backend + Inventario | Sprint 4 (TASK-06, TASK-34) | TASK-06, TASK-34 |
 | **OP-13** | Canal/MFE de aviso de orden `DELIVERED` al mesero | **Pendiente** | Frontend + Sala | Sprint 6 (INT-03) | TASK-16, TASK-42 (condicional) |
-| **OP-11** | Prioridad de cola KDS por tiempo en cocina (`in_preparation_at`) | **Propuesto** *(Por validar)* | Backend + Frontend + PO | Sprint 3 / Sprint 4 | TASK-12, TASK-15 |
-| **OP-12** | Rehacer platillo con orden matriz en `DELIVERED` | **Propuesto** *(Por validar)* | Backend + Frontend + PO | Sprint 5 | TASK-23, TASK-32 |
+| **OP-11** | Prioridad de cola KDS por antigüedad en cocina y `RESERVED` | **Cerrado** *(Sprint 4)* | Backend + Frontend + PO | Sprint 4 (TASK-12, TASK-15) | TASK-12, TASK-15 |
+| **OP-12** | Rehacer platillo con orden matriz en `DELIVERED` | **Diferido** *(Diseño listo S5)* | Backend + Frontend + Inventario | Sprint 5 (TASK-23, TASK-32) | TASK-23, TASK-32 |
 
 ---
 
@@ -46,17 +46,15 @@
 
 ### 2.2 OP-04: Contrato de `ordenes.orden.expirada` y campo `motivo` con Inventario
 
-- **Estado:** Pendiente.
+- **Estado:** **Cerrado en Sprint 4** (Implementado y validado mediante contrato JSON Schema y pruebas automáticas).
 - **Dueño:** Backend Orders & KDS + Microservicio de Inventario.
-- **Hito de resolución:** Integración INT-01 (Sprint 6).
-- **Contexto y problemática:**
-  1. Cuando expira el tiempo límite de confirmación de stock (`SAGA_TIMEOUT_SECONDS=60`, ADR-0001), el worker `SagaTimeoutWatcher` transita la orden a `EXPIRED` y publica el evento `ordenes.orden.expirada`.
-  2. Falta acordar con el equipo de Inventario el JSON Schema definitivo y si el evento debe incluir el campo `motivo`:
-     - `"timeout"`: la reserva tardía debe liberarse si llega posterior al vencimiento.
-     - `"rejected"`: rechazo por falta de stock.
-- **Acciones pendientes:**
-  - [ ] Validar con el equipo de Inventario el esquema ubicado en `contracts/events/ordenes.orden.expirada.json`.
-  - [ ] Confirmar que Inventario consume `ordenes.orden.expirada` y `ordenes.orden.cancelada` para liberar bloqueos de stock tardíos (cierre formal en INT-01).
+- **Hito de resolución:** Sprint 4 (TASK-06, TASK-34).
+- **Resolución adoptada:**
+  1. Se actualizó el esquema formal `contracts/events/ordenes.orden.expirada.v1.json` agregando los campos:
+     - `reason: "timeout"` y `motivo: "timeout"` (compatibilidad bilingüe EN/ES con Inventario).
+     - `items: [{ "offerId": string, "quantity": integer }]` con la lista consolidada de platillos y porciones activas de la orden vencida.
+  2. En `app/messaging/events.py` se actualizó la clase `OrderExpiredEvent` con `for_order(...)` recibiendo los ítems consolidados y la causa del vencimiento.
+  3. En `app/workers/saga_timeout_watcher.py`, al detectar una comanda vencida tras `SAGA_TIMEOUT_SECONDS`, se consolidan sus ítems (`_consolidate_order_items(order.items)`), se construye el evento enriquecido, se valida contra el esquema JSON y se encola en el Outbox transaccional para que Inventario libere cualquier reserva tardía.
 
 ---
 
@@ -79,16 +77,14 @@
 
 ### 2.4 OP-11: Prioridad en cola KDS por tiempo en cocina (`in_preparation_at`)
 
-- **Estado:** Propuesto (Implementado técnicamente, pendiente de ratificación final del equipo/PO).
+- **Estado:** **Cerrado en Sprint 4** (Implementado en base de datos y memoria, integrado con estado `RESERVED`).
 - **Dueño:** Backend + Frontend Orders & KDS.
-- **Hito de resolución:** Cierre funcional de TASK-12 y TASK-15 (Sprint 4).
-- **Contexto:**
-  1. Debido a que el catálogo de Menú entrega el tiempo de receta como texto no procesable numéricamente (ADR-0008), la prioridad de la cola KDS se formuló como FIFO basado en el tiempo transcurrido en cocina (`in_preparation_at`).
-  2. Se configuraron los umbrales de semáforo:
-     - `KDS_WARNING_AFTER_SECONDS` (10 min por defecto) → Alerta amarilla.
-     - `KDS_LATE_AFTER_SECONDS` (15 min por defecto) → Alerta roja.
-- **Acciones pendientes:**
-  - [ ] Ratificar formalmente en Sprint Review la aceptación de esta prioridad ante el cliente/profesor.
+- **Hito de resolución:** Sprint 4 (TASK-12, TASK-15).
+- **Resolución adoptada:**
+  1. La consulta de cola KDS (`build_kds_queue_query` y `get_kds_queue`) incorpora las comandas en estado `RESERVED` junto con `IN_PREPARATION` y `DELIVERED` con ítems pendientes.
+  2. El ordenamiento FIFO por antigüedad en cocina se consolidó mediante:
+     `COALESCE(in_preparation_at, stock_reserved_at, created_at) ASC`, desempatando por `created_at ASC` y `public_id ASC`.
+  3. Esto asegura que una comanda en `RESERVED` mantenga su turno justo en la cola de cocina desde el instante en que Inventario confirmó sus insumos, incluso antes de que el chef pulse *Iniciar preparación*.
 
 ---
 
@@ -103,3 +99,23 @@
 - **Acciones pendientes:**
   - [ ] Validar con la UI del chef y mesero que el platillo rehecho aparezca correctamente resaltado en el KDS sin alterar la cuenta global.
 
+
+
+---
+
+## 3. Decisiones Arquitectónicas Formalizadas en Sprint 4
+
+### ADR-0012: Incorporación del Estado `RESERVED`, Consumo Definitivo en Cocina, Rechazo Físico del Chef y Reapertura Editable desde `REJECTED`
+
+* **Contexto:** En el análisis del flujo con Inventario y Cocina, se detectó la necesidad de desacoplar la reserva de stock del inicio físico de la preparación, permitir el rechazo por ítem si faltan insumos físicos en cocina, y permitir al mesero reabrir y modificar la misma orden si Inventario devuelve stock insuficiente (Opción A).
+* **Decisiones adoptadas:**
+  1. **Nuevo Estado `OrderStatus.RESERVED`:**
+     - Al recibir `inventario.stock.reservado`, la orden pasa a `RESERVED` con marca `stock_reserved_at`. No entra automáticamente a `IN_PREPARATION`.
+  2. **Inicio Manual de Preparación (`PATCH /orders/{orderId}/start-preparation`):**
+     - El Chef pasa la comanda de `RESERVED` a `IN_PREPARATION`. Se emite `ordenes.orden.en_preparacion` al Outbox. Al consumirlo, Inventario descuenta definitivamente los insumos y apaga el TTL de reserva.
+  3. **Rechazo Manual por Ítem del Chef (`PATCH /orders/{orderId}/items/{itemId}/kitchen-reject`):**
+     - Si falta el insumo físico en cocina, el Chef rechaza ese ítem en `RESERVED`. Se bloquea inmediatamente en el Redis local (`CatalogRepository.set_availability(dish_id, False)`), se emite `ordenes.platillo.rechazado_cocina` a Inventario y Menú, y la orden pasa a `REJECTED` devolviéndose al mesero con `rejectionDetails`.
+  4. **Reapertura Editable desde `REJECTED` (`PATCH /orders/{orderId}/items`):**
+     - Cuando el mesero edita una orden en `REJECTED`, la comanda reabre a `CREATED` (`order.reopen_as_draft()`), permitiendo ajustar cantidades o platillos y re-confirmar con el mismo `orderId` y un nuevo `eventId` determinista (`attempt_key=order.version`).
+  5. **Cancelación Permitida en `CREATED`, `RESERVED` y `REJECTED`:**
+     - Bloqueada únicamente en `IN_PREPARATION` (409 Conflict). Al cancelar emite `ordenes.orden.cancelada` con los ítems consolidados para liberar reservas.

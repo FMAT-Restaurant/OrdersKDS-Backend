@@ -120,14 +120,21 @@ def test_dish_prepared_event_satisfies_contract() -> None:
 
 
 @pytest.mark.contract
-@pytest.mark.requirement("RNF-13", "CT-23", "RF-35")
+@pytest.mark.requirement("RNF-13", "CT-23", "RF-35", "OP-04")
 def test_order_expired_event_satisfies_contract() -> None:
     """Verify OrderExpiredEvent payload validates against its contract."""
-    event = OrderExpiredEvent.for_order(uuid4())
-    event.elapsed_seconds = 60
+    event = OrderExpiredEvent.for_order(
+        uuid4(),
+        elapsed_seconds=60,
+        items=[OrderCreatedItem(offerId="dish-1", quantity=2)],
+        reason="timeout",
+    )
     payload = event.model_dump(mode="json", by_alias=True)
 
     validate_event_payload(EventName.ORDER_EXPIRED, payload)
+    assert payload["reason"] == "timeout"
+    assert payload["motivo"] == "timeout"
+    assert payload["items"] == [{"offerId": "dish-1", "quantity": 2}]
 
 
 @pytest.mark.contract

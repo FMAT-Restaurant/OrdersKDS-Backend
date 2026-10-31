@@ -178,6 +178,9 @@ async def test_it07_saga_timeout_and_late_reservation_ignored() -> None:
     assert len(db.outbox) == 1
     assert db.outbox[0].event_type == EventName.ORDER_EXPIRED
     assert db.outbox[0].payload["orderId"] == str(order_id)
+    assert db.outbox[0].payload["reason"] == "timeout"
+    assert db.outbox[0].payload["motivo"] == "timeout"
+    assert "items" in db.outbox[0].payload
 
     # 3. Late reservation arrives from delayed/late stub
     inventory_stub.set_mode(InventoryStubMode.RESERVE)

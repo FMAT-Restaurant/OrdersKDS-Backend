@@ -218,11 +218,36 @@ class OrderExpiredEvent(OrderEvent):
     """Event emitted when Inventory does not answer before the saga timeout.
 
     The identifier is deterministic per order, so retries or concurrent scans
-    stage at most one outbox row for the same expiration (RNF-02, OP-01).
+    stage at most one outbox row for the same expiration (RNF-02, OP-01, OP-04).
     """
 
     event_name: ClassVar[EventName] = EventName.ORDER_EXPIRED
     elapsed_seconds: int | None = Field(default=None, alias="elapsedSeconds")
+    reason: str = Field(default="timeout", alias="reason")
+    motivo: str = Field(default="timeout", alias="motivo")
+    items: list[OrderCreatedItem] = Field(default_factory=list, alias="items")
+
+    @classmethod
+    def for_order(
+        cls,
+        order_id: UUID,
+        *,
+        items: list[OrderCreatedItem] | None = None,
+        elapsed_seconds: int | None = None,
+        reason: str = "timeout",
+        correlation_id: UUID | None = None,
+    ) -> OrderExpiredEvent:
+        """Build the deterministic expiration event for an order."""
+        event_id = uuid5(NAMESPACE_URL, f"{cls.event_name}:{order_id}")
+        return cls(
+            eventId=event_id,
+            orderId=order_id,
+            correlationId=correlation_id,
+            elapsedSeconds=elapsed_seconds,
+            reason=reason,
+            motivo=reason,
+            items=items or [],
+        )
 
 
 class OrderCancelledEvent(OrderEvent):
