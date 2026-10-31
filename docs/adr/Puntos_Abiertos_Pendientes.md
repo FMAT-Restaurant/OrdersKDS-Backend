@@ -1,121 +1,91 @@
 # Orders & KDS — Puntos Abiertos Pendientes de Resolución (Backlog de Decisiones)
 
-> **Origen:** `docs/adr/Decisiones_Puntos_Abiertos_OP01-OP09.md` y `Planificacion_Sprints_Orders_KDSV3.md` §1.4 / §H  
-> **Fecha de corte:** 29 de octubre de 2026 (Sprint 4 / Sprint 5)  
+> **Origen:** `docs/adr/Decisiones_Puntos_Abiertos_OP01-OP09.md`, `docs/adr/Decisiones_Puntos_Abiertos_Sprint4_Reunion_Inventario.md` y `Planificacion_Sprints_Orders_KDSV3.md`  
+> **Fecha de corte:** 31 de octubre de 2026 (Cierre de Backend Sprint 4 / Inicio de Sprint 5)  
 > **Aplica a:** `ordenes-kds-backend` y `ordenes-kds-frontend`  
 > **Ubicación:** `docs/adr/Puntos_Abiertos_Pendientes.md`  
-> **Propósito:** Registrar y dar seguimiento exclusivo a los puntos abiertos (OP) que permanecen **pendientes**, **en curso** o **propuestos (por validar)**, facilitando su resolución en las sesiones de trabajo e integración de los sprints posteriores.
+> **Propósito:** Registrar y dar seguimiento exclusivo a los puntos abiertos (OP) y acuerdos inter-equipo que permanecen **pendientes** o **en curso** para los Sprints 5 y 6, separándolos de los puntos que ya fueron cerrados e implementados en el Sprint 4 (documentados en `docs/adr/Decisiones_Puntos_Abiertos_Sprint4_Reunion_Inventario.md`).
 
 ---
 
-## 1. Matriz de Seguimiento de Puntos Abiertos No Resueltos
+## 1. Matriz de Seguimiento de Puntos Abiertos
+
+### 1.1 Puntos Abiertos Pendientes / En Curso (Para Resolver en Sprint 5 y Sprint 6)
 
 | ID | Tema | Estado Actual | Dueño / Contraparte | Hito Objetivo de Cierre | Impacto / Tareas Afectadas |
 |---|---|:---:|---|:---:|---|
-| **OP-10** | Topología de RabbitMQ, vhost, colas y credenciales del broker | **En curso** *(Retrasado de S2)* | Infra / Broker + Backend | Sprint 5 (TASK-38) / Prevención S6 | TASK-07, TASK-05, TASK-38, INT-01..12 |
-| **OP-04** | Contrato de `ordenes.orden.expirada` y campo `motivo`/`items` | **Cerrado** *(Sprint 4)* | Backend + Inventario | Sprint 4 (TASK-06, TASK-34) | TASK-06, TASK-34 |
-| **OP-13** | Canal/MFE de aviso de orden `DELIVERED` al mesero | **Pendiente** | Frontend + Sala | Sprint 6 (INT-03) | TASK-16, TASK-42 (condicional) |
-| **OP-11** | Prioridad de cola KDS por antigüedad en cocina y `RESERVED` | **Cerrado** *(Sprint 4)* | Backend + Frontend + PO | Sprint 4 (TASK-12, TASK-15) | TASK-12, TASK-15 |
-| **OP-12** | Rehacer platillo con orden matriz en `DELIVERED` | **Diferido** *(Diseño listo S5)* | Backend + Frontend + Inventario | Sprint 5 (TASK-23, TASK-32) | TASK-23, TASK-32 |
+| **OP-12** | Rehacer platillo (`redo`) con orden en `DELIVERED` y descuento extra de insumos en Inventario | **Pendiente de cerrar contrato con Inventario** *(Diseño listo para S5)* | Backend + Frontend Orders + Inventario (Héctor) | Sprint 5 (`TASK-32`, `TASK-23`) | `TASK-32`, `TASK-23`, `INT-02` |
+| **Propuesta Menú → Inventario** | Suscripción paralela (fan-out Pub/Sub) de Inventario y OrdersKDS a los eventos de disponibilidad de Menú | **Pendiente de formalizar en Broker** | Inventario (Héctor) + Menú + Backend Orders | Sprint 5 (`TASK-21b`, `TASK-38`) | `TASK-21b`, `INT-01`, `INT-04` |
+| **OP-10** | Topología compartida de RabbitMQ, vhost, colas, DLQ y credenciales de staging | **En curso** | Infraestructura / Broker + Backend Orders | Sprint 5 (`TASK-38`) | `TASK-05`, `TASK-07`, `TASK-38`, `INT-01..12` |
+| **OP-13** | Canal/MFE donde el mesero recibe el aviso visual de orden `DELIVERED` (Mapa de Sala vs Widget propio) | **Pendiente** | Frontend Orders + Sala | Sprint 6 (`INT-03`) | `TASK-16`, `TASK-42` (condicional) |
+
+### 1.2 Puntos Abiertos Cerrados Recientemente en la Reunión de Sprint 4
+
+> El detalle técnico completo, contratos JSON y ADRs (`ADR-0012` a `ADR-0018`) de estos puntos se encuentra en [`docs/adr/Decisiones_Puntos_Abiertos_Sprint4_Reunion_Inventario.md`](Decisiones_Puntos_Abiertos_Sprint4_Reunion_Inventario.md).
+
+| ID | Tema | Estado | Resolución Implementada en Sprint 4 |
+|---|---|:---:|---|
+| **OP-04** | Contrato de `ordenes.orden.expirada` y campo `motivo`/`items` | **Cerrado (Sprint 4)** | Incluye `elapsedSeconds`, `reason: "timeout"`, `motivo: "timeout"` e `items: [{ offerId, quantity }]` consolidados (`ADR-0012`). |
+| **OP-11** | Prioridad de cola KDS por antigüedad en cocina e inclusión de `RESERVED` | **Cerrado (Sprint 4)** | Cola activa incluye `RESERVED` e `IN_PREPARATION`, ordenada por `COALESCE(in_preparation_at, stock_reserved_at, created_at) ASC` (`ADR-0013`). |
+| **ADR-0013..0018** | Estado `RESERVED`, `start-preparation` (`ordenes.orden.en_preparacion`), `kitchen-reject` (`ordenes.platillo.rechazado_cocina`), Opción A de stock parcial (`rejectedItems`/`reservedItems`), reapertura `REJECTED -> CREATED`, y relación `1:N` en `DiningSession` | **Cerrado (Sprint 4)** | Implementado al 100 % en `orders-backend` con migración Alembic, contratos JSON Schema y 599 pruebas automatizadas en verde. |
 
 ---
 
-## 2. Detalle de Puntos Abiertos y Acciones Requeridas
+## 2. Detalle de los Puntos Abiertos Pendientes y Acciones Requeridas
 
-### 2.1 OP-10: Topología de RabbitMQ y variables del broker
+### 2.1 OP-12: Rehacer platillo (`redo`) con orden matriz en `DELIVERED` y consumo extra en Inventario
 
-- **Estado:** En curso (Retrasado — no se pudo concretar la reunión con el dueño del broker durante el Sprint 2).
-- **Dueño:** Infraestructura / Dueño del Broker + Backend Orders & KDS.
-- **Hito de resolución:** Sprint 5 (previo al despliegue del entorno compartido de integración TASK-38) o antes de iniciar S6.
+- **Estado:** Pendiente de cerrar acuerdo de evento con Inventario (Diseño técnico listo para implementar en Sprint 5 · `TASK-32` y `TASK-23`).
+- **Dueño:** Backend + Frontend Orders & KDS + Microservicio de Inventario (Héctor).
+- **Hito de resolución:** Sprint 5 (`TASK-32`: `PATCH /orders/{orderId}/items/{itemId}/redo` y `TASK-23`: Diálogo de rehechura).
 - **Contexto y problemática:**
-  1. Durante el Sprint 2 se esperaba revisar el archivo comprimido `.zip` compartido por el equipo responsable del broker RabbitMQ central para alinear nombres de *exchanges*, *vhost*, convenciones de *routing keys*, políticas de Dead Letter Queue (DLQ / DLX) y TTL de reintentos.
-  2. Al no haberse celebrado aún la reunión técnica de sincronización, el backend opera actualmente con topología local simulada (`orders.topic` / `amq.topic`) y variables de entorno estándar.
-  3. Es crítico evitar llegar a Integración I (Sprint 6) sin tener pactado el acceso al broker compartido.
+  1. Cuando un comensal devuelve un platillo ya entregado por queja de calidad o término de cocción (RF-22), la orden matriz ya se encuentra en `OrderStatus.DELIVERED`.
+  2. En el dominio de Órdenes ya se acordó que **la orden matriz conserva el estado `DELIVERED`** y únicamente el renglón afectado regresa de `ItemStatus.DELIVERED` a `ItemStatus.PENDING` con nota obligatoria (`{ "note": "..." }`), haciendo que la tarjeta reaparezca en la vista activa del KDS con ese platillo resaltado.
+  3. **Punto a cerrar con Inventario (Héctor):** Como el platillo original ya había consumido sus insumos al entrar la orden a `IN_PREPARATION` (`ordenes.orden.en_preparacion`), elaborar de nuevo ese platillo implica un **consumo físico adicional de insumos (merma por rehechura)** sin incrementar el cobro al cliente.
+- **Opciones técnicas para acordar con Héctor:**
+  - **Alternativa A (Recomendada):** Cuando cocina termina de rehacer el platillo y lo marca de nuevo como `READY` (`PATCH /orders/{orderId}/items/{itemId}/ready`), `orders-backend` emite `ordenes.platillo.preparado` incluyendo `"quantity": item.quantity` y el flag **`"isRedo": true`**. Al ver `"isRedo": true`, Inventario descuenta las unidades adicionales de ese `offerId`.
+  - **Alternativa B:** Emitir un evento dedicado `ordenes.platillo.rehecho` (`{ eventId, orderId, itemId, offerId, quantity, reason }`) en el instante en que el mesero ejecuta `PATCH /orders/{orderId}/items/{itemId}/redo`.
 - **Acciones pendientes:**
-  - [ ] Agendar y llevar a cabo la reunión técnica con el dueño del microservicio/infraestructura del broker RabbitMQ.
-  - [ ] Inspeccionar el `.zip` oficial de configuración de RabbitMQ y validar:
-    - Nombre del *exchange* unificado (¿`amq.topic` o exchange nombrado propio de la facultad?).
-    - Nombre del *vhost* asignado al microservicio de Órdenes.
-    - Nombres normalizados de colas de entrada y colas de descarte/error (`orders.dlq`).
-  - [ ] Obtener las credenciales formales para el ambiente compartido de staging (TASK-38).
-- **Regla estricta de seguridad:**
-  - **Queda terminantemente prohibido almacenar credenciales o URLs de CloudAMQP/RabbitMQ con usuario y contraseña en texto plano dentro de la documentación o código del repositorio.**
-  - La conexión debe inyectarse exclusivamente a través del secreto `RABBITMQ_URL` en las configuraciones seguras de ejecución (*GitHub Secrets* / *Deploy Environments*).
+  - [ ] Confirmar con Héctor cuál de las dos alternativas prefiere consumir en Inventario para descontar el insumo del platillo rehecho.
+  - [ ] Implementar en `OrderService.mark_item_ready` (Sprint 5 · `TASK-32`) el soporte para `order.status == OrderStatus.DELIVERED` de modo que el ítem rehecho pase de `PENDING` a `DELIVERED` conservando la orden en `DELIVERED`.
 
 ---
 
-### 2.2 OP-04: Contrato de `ordenes.orden.expirada` y campo `motivo` con Inventario
+### 2.2 Propuesta de Héctor: Validación inicial de disponibilidad de Menú hacia Inventario vs. Proyección en OrdersKDS
 
-- **Estado:** **Cerrado en Sprint 4** (Implementado y validado mediante contrato JSON Schema y pruebas automáticas).
-- **Dueño:** Backend Orders & KDS + Microservicio de Inventario.
-- **Hito de resolución:** Sprint 4 (TASK-06, TASK-34).
-- **Resolución adoptada:**
-  1. Se actualizó el esquema formal `contracts/events/ordenes.orden.expirada.v1.json` agregando los campos:
-     - `reason: "timeout"` y `motivo: "timeout"` (compatibilidad bilingüe EN/ES con Inventario).
-     - `items: [{ "offerId": string, "quantity": integer }]` con la lista consolidada de platillos y porciones activas de la orden vencida.
-  2. En `app/messaging/events.py` se actualizó la clase `OrderExpiredEvent` con `for_order(...)` recibiendo los ítems consolidados y la causa del vencimiento.
-  3. En `app/workers/saga_timeout_watcher.py`, al detectar una comanda vencida tras `SAGA_TIMEOUT_SECONDS`, se consolidan sus ítems (`_consolidate_order_items(order.items)`), se construye el evento enriquecido, se valida contra el esquema JSON y se encola en el Outbox transaccional para que Inventario libere cualquier reserva tardía.
+- **Estado:** Pendiente de formalizar acuerdo de topología Pub/Sub con Inventario y Menú.
+- **Dueño:** Inventario (Héctor) + Menú + Backend Orders & KDS.
+- **Hito de resolución:** Sprint 5 (`TASK-21b` / `TASK-38`).
+- **Contexto de la propuesta:**
+  - Héctor propuso que la notificación inicial de disponibilidad que publica `Menú` llegue directamente a `Inventario` en lugar de llegar a `OrdersKDS`.
+- **Análisis arquitectónico y posición técnica de `OrdersKDS`:**
+  1. **Por qué `Inventario` SÍ se beneficia de escuchar a `Menú`:** Es excelente idea que `Inventario` se suscriba a los eventos de `Menú` (`menu.catalogo.actualizado`, `menu.oferta.creada`, `menu.oferta.actualizada`) para conocer las recetas/ofertas activas y mantener sincronizado su caché de stock en Redis.
+  2. **Por qué `OrdersKDS` NO debe dejar de recibir los eventos de `Menú`:**
+     - En RabbitMQ los eventos se publican a un **Exchange tipo Topic/Fanout (Pub/Sub)**: que `Inventario` enlace su propia cola para recibir los eventos de `Menú` **no impide ni compite** con que `OrdersKDS` también los reciba en su propia cola.
+     - `OrdersKDS` **necesita obligatoriamente** su proyección local en Redis (`CatalogRepository`) por tres razones críticas de negocio y rendimiento:
+       1. **Metadatos exclusivos de Cocina (`RF-08`, `OP-09`):** La pantalla del KDS requiere mostrar y filtrar cada platillo por su estación de cocina (`station` / `estacion`: parrilla, barra, fría) y mostrar el tiempo estimado de preparación (`preparationTime` / `tiempoPreparacion`), datos que pertenecen al catálogo de Menú y no a Inventario.
+       2. **Precios comerciales congelados (`RF-14`, `RF-15`):** Al agregar un ítem en borrador (`POST /orders` o `PATCH /orders/{id}/items`), `orders-backend` congela el nombre comercial y el `unit_price` desde su Redis local en `< 1 ms` sin hacer llamadas HTTP a Menú ni a Inventario.
+       3. **Filtro inmediato de primera línea (`RF-17`, `< 1 ms`):** Si un platillo está deshabilitado comercialmente en Menú o fue rechazado físicamente por el Chef en cocina (`kitchen-reject`), `OrdersKDS` rechaza la adición al borrador en `< 1 ms` con `422 DISH_UNAVAILABLE` sin siquiera generar tráfico en RabbitMQ.
+- **Resolución propuesta para acordar con Héctor:**
+  - [ ] Confirmar con Héctor y el equipo del Broker que **tanto `Inventario` como `OrdersKDS` tendrán sus colas suscritas en paralelo al exchange de `Menú`** (patrón Pub/Sub estándar), logrando el objetivo de Héctor sin romper el KDS ni la congelación de precios en Órdenes.
 
 ---
 
-### 2.3 OP-13: Recepción del aviso de orden `DELIVERED` para el mesero
+### 2.3 OP-10: Topología de RabbitMQ y variables del broker compartido
+
+- **Estado:** En curso.
+- **Dueño:** Infraestructura / Dueño del Broker + Backend Orders & KDS.
+- **Hito de resolución:** Sprint 5 (`TASK-38` — Ambiente compartido de integración y staging).
+- **Acciones pendientes:**
+  - [ ] Homologar con el administrador del broker el nombre del *exchange* compartido, el *vhost*, las colas de entrada y la configuración de Dead Letter Exchange (`orders.dlq`), incluyendo los nuevos routing keys de Sprint 4 (`ordenes.orden.en_preparacion` y `ordenes.platillo.rechazado_cocina`).
+  - [ ] Configurar `RABBITMQ_URL` exclusivamente mediante *GitHub Environments / Secrets* (prohibido texto plano en el repositorio).
+
+---
+
+### 2.4 OP-13: Recepción del aviso de orden `DELIVERED` para el mesero
 
 - **Estado:** Pendiente.
 - **Dueño:** Frontend Orders & KDS + Microservicio de Sala.
-- **Hito de resolución:** Integración INT-03 (Sprint 6).
-- **Contexto y problemática:**
-  1. Conforme al ADR-0007, la cocina transita la orden a `DELIVERED` al terminar los platillos, y el backend notifica vía WebSocket en `/ws/waiter` (canales `floor` y `user:{userId}`).
-  2. Falta acordar dónde observa el mesero dicha notificación:
-     - **Opción A:** El microservicio de Sala consume el evento o WebSocket y muestra la comanda lista en su propio mapa de mesas.
-     - **Opción B:** El microservicio de Orders debe proporcionar un componente/widget flotante de aviso propio para el mesero.
-  3. Si se elige la Opción B, se activará en el backlog la tarea condicional **TASK-42** (*Aviso al mesero de órdenes DELIVERED*, 3 pts).
+- **Hito de resolución:** Sprint 6 (`INT-03`).
 - **Acciones pendientes:**
-  - [ ] Confirmar con el equipo de Sala en la sesión de INT-03 si ellos asumen la visualización de la alerta de entrega en su interfaz de salón.
-  - [ ] Decidir la activación o descarte formal de TASK-42.
-
----
-
-### 2.4 OP-11: Prioridad en cola KDS por tiempo en cocina (`in_preparation_at`)
-
-- **Estado:** **Cerrado en Sprint 4** (Implementado en base de datos y memoria, integrado con estado `RESERVED`).
-- **Dueño:** Backend + Frontend Orders & KDS.
-- **Hito de resolución:** Sprint 4 (TASK-12, TASK-15).
-- **Resolución adoptada:**
-  1. La consulta de cola KDS (`build_kds_queue_query` y `get_kds_queue`) incorpora las comandas en estado `RESERVED` junto con `IN_PREPARATION` y `DELIVERED` con ítems pendientes.
-  2. El ordenamiento FIFO por antigüedad en cocina se consolidó mediante:
-     `COALESCE(in_preparation_at, stock_reserved_at, created_at) ASC`, desempatando por `created_at ASC` y `public_id ASC`.
-  3. Esto asegura que una comanda en `RESERVED` mantenga su turno justo en la cola de cocina desde el instante en que Inventario confirmó sus insumos, incluso antes de que el chef pulse *Iniciar preparación*.
-
----
-
-### 2.5 OP-12: Rehacer platillo con orden matriz en `DELIVERED`
-
-- **Estado:** Propuesto (Pendiente de validación al construir el flujo alternativo en Sprint 5).
-- **Dueño:** Backend + Frontend Orders & KDS.
-- **Hito de resolución:** Sprint 5 (TASK-32 `PATCH …/items/{itemId}/redo` y TASK-23).
-- **Contexto:**
-  1. Cuando un platillo debe rehacerse por queja del cliente (RF-22), la orden matriz ya está en `DELIVERED`.
-  2. Para evitar ciclos complejos o regresiones en la máquina de estados de la orden matriz, se propuso que la orden conserve `DELIVERED` y únicamente el ítem regrese a `PENDING` con su motivo obligatorio.
-- **Acciones pendientes:**
-  - [ ] Validar con la UI del chef y mesero que el platillo rehecho aparezca correctamente resaltado en el KDS sin alterar la cuenta global.
-
-
-
----
-
-## 3. Decisiones Arquitectónicas Formalizadas en Sprint 4
-
-### ADR-0012: Incorporación del Estado `RESERVED`, Consumo Definitivo en Cocina, Rechazo Físico del Chef y Reapertura Editable desde `REJECTED`
-
-* **Contexto:** En el análisis del flujo con Inventario y Cocina, se detectó la necesidad de desacoplar la reserva de stock del inicio físico de la preparación, permitir el rechazo por ítem si faltan insumos físicos en cocina, y permitir al mesero reabrir y modificar la misma orden si Inventario devuelve stock insuficiente (Opción A).
-* **Decisiones adoptadas:**
-  1. **Nuevo Estado `OrderStatus.RESERVED`:**
-     - Al recibir `inventario.stock.reservado`, la orden pasa a `RESERVED` con marca `stock_reserved_at`. No entra automáticamente a `IN_PREPARATION`.
-  2. **Inicio Manual de Preparación (`PATCH /orders/{orderId}/start-preparation`):**
-     - El Chef pasa la comanda de `RESERVED` a `IN_PREPARATION`. Se emite `ordenes.orden.en_preparacion` al Outbox. Al consumirlo, Inventario descuenta definitivamente los insumos y apaga el TTL de reserva.
-  3. **Rechazo Manual por Ítem del Chef (`PATCH /orders/{orderId}/items/{itemId}/kitchen-reject`):**
-     - Si falta el insumo físico en cocina, el Chef rechaza ese ítem en `RESERVED`. Se bloquea inmediatamente en el Redis local (`CatalogRepository.set_availability(dish_id, False)`), se emite `ordenes.platillo.rechazado_cocina` a Inventario y Menú, y la orden pasa a `REJECTED` devolviéndose al mesero con `rejectionDetails`.
-  4. **Reapertura Editable desde `REJECTED` (`PATCH /orders/{orderId}/items`):**
-     - Cuando el mesero edita una orden en `REJECTED`, la comanda reabre a `CREATED` (`order.reopen_as_draft()`), permitiendo ajustar cantidades o platillos y re-confirmar con el mismo `orderId` y un nuevo `eventId` determinista (`attempt_key=order.version`).
-  5. **Cancelación Permitida en `CREATED`, `RESERVED` y `REJECTED`:**
-     - Bloqueada únicamente en `IN_PREPARATION` (409 Conflict). Al cancelar emite `ordenes.orden.cancelada` con los ítems consolidados para liberar reservas.
+  - [ ] Definir con el equipo de Sala si su mapa de mesas consumirá el canal WebSocket `/ws/waiter` (`floor` / `user:{userId}`) para pintar la alerta de orden lista para recoger (**Opción A, recomendada**) o si el frontend de Órdenes exportará el componente federado `./ReadyOrdersAlert` (**Opción B**, activando `TASK-42`).
