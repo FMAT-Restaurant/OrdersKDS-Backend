@@ -23,11 +23,12 @@ from app.domain.errors import (
     ForbiddenRoleError,
     InvalidOrderItemError,
     InvalidStateTransitionError,
+    NoteRequiredError,
     OrderNotFoundError,
     VersionConflictError,
 )
 from app.domain.order_status import ItemStatus, OrderStatus
-from app.domain.roles import KITCHEN_ROLES, Role
+from app.domain.roles import KITCHEN_ROLES, VOID_KITCHEN_ERROR_ROLES, Role
 from app.messaging.events import (
     ChargeRequestedEvent,
     ChargeRequestedItem,
@@ -519,6 +520,81 @@ class OrderService:
         await self._session.commit()
 
         # 4. Push realtime notification
+        await notify_order_changed(order, notifier=self._notifier)
+        return order
+
+    async def void_kitchen_error(
+        self,
+        order_id: UUID,
+        auth: AuthContext,
+        note: str,
+    ) -> Order:
+        """Void an order in IN_PREPARATION status due to kitchen error (RF-28..31, ADR-0012).
+
+        Transitions the order from IN_PREPARATION to VOIDED (entire order cancelled).
+        Publishes 'ordenes.comanda.mermada' with reason='KITCHEN_ERROR', motivo='error_cocina',
+        and note. Zero charge is published (no CHARGE_REQUESTED event).
+
+        Roles: admin, chef.
+
+        Args:
+            order_id: Target order public UUID.
+            auth: Authenticated caller context (admin or chef).
+            note: Mandatory explanation note describing the kitchen error.
+
+        Returns:
+            The voided Order in VOIDED status.
+
+        Raises:
+            ForbiddenRoleError: If caller is not admin or chef (403).
+            NoteRequiredError: If note is empty or whitespace-only (422).
+            OrderNotFoundError: If order does not exist (404).
+            InvalidStateTransitionError: If order is not in IN_PREPARATION status (409).
+        """
+        if auth.role not in VOID_KITCHEN_ERROR_ROLES:
+            raise ForbiddenRoleError(
+                "Only administrators and chefs can void an order for kitchen error."
+            )
+
+        if not note or not note.strip():
+            raise NoteRequiredError("A non-empty note is required for a kitchen error void.")
+
+        order = await self._orders.get_by_public_id(order_id)
+        if order is None:
+            raise OrderNotFoundError(f"Order with id={order_id} not found.")
+
+        if order.status != OrderStatus.IN_PREPARATION:
+            raise InvalidStateTransitionError(order.status, OrderStatus.VOIDED)
+
+        clean_note = note.strip()
+        logger.info(
+            "Order %s voided for kitchen error (VOIDED) by actor %s (role=%s). Note: %s",
+            order.public_id,
+            auth.user_id,
+            auth.role,
+            clean_note,
+        )
+
+        order.mark_voided()
+
+        # 1. Stage OrderWastedEvent in outbox (reason: KITCHEN_ERROR, no charge published)
+        wasted_items = _consolidate_order_items(order.items)
+        wasted_event = OrderWastedEvent.for_order(
+            order.public_id,
+            items=wasted_items,
+            reason="KITCHEN_ERROR",
+            motivo="error_cocina",
+            note=clean_note,
+        )
+        payload_wasted = wasted_event.model_dump(mode="json", by_alias=True)
+        validate_event_payload(wasted_event.event_name, payload_wasted)
+        self._outbox.add(wasted_event)
+
+        # 2. Save and commit transaction atomically (strictly ZERO charge events staged)
+        self._orders.save(order)
+        await self._session.commit()
+
+        # 3. Push realtime notification
         await notify_order_changed(order, notifier=self._notifier)
         return order
 

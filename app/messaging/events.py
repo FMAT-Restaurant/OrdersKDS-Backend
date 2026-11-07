@@ -295,6 +295,7 @@ class OrderWastedEvent(OrderEvent):
     event_name: ClassVar[EventName] = EventName.ORDER_WASTED
     reason: str = Field(default="ADMINISTRATIVE", alias="reason")
     motivo: str = Field(default="administrativo", alias="motivo")
+    note: str | None = Field(default=None, alias="note")
     items_affected: list[OrderCreatedItem] = Field(
         default_factory=list,
         alias="itemsAfectados",
@@ -313,6 +314,7 @@ class OrderWastedEvent(OrderEvent):
         items: list[OrderCreatedItem] | None = None,
         reason: str = "ADMINISTRATIVE",
         motivo: str = "administrativo",
+        note: str | None = None,
         correlation_id: UUID | None = None,
     ) -> OrderWastedEvent:
         """Build the deterministic order wasted event."""
@@ -324,6 +326,7 @@ class OrderWastedEvent(OrderEvent):
             correlationId=correlation_id,
             reason=reason,
             motivo=motivo,
+            note=note,
             itemsAfectados=items_list,
             items=items_list,
         )

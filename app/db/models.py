@@ -140,6 +140,11 @@ class Order(Base):
         ensure_transition_allowed(self.status, OrderStatus.WASTED)
         self.status = OrderStatus.WASTED
 
+    def mark_voided(self) -> None:
+        """Transition order to VOIDED (kitchen error void, RF-28)."""
+        ensure_transition_allowed(self.status, OrderStatus.VOIDED)
+        self.status = OrderStatus.VOIDED
+
     def mark_paid(self) -> None:
         """Transition order to PAID."""
         ensure_transition_allowed(self.status, OrderStatus.PAID)

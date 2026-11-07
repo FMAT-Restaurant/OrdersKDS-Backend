@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from decimal import Decimal
 from pathlib import Path
+from typing import Any, cast
 from uuid import uuid4
 
 import jsonschema
@@ -231,3 +232,29 @@ def test_charge_requested_event_satisfies_contract() -> None:
     assert payload["status"] == "WASTED"
     assert "data" in payload
     assert payload["data"]["orderId"] == str(order_id)
+
+
+@pytest.mark.contract
+@pytest.mark.requirement("RF-28", "RF-30", "RNF-13", "CT-13")
+def test_void_kitchen_error_event_satisfies_contract() -> None:
+    """CT-13: Verify OrderWastedEvent emitted for kitchen error validates against contract."""
+    order_id = uuid4()
+    item = OrderCreatedItem(offerId="dish-burnt-steak", quantity=2)
+    event = OrderWastedEvent.for_order(
+        order_id,
+        items=[item],
+        reason="KITCHEN_ERROR",
+        motivo="error_cocina",
+        note="Carne sobrecocida y quemada en plancha",
+    )
+    payload = event.model_dump(mode="json", by_alias=True)
+
+    validate_event_payload(EventName.ORDER_WASTED, payload)
+    assert payload["orderId"] == str(order_id)
+    assert payload["reason"] == "KITCHEN_ERROR"
+    assert payload["motivo"] == "error_cocina"
+    assert payload["note"] == "Carne sobrecocida y quemada en plancha"
+    items_afectados = cast(list[dict[str, Any]], payload.get("itemsAfectados", []))
+    assert len(items_afectados) == 1
+    assert items_afectados[0]["offerId"] == "dish-burnt-steak"
+    assert items_afectados[0]["quantity"] == 2

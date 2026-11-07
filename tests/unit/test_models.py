@@ -267,6 +267,27 @@ def test_order_mark_wasted_transitions_from_in_preparation() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.requirement("RF-28")
+def test_order_mark_voided_transitions_from_in_preparation() -> None:
+    order = Order(public_id=uuid4(), status=OrderStatus.IN_PREPARATION)
+    order.mark_voided()
+    assert order.status == OrderStatus.VOIDED
+
+    # Terminal state: cannot transition further
+    with pytest.raises(InvalidStateTransitionError):
+        order.mark_paid()
+
+    # Invalid transitions to VOIDED raise InvalidStateTransitionError
+    order_created = Order(public_id=uuid4(), status=OrderStatus.CREATED)
+    with pytest.raises(InvalidStateTransitionError):
+        order_created.mark_voided()
+
+    order_reserved = Order(public_id=uuid4(), status=OrderStatus.RESERVED)
+    with pytest.raises(InvalidStateTransitionError):
+        order_reserved.mark_voided()
+
+
+@pytest.mark.unit
 def test_version_id_col_enables_optimistic_concurrency() -> None:
     assert Order.__mapper__.version_id_col is Order.__table__.c.version
     assert OrderItem.__mapper__.version_id_col is OrderItem.__table__.c.version

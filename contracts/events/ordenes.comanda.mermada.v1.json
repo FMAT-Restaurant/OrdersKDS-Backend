@@ -29,6 +29,12 @@
     "motivo": {
       "type": "string"
     },
+    "note": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "itemsAfectados": {
       "type": "array",
       "items": {

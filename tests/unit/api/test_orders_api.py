@@ -2200,3 +2200,320 @@ def test_void_administrative_charges_frozen_prices(
     assert items[1]["plateId"] == "dish-drink"
     assert items[1]["unitPrice"] == 20.0
     assert items[1]["subtotal"] == 40.0
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("RF-28")
+@pytest.mark.parametrize("role", ["chef", "admin"])
+def test_void_kitchen_error_allowed_for_chef_and_admin(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    role: str,
+) -> None:
+    """UT-BE-18: Both chef and admin roles can void an order for kitchen error."""
+    order_id = uuid4()
+    order = Order(
+        public_id=order_id,
+        table_number=3,
+        status=OrderStatus.IN_PREPARATION,
+    )
+    order.items.append(
+        OrderItem(
+            public_id=uuid4(),
+            dish_id="dish-soup",
+            name="Sopa Azteca",
+            quantity=1,
+            unit_price=Decimal("85.00"),
+            status=ItemStatus.PENDING,
+        )
+    )
+    test_db[order_id] = order
+
+    response = client.patch(
+        f"/orders/{order_id}/void-kitchen-error",
+        headers=auth_headers(role),
+        json={"note": "Error en condimentos durante la cocción"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["orderId"] == str(order_id)
+    assert data["status"] == "VOIDED"
+    assert test_db[order_id].status == OrderStatus.VOIDED
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("RF-28", "RNF-03")
+@pytest.mark.parametrize("role", ["waiter", "kitchen"])
+def test_void_kitchen_error_by_waiter_or_kitchen_is_forbidden(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    role: str,
+) -> None:
+    """UT-BE-19: Waiter and kitchen staff are forbidden from kitchen error void."""
+    order_id = uuid4()
+    order = Order(
+        public_id=order_id,
+        table_number=4,
+        status=OrderStatus.IN_PREPARATION,
+    )
+    test_db[order_id] = order
+
+    response = client.patch(
+        f"/orders/{order_id}/void-kitchen-error",
+        headers=auth_headers(role),
+        json={"note": "Intento no autorizado"},
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "FORBIDDEN_ROLE"
+    assert test_db[order_id].status == OrderStatus.IN_PREPARATION
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("RF-29")
+@pytest.mark.parametrize(
+    "invalid_payload",
+    [
+        {},
+        {"note": ""},
+        {"note": "   "},
+        {"reason": ""},
+        {"reason": "   "},
+    ],
+)
+def test_void_kitchen_error_without_note_raises_note_required(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    invalid_payload: dict[str, Any],
+) -> None:
+    """UT-BE-20: Missing, empty or whitespace-only explanation note raises NOTE_REQUIRED."""
+    order_id = uuid4()
+    order = Order(
+        public_id=order_id,
+        table_number=5,
+        status=OrderStatus.IN_PREPARATION,
+    )
+    test_db[order_id] = order
+
+    response = client.patch(
+        f"/orders/{order_id}/void-kitchen-error",
+        headers=auth_headers("chef"),
+        json=invalid_payload,
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "NOTE_REQUIRED"
+    assert test_db[order_id].status == OrderStatus.IN_PREPARATION
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("RF-28")
+def test_void_kitchen_error_affects_all_items_of_the_order(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+) -> None:
+    """UT-BE-21: Kitchen error voids the entire order and includes all items in event."""
+    order_id = uuid4()
+    order = Order(
+        public_id=order_id,
+        table_number=6,
+        status=OrderStatus.IN_PREPARATION,
+    )
+    item1 = OrderItem(
+        public_id=uuid4(),
+        dish_id="dish-steak",
+        name="Corte Ribeye",
+        quantity=2,
+        unit_price=Decimal("350.00"),
+        status=ItemStatus.PENDING,
+    )
+    item2 = OrderItem(
+        public_id=uuid4(),
+        dish_id="dish-salad",
+        name="Ensalada César",
+        quantity=1,
+        unit_price=Decimal("120.00"),
+        status=ItemStatus.READY,
+    )
+    order.items.extend([item1, item2])
+    test_db[order_id] = order
+
+    response = client.patch(
+        f"/orders/{order_id}/void-kitchen-error",
+        headers=auth_headers("chef"),
+        json={"note": "Carne quemada y ensalada contaminada con aceite caliente"},
+    )
+    assert response.status_code == 200
+    assert test_db[order_id].status == OrderStatus.VOIDED
+
+    wasted_entry = next(
+        e for e in fake_session.outbox_rows if e.event_type == "ordenes.comanda.mermada"
+    )
+    items_afectados = cast(list[dict[str, Any]], wasted_entry.payload.get("itemsAfectados", []))
+    assert len(items_afectados) == 2
+    offers = {it["offerId"] for it in items_afectados}
+    assert "dish-steak" in offers
+    assert "dish-salad" in offers
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("RF-30", "RF-31")
+def test_void_kitchen_error_publishes_wasted_with_reason_and_no_charge(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+    spy_notifier: SpyOrderNotifier,
+) -> None:
+    """UT-BE-22: Publishes comanda.mermada with KITCHEN_ERROR and never publishes charge."""
+    order_id = uuid4()
+    order = Order(
+        public_id=order_id,
+        table_number=8,
+        status=OrderStatus.IN_PREPARATION,
+    )
+    item = OrderItem(
+        public_id=uuid4(),
+        dish_id="dish-pasta",
+        name="Pasta Alfredo",
+        quantity=2,
+        unit_price=Decimal("140.00"),
+        status=ItemStatus.PENDING,
+    )
+    order.items.append(item)
+    test_db[order_id] = order
+
+    response = client.patch(
+        f"/orders/{order_id}/void-kitchen-error",
+        headers=auth_headers("admin"),
+        json={"note": "Salsa quemada en preparación"},
+    )
+    assert response.status_code == 200
+
+    # 1. Exactly 1 outbox event staged (no charge event staged!)
+    assert len(fake_session.outbox_rows) == 1
+    assert fake_session.outbox_rows[0].event_type == "ordenes.comanda.mermada"
+    wasted_payload = fake_session.outbox_rows[0].payload
+    assert wasted_payload["orderId"] == str(order_id)
+    assert wasted_payload["reason"] == "KITCHEN_ERROR"
+    assert wasted_payload["motivo"] == "error_cocina"
+    assert wasted_payload["note"] == "Salsa quemada en preparación"
+
+    # 2. Verify strictly ZERO charge event staged (RF-31)
+    charge_events = [
+        e for e in fake_session.outbox_rows if e.event_type == "ordenes.cobro.solicitado"
+    ]
+    assert len(charge_events) == 0
+
+    # 3. Realtime notification emitted
+    assert any(o.public_id == order_id for o in spy_notifier.notified_orders)
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("RF-28")
+@pytest.mark.parametrize(
+    "invalid_status",
+    [
+        OrderStatus.CREATED,
+        OrderStatus.RESERVED,
+        OrderStatus.DELIVERED,
+        OrderStatus.CANCELLED,
+        OrderStatus.PAID,
+        OrderStatus.WASTED,
+        OrderStatus.VOIDED,
+        OrderStatus.EXPIRED,
+    ],
+)
+def test_void_kitchen_error_in_non_in_preparation_status_raises_409(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    invalid_status: OrderStatus,
+) -> None:
+    """Orders in any status other than IN_PREPARATION return 409 INVALID_STATE_TRANSITION."""
+    order_id = uuid4()
+    order = Order(
+        public_id=order_id,
+        table_number=2,
+        status=invalid_status,
+    )
+    test_db[order_id] = order
+
+    response = client.patch(
+        f"/orders/{order_id}/void-kitchen-error",
+        headers=auth_headers("chef"),
+        json={"note": "Error de cocina tardío"},
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "INVALID_STATE_TRANSITION"
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("RF-28")
+def test_void_kitchen_error_not_found_404(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+) -> None:
+    """Non-existent order returns 404 ORDER_NOT_FOUND."""
+    missing_id = uuid4()
+    response = client.patch(
+        f"/orders/{missing_id}/void-kitchen-error",
+        headers=auth_headers("chef"),
+        json={"note": "Orden que no existe"},
+    )
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "ORDER_NOT_FOUND"
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("RF-28")
+def test_void_kitchen_error_post_alias(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """POST alias for void-kitchen-error works identically to PATCH."""
+    order_id = uuid4()
+    order = Order(
+        public_id=order_id,
+        table_number=9,
+        status=OrderStatus.IN_PREPARATION,
+    )
+    test_db[order_id] = order
+
+    response = client.post(
+        f"/orders/{order_id}/void-kitchen-error",
+        headers=auth_headers("chef"),
+        json={"note": "Incidente en cocina vía POST alias"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "VOIDED"
+    assert test_db[order_id].status == OrderStatus.VOIDED
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("RF-28", "RNF-03")
+def test_void_kitchen_error_rejects_extra_fields(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Payload with extra unexpected properties is rejected with 422 VALIDATION_ERROR."""
+    order_id = uuid4()
+    order = Order(
+        public_id=order_id,
+        table_number=1,
+        status=OrderStatus.IN_PREPARATION,
+    )
+    test_db[order_id] = order
+
+    response = client.patch(
+        f"/orders/{order_id}/void-kitchen-error",
+        headers=auth_headers("chef"),
+        json={"note": "Error", "extraField": "forbidden"},
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
