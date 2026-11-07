@@ -3,9 +3,10 @@
 Every route is guarded by JWT role claims (ADR-0011). Waiters and admins can create,
 modify, query, transfer, and confirm draft orders. Modification is strictly rejected
 once the order has been confirmed or has moved past CREATED status (OP-05 / ADR-0004).
+Administrative voiding of in-preparation orders is strictly restricted to admin (RF-26).
 
 Satisfies: RF-12, RF-13, RF-14, RF-15, RF-16, RF-17, RF-18, RF-23, RF-24, RF-25,
-           RNF-03, RNF-09, RNF-13
+           RF-26, RF-27, RNF-03, RNF-09, RNF-13, ADR-0012
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from app.api.schemas.order import (
     OrderResponse,
     TransferOrderRequest,
     UpdateOrderItemsRequest,
+    VoidOrderRequest,
 )
 from app.db.models import Order, OrderItem
 from app.db.session import get_session
@@ -312,6 +314,68 @@ async def cancel_order(
         InvalidStateTransitionError: If order is not in CREATED status (409).
     """
     order = await order_service.cancel_order(
+        order_id=order_id,
+        auth=auth,
+        reason=payload.reason if payload else None,
+    )
+    return OrderResponse.from_model(order)
+
+
+@router.patch(
+    "/{orderId}/void",
+    status_code=status.HTTP_200_OK,
+    summary="Administratively void order (with charge)",
+    description=(
+        "Administratively voids an order in IN_PREPARATION status (RF-26, RF-27, ADR-0012). "
+        "Transitions the order to WASTED, and publishes both ordenes.comanda.mermada "
+        "and ordenes.cobro.solicitado with frozen prices in the same transaction. "
+        "Strictly restricted to admin role."
+    ),
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+            "description": "Caller lacks admin role (`FORBIDDEN_ROLE`).",
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "model": ErrorResponse,
+            "description": "Order not found (`ORDER_NOT_FOUND`).",
+        },
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorResponse,
+            "description": "Order is not in IN_PREPARATION status (`INVALID_STATE_TRANSITION`).",
+        },
+    },
+)
+@router.post(
+    "/{orderId}/void",
+    status_code=status.HTTP_200_OK,
+    summary="Administratively void order (POST alias)",
+    description="POST alias for administrative void.",
+    include_in_schema=False,
+)
+async def void_order(
+    order_id: OrderIdPath,
+    auth: Annotated[AuthContext, Depends(require_roles(Role.ADMIN))],
+    order_service: Annotated[OrderService, Depends(get_order_service)],
+    payload: VoidOrderRequest | None = None,
+) -> OrderResponse:
+    """Administratively void an order in IN_PREPARATION status (RF-26, RF-27, ADR-0012).
+
+    Args:
+        order_id: Public UUID of target order.
+        auth: Authenticated caller context from JWT (strictly admin).
+        order_service: Order domain service instance.
+        payload: Optional void request payload.
+
+    Returns:
+        The order aggregate in WASTED status.
+
+    Raises:
+        OrderNotFoundError: If order does not exist (404).
+        InvalidStateTransitionError: If order is not in IN_PREPARATION status (409).
+        ForbiddenRoleError: If caller is not admin (403).
+    """
+    order = await order_service.void_order(
         order_id=order_id,
         auth=auth,
         reason=payload.reason if payload else None,

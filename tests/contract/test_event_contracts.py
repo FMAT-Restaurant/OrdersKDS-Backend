@@ -6,6 +6,7 @@ Satisfies: RF-10, RNF-13, CT-23
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
@@ -13,6 +14,8 @@ import jsonschema
 import pytest
 
 from app.messaging.events import (
+    ChargeRequestedEvent,
+    ChargeRequestedItem,
     DishPreparedEvent,
     EventName,
     KitchenDishRejectedEvent,
@@ -21,6 +24,7 @@ from app.messaging.events import (
     OrderCreatedItem,
     OrderExpiredEvent,
     OrderInPreparationEvent,
+    OrderWastedEvent,
 )
 from app.messaging.validator import EventContractError, validate_event_payload
 
@@ -177,3 +181,53 @@ def test_order_cancelled_event_satisfies_contract() -> None:
 
     validate_event_payload(EventName.ORDER_CANCELLED, payload)
     assert payload["itemsCancelados"] == [{"offerId": "dish-1", "quantity": 2}]
+
+
+@pytest.mark.contract
+@pytest.mark.requirement("RF-26", "RF-27", "RNF-13", "CT-23")
+def test_order_wasted_event_satisfies_contract() -> None:
+    """Verify OrderWastedEvent payload validates against its contract."""
+    event = OrderWastedEvent.for_order(
+        uuid4(),
+        correlation_id=uuid4(),
+        items=[OrderCreatedItem(offerId="dish-1", quantity=2)],
+        reason="ADMINISTRATIVE",
+        motivo="administrativo",
+    )
+    payload = event.model_dump(mode="json", by_alias=True)
+
+    validate_event_payload(EventName.ORDER_WASTED, payload)
+    assert payload["reason"] == "ADMINISTRATIVE"
+    assert payload["motivo"] == "administrativo"
+    assert payload["itemsAfectados"] == [{"offerId": "dish-1", "quantity": 2}]
+
+
+@pytest.mark.contract
+@pytest.mark.requirement("RF-20", "RF-26", "RF-27", "RNF-13", "CT-23")
+def test_charge_requested_event_satisfies_contract() -> None:
+    """Verify ChargeRequestedEvent payload validates against its contract."""
+    order_id = uuid4()
+    item_id = uuid4()
+    charge_item = ChargeRequestedItem(
+        itemId=item_id,
+        plateId="dish-1",
+        name="Hamburguesa Clásica",
+        quantity=2,
+        unitPrice=Decimal("180.00"),
+        subtotal=Decimal("360.00"),
+    )
+    event = ChargeRequestedEvent.for_order(
+        order_id,
+        total_amount=Decimal("360.00"),
+        items=[charge_item],
+        table_id="MESA-04",
+        status="WASTED",
+    )
+    payload = event.model_dump(mode="json", by_alias=True)
+
+    validate_event_payload(EventName.CHARGE_REQUESTED, payload)
+    assert payload["orderId"] == str(order_id)
+    assert payload["totalAmount"] == 360.0
+    assert payload["status"] == "WASTED"
+    assert "data" in payload
+    assert payload["data"]["orderId"] == str(order_id)

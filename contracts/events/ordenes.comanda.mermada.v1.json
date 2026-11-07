@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://restaurant.example.com/contracts/events/ordenes.comanda.mermada.v1.json",
   "title": "OrderWastedEvent",
-  "description": "Event emitted when an in-preparation order is voided/wasted.",
+  "description": "Event emitted when an in-preparation order is voided/wasted (RF-26, RF-27, RF-28).",
   "type": "object",
   "required": [
     "eventId",
@@ -22,6 +22,52 @@
         "string",
         "null"
       ]
+    },
+    "reason": {
+      "type": "string"
+    },
+    "motivo": {
+      "type": "string"
+    },
+    "itemsAfectados": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "offerId",
+          "quantity"
+        ],
+        "properties": {
+          "offerId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "offerId",
+          "quantity"
+        ],
+        "properties": {
+          "offerId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
     }
   },
   "additionalProperties": true

@@ -147,6 +147,18 @@ class CancelOrderRequest(BaseModel):
     reason: str | None = Field(default=None, description="Optional cancellation reason.")
 
 
+class VoidOrderRequest(BaseModel):
+    """Optional payload for administratively voiding an in-preparation order (RF-26, RF-27)."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    reason: str | None = Field(
+        default=None,
+        max_length=500,
+        description="Optional administrative reason for voiding the order.",
+    )
+
+
 class OrderItemResponse(BaseModel):
     """Public representation of an order item."""
 
