@@ -355,142 +355,91 @@ class ChargeRequestedItem(BaseModel):
         return float(value)
 
 
-class ChargeRequestedEvent(OrderEvent):
+class BasePaymentRequestEvent(OrderEvent):
+    """Base event for outbound monetary settlement requests (charge or bill requested)."""
+
+    default_status: ClassVar[str] = ""
+
+    session_id: UUID | None = Field(default=None, alias="sessionId")
+    table_id: str | None = Field(default=None, alias="tableId")
+    waiter_id: UUID | None = Field(default=None, alias="waiterId")
+    status: str = Field(default="", alias="status")
+    total_amount: Decimal = Field(default=Decimal("0.00"), alias="totalAmount")
+    items: list[ChargeRequestedItem] = Field(default_factory=list, alias="items")
+    data: dict[str, Any] | None = Field(default=None, alias="data")
+
+    @field_serializer("total_amount", mode="plain")
+    def _serialize_total_amount(self, value: Decimal) -> float:
+        return float(value)
+
+    @classmethod
+    def for_order(
+        cls,
+        order_id: UUID,
+        *,
+        total_amount: Decimal = Decimal("0.00"),
+        items: list[ChargeRequestedItem] | None = None,
+        session_id: UUID | None = None,
+        table_id: str | None = None,
+        waiter_id: UUID | None = None,
+        status: str | None = None,
+        correlation_id: UUID | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> Self:
+        """Build the deterministic payment request event for an order."""
+        event_id = uuid5(NAMESPACE_URL, f"{cls.event_name}:{order_id}")
+        items_list = items or []
+        effective_total = total_amount if total_amount is not None else Decimal("0.00")
+        effective_status = status if status is not None else cls.default_status
+        payload_data = data or {
+            "orderId": str(order_id),
+            "sessionId": str(session_id) if session_id else None,
+            "tableId": table_id,
+            "waiterId": str(waiter_id) if waiter_id else None,
+            "status": effective_status,
+            "totalAmount": float(effective_total),
+            "items": [
+                {
+                    "itemId": str(it.item_id),
+                    "plateId": it.plate_id,
+                    "name": it.name,
+                    "quantity": it.quantity,
+                    "unitPrice": float(it.unit_price) if it.unit_price is not None else 0.0,
+                    "subtotal": float(it.subtotal) if it.subtotal is not None else 0.0,
+                    "modifiers": it.modifiers,
+                    "notes": it.notes,
+                }
+                for it in items_list
+            ],
+        }
+        return cls(
+            eventId=event_id,
+            orderId=order_id,
+            correlationId=correlation_id,
+            sessionId=session_id,
+            tableId=table_id,
+            waiterId=waiter_id,
+            status=effective_status,
+            totalAmount=effective_total,
+            items=items_list,
+            data=payload_data,
+        )
+
+
+class ChargeRequestedEvent(BasePaymentRequestEvent):
     """Event emitted when payment is requested for an order (RF-20, RF-26, RF-27)."""
 
     event_name: ClassVar[EventName] = EventName.CHARGE_REQUESTED
-    session_id: UUID | None = Field(default=None, alias="sessionId")
-    table_id: str | None = Field(default=None, alias="tableId")
-    waiter_id: UUID | None = Field(default=None, alias="waiterId")
+    default_status: ClassVar[str] = "WASTED"
     status: str = Field(default="WASTED", alias="status")
-    total_amount: Decimal = Field(default=Decimal("0.00"), alias="totalAmount")
-    items: list[ChargeRequestedItem] = Field(default_factory=list, alias="items")
-    data: dict[str, Any] | None = Field(default=None, alias="data")
-
-    @field_serializer("total_amount", mode="plain")
-    def _serialize_total_amount(self, value: Decimal) -> float:
-        return float(value)
-
-    @classmethod
-    def for_order(
-        cls,
-        order_id: UUID,
-        *,
-        total_amount: Decimal = Decimal("0.00"),
-        items: list[ChargeRequestedItem] | None = None,
-        session_id: UUID | None = None,
-        table_id: str | None = None,
-        waiter_id: UUID | None = None,
-        status: str = "WASTED",
-        correlation_id: UUID | None = None,
-        data: dict[str, Any] | None = None,
-    ) -> ChargeRequestedEvent:
-        """Build the deterministic charge requested event for an order."""
-        event_id = uuid5(NAMESPACE_URL, f"{cls.event_name}:{order_id}")
-        items_list = items or []
-        effective_total = total_amount if total_amount is not None else Decimal("0.00")
-        payload_data = data or {
-            "orderId": str(order_id),
-            "sessionId": str(session_id) if session_id else None,
-            "tableId": table_id,
-            "waiterId": str(waiter_id) if waiter_id else None,
-            "status": status,
-            "totalAmount": float(effective_total),
-            "items": [
-                {
-                    "itemId": str(it.item_id),
-                    "plateId": it.plate_id,
-                    "name": it.name,
-                    "quantity": it.quantity,
-                    "unitPrice": float(it.unit_price) if it.unit_price is not None else 0.0,
-                    "subtotal": float(it.subtotal) if it.subtotal is not None else 0.0,
-                    "modifiers": it.modifiers,
-                    "notes": it.notes,
-                }
-                for it in items_list
-            ],
-        }
-        return cls(
-            eventId=event_id,
-            orderId=order_id,
-            correlationId=correlation_id,
-            sessionId=session_id,
-            tableId=table_id,
-            waiterId=waiter_id,
-            status=status,
-            totalAmount=effective_total,
-            items=items_list,
-            data=payload_data,
-        )
 
 
-class BillRequestedEvent(OrderEvent):
+class BillRequestedEvent(BasePaymentRequestEvent):
     """Event emitted when payment is requested for a delivered order (RF-20, RF-21)."""
 
     event_name: ClassVar[EventName] = EventName.BILL_REQUESTED
-    session_id: UUID | None = Field(default=None, alias="sessionId")
-    table_id: str | None = Field(default=None, alias="tableId")
-    waiter_id: UUID | None = Field(default=None, alias="waiterId")
+    default_status: ClassVar[str] = "DELIVERED"
     status: str = Field(default="DELIVERED", alias="status")
-    total_amount: Decimal = Field(default=Decimal("0.00"), alias="totalAmount")
-    items: list[ChargeRequestedItem] = Field(default_factory=list, alias="items")
-    data: dict[str, Any] | None = Field(default=None, alias="data")
-
-    @field_serializer("total_amount", mode="plain")
-    def _serialize_total_amount(self, value: Decimal) -> float:
-        return float(value)
-
-    @classmethod
-    def for_order(
-        cls,
-        order_id: UUID,
-        *,
-        total_amount: Decimal = Decimal("0.00"),
-        items: list[ChargeRequestedItem] | None = None,
-        session_id: UUID | None = None,
-        table_id: str | None = None,
-        waiter_id: UUID | None = None,
-        status: str = "DELIVERED",
-        correlation_id: UUID | None = None,
-        data: dict[str, Any] | None = None,
-    ) -> BillRequestedEvent:
-        """Build the deterministic bill requested event for an order."""
-        event_id = uuid5(NAMESPACE_URL, f"{cls.event_name}:{order_id}")
-        items_list = items or []
-        effective_total = total_amount if total_amount is not None else Decimal("0.00")
-        payload_data = data or {
-            "orderId": str(order_id),
-            "sessionId": str(session_id) if session_id else None,
-            "tableId": table_id,
-            "waiterId": str(waiter_id) if waiter_id else None,
-            "status": status,
-            "totalAmount": float(effective_total),
-            "items": [
-                {
-                    "itemId": str(it.item_id),
-                    "plateId": it.plate_id,
-                    "name": it.name,
-                    "quantity": it.quantity,
-                    "unitPrice": float(it.unit_price) if it.unit_price is not None else 0.0,
-                    "subtotal": float(it.subtotal) if it.subtotal is not None else 0.0,
-                    "modifiers": it.modifiers,
-                    "notes": it.notes,
-                }
-                for it in items_list
-            ],
-        }
-        return cls(
-            eventId=event_id,
-            orderId=order_id,
-            correlationId=correlation_id,
-            sessionId=session_id,
-            tableId=table_id,
-            waiterId=waiter_id,
-            status=status,
-            totalAmount=effective_total,
-            items=items_list,
-            data=payload_data,
-        )
 
 
 # ---------------------------------------------------------------------------
