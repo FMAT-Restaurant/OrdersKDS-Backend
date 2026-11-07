@@ -291,4 +291,3 @@ async def test_transfer_order_stale_data_error_raises_version_conflict(
 
     with pytest.raises(VersionConflictError):
         await service.transfer_order(order.public_id, new_table_number=2)
-

@@ -389,4 +389,3 @@ def test_create_and_list_orders_with_dining_session_id(
     results = list_resp.json()
     assert len(results) == 2
     assert all(r["diningSessionId"] == str(session_a) for r in results)
-

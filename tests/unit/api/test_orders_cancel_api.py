@@ -365,4 +365,3 @@ def test_cancel_order_role_matrix(
     resp_unauth = client.patch(f"/orders/{order_unauth.public_id}/cancel")
     assert resp_unauth.status_code == 401
     assert resp_unauth.json()["error"]["code"] == ErrorCode.UNAUTHENTICATED
-

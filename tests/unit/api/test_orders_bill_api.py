@@ -225,4 +225,3 @@ def test_request_bill_patch_alias(
     assert test_db[order_id].status == OrderStatus.DELIVERED
     assert len(fake_session.outbox_rows) == 1
     assert fake_session.outbox_rows[0].event_type == "ordenes.cuenta.solicitada"
-

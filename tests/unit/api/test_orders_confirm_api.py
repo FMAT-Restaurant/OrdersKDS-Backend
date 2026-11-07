@@ -310,4 +310,3 @@ def test_reconfirm_reopened_order_generates_distinct_event_id(
 
     assert event_id_1 != event_id_2
     assert payload_2["items"] == [{"offerId": "dish-101", "quantity": 1}]
-

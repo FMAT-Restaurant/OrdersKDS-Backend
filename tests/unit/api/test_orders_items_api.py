@@ -459,4 +459,3 @@ def test_update_order_items_on_rejected_order_reopens_to_created(
     assert data["confirmedAt"] is None
     assert test_db[order.public_id].status == OrderStatus.CREATED
     assert test_db[order.public_id].rejection_details is None
-
