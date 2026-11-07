@@ -2,6 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://restaurant.example.com/contracts/events/ordenes.cuenta.solicitada.v1.json",
   "title": "BillRequestedEvent",
+  "description": "Event emitted when bill is requested for a delivered order (RF-20, RF-21).",
   "type": "object",
   "required": [
     "eventId",
@@ -21,6 +22,39 @@
         "string",
         "null"
       ]
+    },
+    "sessionId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tableId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "waiterId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string"
+    },
+    "totalAmount": {
+      "type": [
+        "number",
+        "string"
+      ]
+    },
+    "items": {
+      "type": "array"
+    },
+    "data": {
+      "type": "object"
     }
   },
   "additionalProperties": true

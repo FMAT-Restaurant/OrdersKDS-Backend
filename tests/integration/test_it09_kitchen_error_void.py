@@ -241,4 +241,3 @@ async def test_it09_void_kitchen_error_validation_guards() -> None:
             auth=chef_auth,
             note="Accidente en cocina",
         )
-

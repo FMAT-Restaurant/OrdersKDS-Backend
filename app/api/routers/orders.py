@@ -38,7 +38,7 @@ from app.domain.errors import (
     OrderNotFoundError,
 )
 from app.domain.order_status import ItemStatus, OrderStatus
-from app.domain.roles import VOID_KITCHEN_ERROR_ROLES, Role
+from app.domain.roles import VOID_KITCHEN_ERROR_ROLES, WAITER_ROLES, Role
 from app.repositories.orders import OrderRepository
 from app.services.catalog import CatalogValidatorProtocol, get_catalog_validator
 from app.services.orders import OrderService, get_order_service
@@ -457,6 +457,66 @@ async def void_kitchen_error(
         order_id=order_id,
         auth=auth,
         note=note.strip(),
+    )
+    return OrderResponse.from_model(order)
+
+
+@router.post(
+    "/{orderId}/request-bill",
+    status_code=status.HTTP_200_OK,
+    summary="Request bill for delivered order",
+    description=(
+        "Requests the bill for an order in DELIVERED status (RF-20, RF-21). "
+        "Stages 'ordenes.cuenta.solicitada' outbox event with frozen dish prices, "
+        "modifiers, and dual identifiers (orderId, sessionId). "
+        "The order remains in DELIVERED status until payment settlement. "
+        "Restricted to waiter and admin roles."
+    ),
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+            "description": "Caller lacks waiter or admin role (`FORBIDDEN_ROLE`).",
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "model": ErrorResponse,
+            "description": "Order not found (`ORDER_NOT_FOUND`).",
+        },
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorResponse,
+            "description": "Order is not in DELIVERED status (`INVALID_STATE_TRANSITION`).",
+        },
+    },
+)
+@router.patch(
+    "/{orderId}/request-bill",
+    status_code=status.HTTP_200_OK,
+    summary="Request bill for delivered order (PATCH alias)",
+    description="PATCH alias for request bill.",
+    include_in_schema=False,
+)
+async def request_bill(
+    order_id: OrderIdPath,
+    auth: Annotated[AuthContext, Depends(require_roles(*WAITER_ROLES))],
+    order_service: Annotated[OrderService, Depends(get_order_service)],
+) -> OrderResponse:
+    """Request bill for an order in DELIVERED status (RF-20, RF-21).
+
+    Args:
+        order_id: Public UUID of target order.
+        auth: Authenticated caller context from JWT (waiter or admin).
+        order_service: Order domain service instance.
+
+    Returns:
+        The order aggregate representation (remains in DELIVERED status).
+
+    Raises:
+        OrderNotFoundError: If order does not exist (404).
+        InvalidStateTransitionError: If order is not in DELIVERED status (409).
+        ForbiddenRoleError: If caller lacks waiter or admin role (403).
+    """
+    order = await order_service.request_bill(
+        order_id=order_id,
+        auth=auth,
     )
     return OrderResponse.from_model(order)
 

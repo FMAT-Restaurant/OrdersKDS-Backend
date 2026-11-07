@@ -15,6 +15,7 @@ import jsonschema
 import pytest
 
 from app.messaging.events import (
+    BillRequestedEvent,
     ChargeRequestedEvent,
     ChargeRequestedItem,
     DishPreparedEvent,
@@ -258,3 +259,51 @@ def test_void_kitchen_error_event_satisfies_contract() -> None:
     assert len(items_afectados) == 1
     assert items_afectados[0]["offerId"] == "dish-burnt-steak"
     assert items_afectados[0]["quantity"] == 2
+
+
+@pytest.mark.contract
+@pytest.mark.requirement("RF-20", "RF-21", "RNF-13", "CT-08", "CT-15", "IT-18")
+def test_bill_requested_event_satisfies_contract() -> None:
+    """CT-08, CT-15: Verify BillRequestedEvent validates against its JSON Schema contract."""
+    order_id = uuid4()
+    session_id = uuid4()
+    waiter_id = uuid4()
+    item_id = uuid4()
+    item = ChargeRequestedItem(
+        itemId=item_id,
+        plateId="dish-ribeye",
+        name="Bife de Chorizo",
+        quantity=1,
+        unitPrice=Decimal("450.00"),
+        subtotal=Decimal("450.00"),
+        modifiers=["término medio"],
+        notes="Sin sal adicional",
+    )
+    event = BillRequestedEvent.for_order(
+        order_id,
+        total_amount=Decimal("450.00"),
+        items=[item],
+        session_id=session_id,
+        table_id="MESA-05",
+        waiter_id=waiter_id,
+        status="DELIVERED",
+    )
+    payload = event.model_dump(mode="json", by_alias=True)
+
+    validate_event_payload(EventName.BILL_REQUESTED, payload)
+    assert payload["orderId"] == str(order_id)
+    assert payload["sessionId"] == str(session_id)
+    assert payload["tableId"] == "MESA-05"
+    assert payload["waiterId"] == str(waiter_id)
+    assert payload["status"] == "DELIVERED"
+    assert payload["totalAmount"] == 450.0
+    items_list = cast(list[dict[str, Any]], payload.get("items", []))
+    assert len(items_list) == 1
+    assert items_list[0]["plateId"] == "dish-ribeye"
+    assert items_list[0]["unitPrice"] == 450.0
+    assert items_list[0]["modifiers"] == ["término medio"]
+    assert items_list[0]["notes"] == "Sin sal adicional"
+    assert "data" in payload
+    data_dict = cast(dict[str, Any], payload.get("data", {}))
+    assert data_dict["orderId"] == str(order_id)
+    assert data_dict["sessionId"] == str(session_id)

@@ -28,8 +28,9 @@ from app.domain.errors import (
     VersionConflictError,
 )
 from app.domain.order_status import ItemStatus, OrderStatus
-from app.domain.roles import KITCHEN_ROLES, VOID_KITCHEN_ERROR_ROLES, Role
+from app.domain.roles import KITCHEN_ROLES, VOID_KITCHEN_ERROR_ROLES, WAITER_ROLES, Role
 from app.messaging.events import (
+    BillRequestedEvent,
     ChargeRequestedEvent,
     ChargeRequestedItem,
     DishPreparedEvent,
@@ -595,6 +596,75 @@ class OrderService:
         await self._session.commit()
 
         # 3. Push realtime notification
+        await notify_order_changed(order, notifier=self._notifier)
+        return order
+
+    async def request_bill(
+        self,
+        order_id: UUID,
+        auth: AuthContext,
+    ) -> Order:
+        """Request the bill for an order in DELIVERED status (RF-20, RF-21).
+
+        Publishes 'ordenes.cuenta.solicitada' with frozen dish prices and modifiers.
+        The order remains in DELIVERED status until Payments confirms settlement.
+
+        Roles: waiter, admin (WAITER_ROLES).
+
+        Args:
+            order_id: Public UUID of target order.
+            auth: Authenticated caller context.
+
+        Returns:
+            The order aggregate representation.
+
+        Raises:
+            ForbiddenRoleError: If caller lacks waiter or admin role (403).
+            OrderNotFoundError: If order does not exist (404).
+            InvalidStateTransitionError: If order is not in DELIVERED status (409).
+        """
+        if auth.role not in WAITER_ROLES:
+            raise ForbiddenRoleError(
+                "Only waiters and administrators can request the bill for an order."
+            )
+
+        order = await self._orders.get_by_public_id(order_id)
+        if order is None:
+            raise OrderNotFoundError(f"Order with id={order_id} not found.")
+
+        if order.status != OrderStatus.DELIVERED:
+            raise InvalidStateTransitionError(order.status, "REQUEST_BILL")
+
+        logger.info(
+            "Bill requested for order %s by actor %s (role=%s)",
+            order.public_id,
+            auth.user_id,
+            auth.role,
+        )
+
+        if order.total_amount is None:
+            order.recalculate_total()
+        effective_total = order.total_amount if order.total_amount is not None else Decimal("0.00")
+        charge_items = _build_charge_items(order.items)
+        waiter_id = order.responsible_waiter_id or order.confirmed_by or order.created_by
+        table_id = f"MESA-{order.table_number}" if order.table_number is not None else None
+
+        bill_event = BillRequestedEvent.for_order(
+            order.public_id,
+            total_amount=effective_total,
+            items=charge_items,
+            session_id=order.dining_session_id,
+            table_id=table_id,
+            waiter_id=waiter_id,
+            status=order.status.value,
+        )
+        payload = bill_event.model_dump(mode="json", by_alias=True)
+        validate_event_payload(bill_event.event_name, payload)
+        self._outbox.add(bill_event)
+
+        self._orders.save(order)
+        await self._session.commit()
+
         await notify_order_changed(order, notifier=self._notifier)
         return order
 

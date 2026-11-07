@@ -424,6 +424,75 @@ class ChargeRequestedEvent(OrderEvent):
         )
 
 
+class BillRequestedEvent(OrderEvent):
+    """Event emitted when payment is requested for a delivered order (RF-20, RF-21)."""
+
+    event_name: ClassVar[EventName] = EventName.BILL_REQUESTED
+    session_id: UUID | None = Field(default=None, alias="sessionId")
+    table_id: str | None = Field(default=None, alias="tableId")
+    waiter_id: UUID | None = Field(default=None, alias="waiterId")
+    status: str = Field(default="DELIVERED", alias="status")
+    total_amount: Decimal = Field(default=Decimal("0.00"), alias="totalAmount")
+    items: list[ChargeRequestedItem] = Field(default_factory=list, alias="items")
+    data: dict[str, Any] | None = Field(default=None, alias="data")
+
+    @field_serializer("total_amount", mode="plain")
+    def _serialize_total_amount(self, value: Decimal) -> float:
+        return float(value)
+
+    @classmethod
+    def for_order(
+        cls,
+        order_id: UUID,
+        *,
+        total_amount: Decimal = Decimal("0.00"),
+        items: list[ChargeRequestedItem] | None = None,
+        session_id: UUID | None = None,
+        table_id: str | None = None,
+        waiter_id: UUID | None = None,
+        status: str = "DELIVERED",
+        correlation_id: UUID | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> BillRequestedEvent:
+        """Build the deterministic bill requested event for an order."""
+        event_id = uuid5(NAMESPACE_URL, f"{cls.event_name}:{order_id}")
+        items_list = items or []
+        effective_total = total_amount if total_amount is not None else Decimal("0.00")
+        payload_data = data or {
+            "orderId": str(order_id),
+            "sessionId": str(session_id) if session_id else None,
+            "tableId": table_id,
+            "waiterId": str(waiter_id) if waiter_id else None,
+            "status": status,
+            "totalAmount": float(effective_total),
+            "items": [
+                {
+                    "itemId": str(it.item_id),
+                    "plateId": it.plate_id,
+                    "name": it.name,
+                    "quantity": it.quantity,
+                    "unitPrice": float(it.unit_price) if it.unit_price is not None else 0.0,
+                    "subtotal": float(it.subtotal) if it.subtotal is not None else 0.0,
+                    "modifiers": it.modifiers,
+                    "notes": it.notes,
+                }
+                for it in items_list
+            ],
+        }
+        return cls(
+            eventId=event_id,
+            orderId=order_id,
+            correlationId=correlation_id,
+            sessionId=session_id,
+            tableId=table_id,
+            waiterId=waiter_id,
+            status=status,
+            totalAmount=effective_total,
+            items=items_list,
+            data=payload_data,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Inbound event models (Anti-Corruption Layer)
 # Spanish external names exist exclusively as Field aliases here.
