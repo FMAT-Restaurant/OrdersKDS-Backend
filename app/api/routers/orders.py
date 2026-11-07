@@ -3,9 +3,10 @@
 Every route is guarded by JWT role claims (ADR-0011). Waiters and admins can create,
 modify, query, transfer, and confirm draft orders. Modification is strictly rejected
 once the order has been confirmed or has moved past CREATED status (OP-05 / ADR-0004).
+Administrative voiding of in-preparation orders is strictly restricted to admin (RF-26).
 
 Satisfies: RF-12, RF-13, RF-14, RF-15, RF-16, RF-17, RF-18, RF-23, RF-24, RF-25,
-           RNF-03, RNF-09, RNF-13
+           RF-26, RF-27, RNF-03, RNF-09, RNF-13, ADR-0012
 """
 
 from __future__ import annotations
@@ -26,12 +27,18 @@ from app.api.schemas.order import (
     OrderResponse,
     TransferOrderRequest,
     UpdateOrderItemsRequest,
+    VoidKitchenErrorRequest,
+    VoidOrderRequest,
 )
 from app.db.models import Order, OrderItem
 from app.db.session import get_session
-from app.domain.errors import InvalidStateTransitionError, OrderNotFoundError
+from app.domain.errors import (
+    InvalidStateTransitionError,
+    NoteRequiredError,
+    OrderNotFoundError,
+)
 from app.domain.order_status import ItemStatus, OrderStatus
-from app.domain.roles import Role
+from app.domain.roles import VOID_KITCHEN_ERROR_ROLES, WAITER_ROLES, Role
 from app.repositories.orders import OrderRepository
 from app.services.catalog import CatalogValidatorProtocol, get_catalog_validator
 from app.services.orders import OrderService, get_order_service
@@ -315,6 +322,201 @@ async def cancel_order(
         order_id=order_id,
         auth=auth,
         reason=payload.reason if payload else None,
+    )
+    return OrderResponse.from_model(order)
+
+
+@router.patch(
+    "/{orderId}/void",
+    status_code=status.HTTP_200_OK,
+    summary="Administratively void order (with charge)",
+    description=(
+        "Administratively voids an order in IN_PREPARATION status (RF-26, RF-27, ADR-0012). "
+        "Transitions the order to WASTED, and publishes both ordenes.comanda.mermada "
+        "and ordenes.cobro.solicitado with frozen prices in the same transaction. "
+        "Strictly restricted to admin role."
+    ),
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+            "description": "Caller lacks admin role (`FORBIDDEN_ROLE`).",
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "model": ErrorResponse,
+            "description": "Order not found (`ORDER_NOT_FOUND`).",
+        },
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorResponse,
+            "description": "Order is not in IN_PREPARATION status (`INVALID_STATE_TRANSITION`).",
+        },
+    },
+)
+@router.post(
+    "/{orderId}/void",
+    status_code=status.HTTP_200_OK,
+    summary="Administratively void order (POST alias)",
+    description="POST alias for administrative void.",
+    include_in_schema=False,
+)
+async def void_order(
+    order_id: OrderIdPath,
+    auth: Annotated[AuthContext, Depends(require_roles(Role.ADMIN))],
+    order_service: Annotated[OrderService, Depends(get_order_service)],
+    payload: VoidOrderRequest | None = None,
+) -> OrderResponse:
+    """Administratively void an order in IN_PREPARATION status (RF-26, RF-27, ADR-0012).
+
+    Args:
+        order_id: Public UUID of target order.
+        auth: Authenticated caller context from JWT (strictly admin).
+        order_service: Order domain service instance.
+        payload: Optional void request payload.
+
+    Returns:
+        The order aggregate in WASTED status.
+
+    Raises:
+        OrderNotFoundError: If order does not exist (404).
+        InvalidStateTransitionError: If order is not in IN_PREPARATION status (409).
+        ForbiddenRoleError: If caller is not admin (403).
+    """
+    order = await order_service.void_order(
+        order_id=order_id,
+        auth=auth,
+        reason=payload.reason if payload else None,
+    )
+    return OrderResponse.from_model(order)
+
+
+@router.patch(
+    "/{orderId}/void-kitchen-error",
+    status_code=status.HTTP_200_OK,
+    summary="Void order for kitchen error (without charge)",
+    description=(
+        "Voids an order in IN_PREPARATION status due to a kitchen incident (RF-28..31, ADR-0012). "
+        "Transitions the order to VOIDED and publishes ordenes.comanda.mermada with "
+        "motivo='error_cocina' (reason='KITCHEN_ERROR') without publishing any charge event. "
+        "Requires a non-empty explanation note. Restricted to admin and chef roles."
+    ),
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+            "description": "Caller lacks admin or chef role (`FORBIDDEN_ROLE`).",
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "model": ErrorResponse,
+            "description": "Order not found (`ORDER_NOT_FOUND`).",
+        },
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorResponse,
+            "description": "Order is not in IN_PREPARATION status (`INVALID_STATE_TRANSITION`).",
+        },
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "model": ErrorResponse,
+            "description": (
+                "Missing, empty, or whitespace-only explanation note (`NOTE_REQUIRED`)."
+            ),
+        },
+    },
+)
+@router.post(
+    "/{orderId}/void-kitchen-error",
+    status_code=status.HTTP_200_OK,
+    summary="Void order for kitchen error (POST alias)",
+    description="POST alias for kitchen error void.",
+    include_in_schema=False,
+)
+async def void_kitchen_error(
+    order_id: OrderIdPath,
+    auth: Annotated[AuthContext, Depends(require_roles(*VOID_KITCHEN_ERROR_ROLES))],
+    order_service: Annotated[OrderService, Depends(get_order_service)],
+    payload: VoidKitchenErrorRequest | None = None,
+) -> OrderResponse:
+    """Void an order in IN_PREPARATION status due to kitchen error (RF-28..31, ADR-0012).
+
+    Args:
+        order_id: Public UUID of target order.
+        auth: Authenticated caller context from JWT (admin or chef).
+        order_service: Order domain service instance.
+        payload: Mandatory kitchen error explanation payload.
+
+    Returns:
+        The order aggregate in VOIDED status.
+
+    Raises:
+        NoteRequiredError: If note is missing, empty, or whitespace-only (422).
+        OrderNotFoundError: If order does not exist (404).
+        InvalidStateTransitionError: If order is not in IN_PREPARATION status (409).
+        ForbiddenRoleError: If caller lacks admin or chef role (403).
+    """
+    note = payload.note if payload is not None else None
+    if note is None or not note.strip():
+        raise NoteRequiredError("A non-empty note is required for a kitchen error void.")
+
+    order = await order_service.void_kitchen_error(
+        order_id=order_id,
+        auth=auth,
+        note=note.strip(),
+    )
+    return OrderResponse.from_model(order)
+
+
+@router.post(
+    "/{orderId}/request-bill",
+    status_code=status.HTTP_200_OK,
+    summary="Request bill for delivered order",
+    description=(
+        "Requests the bill for an order in DELIVERED status (RF-20, RF-21). "
+        "Stages 'ordenes.cuenta.solicitada' outbox event with frozen dish prices, "
+        "modifiers, and dual identifiers (orderId, sessionId). "
+        "The order remains in DELIVERED status until payment settlement. "
+        "Restricted to waiter and admin roles."
+    ),
+    responses={
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+            "description": "Caller lacks waiter or admin role (`FORBIDDEN_ROLE`).",
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "model": ErrorResponse,
+            "description": "Order not found (`ORDER_NOT_FOUND`).",
+        },
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorResponse,
+            "description": "Order is not in DELIVERED status (`INVALID_STATE_TRANSITION`).",
+        },
+    },
+)
+@router.patch(
+    "/{orderId}/request-bill",
+    status_code=status.HTTP_200_OK,
+    summary="Request bill for delivered order (PATCH alias)",
+    description="PATCH alias for request bill.",
+    include_in_schema=False,
+)
+async def request_bill(
+    order_id: OrderIdPath,
+    auth: Annotated[AuthContext, Depends(require_roles(*WAITER_ROLES))],
+    order_service: Annotated[OrderService, Depends(get_order_service)],
+) -> OrderResponse:
+    """Request bill for an order in DELIVERED status (RF-20, RF-21).
+
+    Args:
+        order_id: Public UUID of target order.
+        auth: Authenticated caller context from JWT (waiter or admin).
+        order_service: Order domain service instance.
+
+    Returns:
+        The order aggregate representation (remains in DELIVERED status).
+
+    Raises:
+        OrderNotFoundError: If order does not exist (404).
+        InvalidStateTransitionError: If order is not in DELIVERED status (409).
+        ForbiddenRoleError: If caller lacks waiter or admin role (403).
+    """
+    order = await order_service.request_bill(
+        order_id=order_id,
+        auth=auth,
     )
     return OrderResponse.from_model(order)
 

@@ -76,6 +76,9 @@ class FakeCatalogValidator:
     async def validate_dishes(self, dish_ids: list[str]) -> list[str]:
         return []
 
+    async def validate_dish_available(self, dish_id: str) -> None:
+        pass
+
 
 @pytest.fixture
 def fake_catalog() -> FakeCatalogValidator:

@@ -135,6 +135,16 @@ class Order(Base):
         ensure_transition_allowed(self.status, OrderStatus.EXPIRED)
         self.status = OrderStatus.EXPIRED
 
+    def mark_wasted(self) -> None:
+        """Transition order to WASTED (administrative void, RF-26)."""
+        ensure_transition_allowed(self.status, OrderStatus.WASTED)
+        self.status = OrderStatus.WASTED
+
+    def mark_voided(self) -> None:
+        """Transition order to VOIDED (kitchen error void, RF-28)."""
+        ensure_transition_allowed(self.status, OrderStatus.VOIDED)
+        self.status = OrderStatus.VOIDED
+
     def mark_paid(self) -> None:
         """Transition order to PAID."""
         ensure_transition_allowed(self.status, OrderStatus.PAID)

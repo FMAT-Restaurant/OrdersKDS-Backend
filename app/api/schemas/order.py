@@ -10,7 +10,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.order_status import ItemStatus, OrderStatus
 
@@ -145,6 +145,35 @@ class CancelOrderRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     reason: str | None = Field(default=None, description="Optional cancellation reason.")
+
+
+class VoidOrderRequest(BaseModel):
+    """Optional payload for administratively voiding an in-preparation order (RF-26, RF-27)."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    reason: str | None = Field(
+        default=None,
+        max_length=500,
+        description="Optional administrative reason for voiding the order.",
+    )
+
+
+class VoidKitchenErrorRequest(BaseModel):
+    """Payload for kitchen error void endpoint (RF-28, RF-29).
+
+    Requires a non-empty explanation note (`note` or alias `reason`).
+    Extra fields are strictly forbidden.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    note: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("note", "reason", "motivo"),
+        max_length=500,
+        description="Mandatory explanation note describing the kitchen error.",
+    )
 
 
 class OrderItemResponse(BaseModel):

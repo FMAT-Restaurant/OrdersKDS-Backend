@@ -18,6 +18,7 @@ from sqlalchemy import JSON, DateTime, Enum, Numeric, Table, Uuid
 
 from app.db.base import Base
 from app.db.models import Order, OrderItem, ProcessedEvent, _utcnow
+from app.domain.errors import InvalidStateTransitionError
 from app.domain.order_status import ItemStatus, OrderStatus
 
 
@@ -241,6 +242,49 @@ def test_order_mark_rejected_and_mark_paid() -> None:
     order_paid = Order(public_id=uuid4(), status=OrderStatus.DELIVERED)
     order_paid.mark_paid()
     assert order_paid.status is OrderStatus.PAID
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("RF-26")
+def test_order_mark_wasted_transitions_from_in_preparation() -> None:
+    order = Order(public_id=uuid4(), status=OrderStatus.IN_PREPARATION)
+    order.mark_wasted()
+    assert order.status == OrderStatus.WASTED
+
+    # From WASTED, can transition to PAID
+    order_wasted = Order(public_id=uuid4(), status=OrderStatus.WASTED)
+    order_wasted.mark_paid()
+    assert order_wasted.status == OrderStatus.PAID
+
+    # Invalid transitions to WASTED raise InvalidStateTransitionError
+    order_created = Order(public_id=uuid4(), status=OrderStatus.CREATED)
+    with pytest.raises(InvalidStateTransitionError):
+        order_created.mark_wasted()
+
+    order_reserved = Order(public_id=uuid4(), status=OrderStatus.RESERVED)
+    with pytest.raises(InvalidStateTransitionError):
+        order_reserved.mark_wasted()
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("RF-28")
+def test_order_mark_voided_transitions_from_in_preparation() -> None:
+    order = Order(public_id=uuid4(), status=OrderStatus.IN_PREPARATION)
+    order.mark_voided()
+    assert order.status == OrderStatus.VOIDED
+
+    # Terminal state: cannot transition further
+    with pytest.raises(InvalidStateTransitionError):
+        order.mark_paid()
+
+    # Invalid transitions to VOIDED raise InvalidStateTransitionError
+    order_created = Order(public_id=uuid4(), status=OrderStatus.CREATED)
+    with pytest.raises(InvalidStateTransitionError):
+        order_created.mark_voided()
+
+    order_reserved = Order(public_id=uuid4(), status=OrderStatus.RESERVED)
+    with pytest.raises(InvalidStateTransitionError):
+        order_reserved.mark_voided()
 
 
 @pytest.mark.unit

@@ -87,3 +87,13 @@ class InvalidOrderItemError(DomainError):
 
     def __init__(self) -> None:
         super().__init__("Order contains an item that cannot be sent to Inventory.")
+
+
+class NoteRequiredError(DomainError):
+    """Raised when an operation requires an explanation note that was not provided."""
+
+    code: ErrorCode = ErrorCode.NOTE_REQUIRED
+    http_status: int = 422
+
+    def __init__(self, message: str = "A non-empty note is required for this operation.") -> None:
+        super().__init__(message)

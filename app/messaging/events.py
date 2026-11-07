@@ -13,7 +13,14 @@ from enum import StrEnum
 from typing import Any, ClassVar, Self, TypeGuard, cast
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    model_validator,
+)
 
 
 def _is_string_keyed_dict(value: object) -> TypeGuard[dict[str, object]]:
@@ -280,6 +287,159 @@ class OrderCancelledEvent(OrderEvent):
             correlationId=correlation_id,
             itemsCancelados=items or [],
         )
+
+
+class OrderWastedEvent(OrderEvent):
+    """Event emitted when an in-preparation order is voided/wasted (RF-26, RF-27, RF-28)."""
+
+    event_name: ClassVar[EventName] = EventName.ORDER_WASTED
+    reason: str = Field(default="ADMINISTRATIVE", alias="reason")
+    motivo: str = Field(default="administrativo", alias="motivo")
+    note: str | None = Field(default=None, alias="note")
+    items_affected: list[OrderCreatedItem] = Field(
+        default_factory=list,
+        alias="itemsAfectados",
+        validation_alias=AliasChoices(
+            "itemsAfectados", "items_affected", "items", "itemsMermados"
+        ),
+        serialization_alias="itemsAfectados",
+    )
+    items: list[OrderCreatedItem] = Field(default_factory=list, alias="items")
+
+    @classmethod
+    def for_order(
+        cls,
+        order_id: UUID,
+        *,
+        items: list[OrderCreatedItem] | None = None,
+        reason: str = "ADMINISTRATIVE",
+        motivo: str = "administrativo",
+        note: str | None = None,
+        correlation_id: UUID | None = None,
+    ) -> OrderWastedEvent:
+        """Build the deterministic order wasted event."""
+        event_id = uuid5(NAMESPACE_URL, f"{cls.event_name}:{order_id}")
+        items_list = items or []
+        return cls(
+            eventId=event_id,
+            orderId=order_id,
+            correlationId=correlation_id,
+            reason=reason,
+            motivo=motivo,
+            note=note,
+            itemsAfectados=items_list,
+            items=items_list,
+        )
+
+
+class ChargeRequestedItem(BaseModel):
+    """Single item entry included in a charge requested event."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    item_id: UUID = Field(alias="itemId")
+    plate_id: str = Field(
+        alias="plateId",
+        validation_alias=AliasChoices("plateId", "offerId", "dish_id"),
+        serialization_alias="plateId",
+    )
+    name: str = Field(default="")
+    quantity: int = Field(gt=0)
+    unit_price: Decimal = Field(alias="unitPrice")
+    subtotal: Decimal = Field(alias="subtotal")
+    modifiers: list[dict[str, object] | str] = Field(default_factory=list)
+    notes: str | None = Field(default=None)
+
+    @field_serializer("unit_price", "subtotal", mode="plain")
+    def _serialize_prices(self, value: Decimal) -> float:
+        return float(value)
+
+
+class BasePaymentRequestEvent(OrderEvent):
+    """Base event for outbound monetary settlement requests (charge or bill requested)."""
+
+    default_status: ClassVar[str] = ""
+
+    session_id: UUID | None = Field(default=None, alias="sessionId")
+    table_id: str | None = Field(default=None, alias="tableId")
+    waiter_id: UUID | None = Field(default=None, alias="waiterId")
+    status: str = Field(default="", alias="status")
+    total_amount: Decimal = Field(default=Decimal("0.00"), alias="totalAmount")
+    items: list[ChargeRequestedItem] = Field(default_factory=list, alias="items")
+    data: dict[str, Any] | None = Field(default=None, alias="data")
+
+    @field_serializer("total_amount", mode="plain")
+    def _serialize_total_amount(self, value: Decimal) -> float:
+        return float(value)
+
+    @classmethod
+    def for_order(
+        cls,
+        order_id: UUID,
+        *,
+        total_amount: Decimal = Decimal("0.00"),
+        items: list[ChargeRequestedItem] | None = None,
+        session_id: UUID | None = None,
+        table_id: str | None = None,
+        waiter_id: UUID | None = None,
+        status: str | None = None,
+        correlation_id: UUID | None = None,
+        data: dict[str, Any] | None = None,
+    ) -> Self:
+        """Build the deterministic payment request event for an order."""
+        event_id = uuid5(NAMESPACE_URL, f"{cls.event_name}:{order_id}")
+        items_list = items or []
+        effective_total = total_amount if total_amount is not None else Decimal("0.00")
+        effective_status = status if status is not None else cls.default_status
+        payload_data = data or {
+            "orderId": str(order_id),
+            "sessionId": str(session_id) if session_id else None,
+            "tableId": table_id,
+            "waiterId": str(waiter_id) if waiter_id else None,
+            "status": effective_status,
+            "totalAmount": float(effective_total),
+            "items": [
+                {
+                    "itemId": str(it.item_id),
+                    "plateId": it.plate_id,
+                    "name": it.name,
+                    "quantity": it.quantity,
+                    "unitPrice": float(it.unit_price) if it.unit_price is not None else 0.0,
+                    "subtotal": float(it.subtotal) if it.subtotal is not None else 0.0,
+                    "modifiers": it.modifiers,
+                    "notes": it.notes,
+                }
+                for it in items_list
+            ],
+        }
+        return cls(
+            eventId=event_id,
+            orderId=order_id,
+            correlationId=correlation_id,
+            sessionId=session_id,
+            tableId=table_id,
+            waiterId=waiter_id,
+            status=effective_status,
+            totalAmount=effective_total,
+            items=items_list,
+            data=payload_data,
+        )
+
+
+class ChargeRequestedEvent(BasePaymentRequestEvent):
+    """Event emitted when payment is requested for an order (RF-20, RF-26, RF-27)."""
+
+    event_name: ClassVar[EventName] = EventName.CHARGE_REQUESTED
+    default_status: ClassVar[str] = "WASTED"
+    status: str = Field(default="WASTED", alias="status")
+
+
+class BillRequestedEvent(BasePaymentRequestEvent):
+    """Event emitted when payment is requested for a delivered order (RF-20, RF-21)."""
+
+    event_name: ClassVar[EventName] = EventName.BILL_REQUESTED
+    default_status: ClassVar[str] = "DELIVERED"
+    status: str = Field(default="DELIVERED", alias="status")
 
 
 # ---------------------------------------------------------------------------
