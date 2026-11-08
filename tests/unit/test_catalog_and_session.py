@@ -51,6 +51,16 @@ def test_get_database_url_prefers_env_var() -> None:
         assert db_session.get_database_url() == "postgresql+asyncpg://user:pass@host:5432/testdb"
 
 
+def test_get_database_url_defaults_when_unset() -> None:
+    with patch.dict(os.environ, {}, clear=True):
+        assert db_session.get_database_url() == "postgresql+asyncpg://localhost:5432/orders"
+
+
+def test_get_database_url_defaults_when_empty_string() -> None:
+    with patch.dict(os.environ, {"DATABASE_URL": "   "}):
+        assert db_session.get_database_url() == "postgresql+asyncpg://localhost:5432/orders"
+
+
 def test_get_engine_and_session_factory() -> None:
     with (
         patch("app.db.session.create_async_engine") as mock_create_engine,

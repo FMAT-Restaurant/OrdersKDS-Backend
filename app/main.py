@@ -3,13 +3,25 @@
 Satisfies: RNF-03, RNF-04
 """
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.error_handlers import register_error_handlers
 from app.api.routers import kds, orders
 from app.api.websockets import routes as websocket_routes
 
+load_dotenv()
+
 app = FastAPI(title="Orders KDS Backend")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 register_error_handlers(app)
 
