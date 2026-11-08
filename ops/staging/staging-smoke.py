@@ -5,18 +5,28 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from urllib.request import urlopen
+from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
 from uuid import uuid4
 
 import aio_pika
 
 
+def check_health(url: str) -> None:
+    """Verify the API health endpoint using an HTTP(S) URL."""
+    parsed_url = urlsplit(url)
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+        raise ValueError("API_HEALTH_URL must be an absolute HTTP(S) URL")
+    request = Request(url, method="GET")
+    with urlopen(request, timeout=10) as response:  # noqa: S310
+        if response.status != 200:
+            raise RuntimeError(f"Health check returned HTTP {response.status}")
+
+
 async def main() -> None:
     """Verify health and one publish/consume round trip."""
     health_url = os.environ["API_HEALTH_URL"]
-    with urlopen(health_url, timeout=10) as response:
-        if response.status != 200:
-            raise RuntimeError(f"Health check returned HTTP {response.status}")
+    await asyncio.to_thread(check_health, health_url)
 
     connection = await aio_pika.connect_robust(
         os.environ["RABBITMQ_URL"],
