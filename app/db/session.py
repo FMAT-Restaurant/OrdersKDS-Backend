@@ -18,21 +18,26 @@ from sqlalchemy.ext.asyncio import (
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 
+_DEFAULT_DATABASE_URL = "postgresql+asyncpg://localhost:5432/orders"
+
 
 def get_database_url() -> str:
-    """Retrieve DATABASE_URL from environment or fail fast."""
+    """Retrieve DATABASE_URL from environment or fallback to default local database."""
     url = os.getenv("DATABASE_URL")
-    if not url or not url.strip():
-        try:
-            from dotenv import load_dotenv
+    if url and url.strip():
+        return url.strip()
 
-            load_dotenv()
-            url = os.getenv("DATABASE_URL")
-        except ImportError:
-            pass
-    if not url or not url.strip():
-        raise RuntimeError("DATABASE_URL environment variable is required")
-    return url.strip()
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv()
+        url = os.getenv("DATABASE_URL")
+        if url and url.strip():
+            return url.strip()
+    except ImportError:
+        pass
+
+    return _DEFAULT_DATABASE_URL
 
 
 def get_engine() -> AsyncEngine:
