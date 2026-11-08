@@ -17,7 +17,7 @@ def check_health(url: str) -> None:
     parsed_url = urlsplit(url)
     if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
         raise ValueError("API_HEALTH_URL must be an absolute HTTP(S) URL")
-    request = Request(url, method="GET")
+    request = Request(url, method="GET")  # noqa: S310
     with urlopen(request, timeout=10) as response:  # noqa: S310
         if response.status != 200:
             raise RuntimeError(f"Health check returned HTTP {response.status}")
