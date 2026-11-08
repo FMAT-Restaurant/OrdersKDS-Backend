@@ -22,21 +22,10 @@ _DEFAULT_DATABASE_URL = "postgresql+asyncpg://localhost:5432/orders"
 
 
 def get_database_url() -> str:
-    """Retrieve DATABASE_URL from environment or fallback to default local database."""
+    """Retrieve DATABASE_URL from environment or default to local Postgres."""
     url = os.getenv("DATABASE_URL")
     if url and url.strip():
         return url.strip()
-
-    try:
-        from dotenv import load_dotenv
-
-        load_dotenv()
-        url = os.getenv("DATABASE_URL")
-        if url and url.strip():
-            return url.strip()
-    except ImportError:
-        pass
-
     return _DEFAULT_DATABASE_URL
 
 
