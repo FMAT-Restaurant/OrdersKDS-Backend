@@ -302,4 +302,3 @@ async def test_catalog_consumer_projects_menu_offer_payload() -> None:
             "category": "plato fuerte",
         },
     )
-    
