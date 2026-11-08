@@ -20,10 +20,19 @@ _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
 def get_database_url() -> str:
-    """Retrieve DATABASE_URL from environment or default to local Postgres."""
-    return os.getenv(
-        "DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/orders"
-    )
+    """Retrieve DATABASE_URL from environment or fail fast."""
+    url = os.getenv("DATABASE_URL")
+    if not url or not url.strip():
+        try:
+            from dotenv import load_dotenv
+
+            load_dotenv()
+            url = os.getenv("DATABASE_URL")
+        except ImportError:
+            pass
+    if not url or not url.strip():
+        raise RuntimeError("DATABASE_URL environment variable is required")
+    return url.strip()
 
 
 def get_engine() -> AsyncEngine:
