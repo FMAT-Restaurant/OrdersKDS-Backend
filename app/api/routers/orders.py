@@ -25,6 +25,7 @@ from app.api.schemas.order import (
     CancelOrderRequest,
     CreateOrderRequest,
     OrderResponse,
+    RedoItemRequest,
     TransferOrderRequest,
     UpdateOrderItemsRequest,
     VoidKitchenErrorRequest,
@@ -585,4 +586,29 @@ async def get_order_by_id(
     if order is None:
         raise OrderNotFoundError(f"Order with id={order_id} not found.")
 
+    return OrderResponse.from_model(order)
+
+
+@router.patch(
+    "/{orderId}/items/{itemId}/redo",
+    status_code=status.HTTP_200_OK,
+    summary="Return a delivered dish to kitchen",
+    description=(
+        "Returns one delivered item to PENDING while preserving the order DELIVERED status."
+    ),
+)
+async def redo_order_item(
+    order_id: OrderIdPath,
+    item_id: Annotated[UUID, Path(alias="itemId", description="Public order item identifier.")],
+    auth: Annotated[AuthContext, Depends(require_roles(*WAITER_ROLES))],
+    order_service: Annotated[OrderService, Depends(get_order_service)],
+    payload: RedoItemRequest | None = None,
+) -> OrderResponse:
+    """Return a delivered item to kitchen with a mandatory note (RF-22, OP-12)."""
+    order = await order_service.redo_order_item(
+        order_id,
+        item_id,
+        auth,
+        note=payload.note if payload else None,
+    )
     return OrderResponse.from_model(order)
