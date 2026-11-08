@@ -203,6 +203,36 @@ async def test_older_updated_at_is_ignored() -> None:
 
 
 @pytest.mark.asyncio
+async def test_updated_at_comparison_handles_timezone_offsets() -> None:
+    redis = AsyncMock()
+    redis.hgetall.return_value = {"updated_at": "2026-10-25T12:00:00+02:00"}
+
+    stored = await CatalogRepository(redis).upsert(
+        "dish-offset",
+        station="Kitchen",
+        updated_at="2026-10-25T09:30:00Z",
+    )
+
+    assert stored is False
+    redis.hset.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unparseable_updated_at_does_not_overwrite_cached_item() -> None:
+    redis = AsyncMock()
+    redis.hgetall.return_value = {"updated_at": "unknown-current-version"}
+
+    stored = await CatalogRepository(redis).upsert(
+        "dish-invalid-time",
+        station="Kitchen",
+        updated_at="2026-10-25T09:30:00Z",
+    )
+
+    assert stored is False
+    redis.hset.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_get_decodes_redis_bytes() -> None:
     redis = AsyncMock()
     redis.hgetall.return_value = {b"station": b"plancha", "available": b"true"}
@@ -272,3 +302,4 @@ async def test_catalog_consumer_projects_menu_offer_payload() -> None:
             "category": "plato fuerte",
         },
     )
+    

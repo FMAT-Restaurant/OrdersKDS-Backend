@@ -106,6 +106,7 @@ flowchart TB
         CACHE[(Redis: materialized view)]
         WORKER[Event Outbox Worker]
         CONS[Event Consumers]
+        CATALOG[Menu Catalog Reconciler]
         WATCH[Saga Timeout Watcher]
     end
 
@@ -120,6 +121,8 @@ flowchart TB
     DB -.polls.-> WORKER --> BROKER
     BROKER --> CONS --> REPO
     CONS --> CACHE
+    CATALOG -.startup and periodic HTTP snapshots.-> OTHERS
+    CATALOG --> CACHE
     WATCH -.detects expired orders.-> DB
     BROKER <--> OTHERS
     SVC -.push.-> API

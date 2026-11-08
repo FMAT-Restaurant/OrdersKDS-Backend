@@ -14,14 +14,19 @@ import os
 import signal
 import sys
 
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.cache.catalog import CatalogRepository, RedisHashAdapter
 from app.core.config import (
+    get_catalog_reconciliation_settings,
     get_outbox_worker_settings,
     get_rabbitmq_settings,
+    get_redis_url,
     get_saga_timeout_settings,
 )
 from app.messaging.publisher import EventPublisher
+from app.workers.catalog_reconciliation import CatalogReconciliationWorker
 from app.workers.outbox_worker import OutboxWorker
 from app.workers.saga_timeout_watcher import SagaTimeoutWatcher
 
@@ -47,6 +52,7 @@ async def main() -> None:
     rabbitmq_settings = get_rabbitmq_settings()
     worker_settings = get_outbox_worker_settings()
     saga_settings = get_saga_timeout_settings()
+    catalog_settings = get_catalog_reconciliation_settings()
 
     engine = create_async_engine(db_url, echo=False)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -58,6 +64,7 @@ async def main() -> None:
     )
 
     stop_event = asyncio.Event()
+    catalog_redis: Redis | None = None
 
     def _on_signal(*_: object) -> None:
         logger.info("Shutdown signal received, stopping workers...")
@@ -85,12 +92,23 @@ async def main() -> None:
             settings=saga_settings,
         )
 
-        await asyncio.gather(
+        workers = [
             outbox_worker.run(stop_event=stop_event),
             saga_watcher.run(stop_event=stop_event),
-        )
+        ]
+        if catalog_settings.sync_url is not None:
+            catalog_redis = Redis.from_url(get_redis_url(), decode_responses=True)
+            catalog_worker = CatalogReconciliationWorker(
+                CatalogRepository(RedisHashAdapter(catalog_redis)),
+                sync_url=catalog_settings.sync_url,
+                interval_seconds=catalog_settings.interval_seconds,
+            )
+            workers.append(catalog_worker.run(stop_event=stop_event))
+        await asyncio.gather(*workers)
     finally:
         logger.info("Cleaning up worker resources...")
+        if catalog_redis is not None:
+            await catalog_redis.aclose()
         await publisher.close()
         await engine.dispose()
         logger.info("Workers shut down successfully.")

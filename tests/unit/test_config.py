@@ -9,6 +9,7 @@ import pytest
 
 from app.core.config import (
     DEFAULT_SAGA_WATCHER_INTERVAL_SECONDS,
+    get_catalog_reconciliation_settings,
     get_outbox_worker_settings,
     get_rabbitmq_settings,
     get_saga_timeout_settings,
@@ -92,6 +93,69 @@ def test_outbox_worker_settings_defaults_and_overrides(
     fallback = get_outbox_worker_settings()
     assert fallback.poll_interval_seconds == 1.0
     assert fallback.batch_size == 100
+
+
+@pytest.mark.unit
+def test_catalog_reconciliation_settings_have_no_interval_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CATALOG_SYNC_URL", raising=False)
+    monkeypatch.delenv("CATALOG_RECONCILIATION_INTERVAL_SECONDS", raising=False)
+
+    settings = get_catalog_reconciliation_settings()
+
+    assert settings.sync_url is None
+    assert settings.interval_seconds is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("raw_interval", ["invalid", "0", "-5"])
+def test_catalog_reconciliation_settings_reject_invalid_interval(
+    monkeypatch: pytest.MonkeyPatch,
+    raw_interval: str,
+) -> None:
+    monkeypatch.setenv("CATALOG_SYNC_URL", "http://menu.example/menu/catalogo/completo")
+    monkeypatch.setenv("CATALOG_RECONCILIATION_INTERVAL_SECONDS", raw_interval)
+
+    with pytest.raises(RuntimeError, match="Invalid CATALOG_RECONCILIATION_INTERVAL_SECONDS"):
+        get_catalog_reconciliation_settings()
+
+
+@pytest.mark.unit
+def test_catalog_reconciliation_settings_requires_url_for_periodic_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CATALOG_SYNC_URL", raising=False)
+    monkeypatch.setenv("CATALOG_RECONCILIATION_INTERVAL_SECONDS", "30")
+
+    with pytest.raises(RuntimeError, match="CATALOG_SYNC_URL is required"):
+        get_catalog_reconciliation_settings()
+
+
+@pytest.mark.unit
+def test_catalog_reconciliation_settings_loads_explicit_frequency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CATALOG_SYNC_URL", "http://menu.example/menu/catalogo/completo")
+    monkeypatch.setenv("CATALOG_RECONCILIATION_INTERVAL_SECONDS", "30")
+
+    settings = get_catalog_reconciliation_settings()
+
+    assert settings.sync_url == "http://menu.example/menu/catalogo/completo"
+    assert settings.interval_seconds == 30
+
+
+@pytest.mark.unit
+def test_catalog_url_without_interval_enables_only_startup_bootstrap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CATALOG_SYNC_URL", "http://menu.example/menu/catalogo/completo")
+    monkeypatch.delenv("CATALOG_RECONCILIATION_INTERVAL_SECONDS", raising=False)
+
+    settings = get_catalog_reconciliation_settings()
+
+    assert settings.sync_url == "http://menu.example/menu/catalogo/completo"
+    assert settings.interval_seconds is None
 
 
 @pytest.mark.unit
