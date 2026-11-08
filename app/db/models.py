@@ -201,6 +201,12 @@ class OrderItem(Base):
         ensure_item_transition_allowed(self.status, ItemStatus.DELIVERED)
         self.status = ItemStatus.DELIVERED
 
+    def mark_pending_for_redo(self, note: str) -> None:
+        """Return a delivered item to kitchen with the waiter's explanation (RF-22)."""
+        ensure_item_transition_allowed(self.status, ItemStatus.PENDING)
+        self.status = ItemStatus.PENDING
+        self.notes = note
+
     def mark_cancelled(self) -> None:
         """Transition item to CANCELLED."""
         ensure_item_transition_allowed(self.status, ItemStatus.CANCELLED)

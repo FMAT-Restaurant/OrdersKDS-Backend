@@ -29,6 +29,18 @@ class MarkReadyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class RedoItemRequest(BaseModel):
+    """Payload for returning a delivered item to kitchen (RF-22, OP-12)."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    note: str | None = Field(
+        default=None,
+        max_length=500,
+        description="Mandatory explanation for redoing the delivered dish.",
+    )
+
+
 class KitchenRejectRequest(BaseModel):
     """Payload for kitchen rejecting an item due to physical lack of stock."""
 

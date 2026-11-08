@@ -38,6 +38,10 @@
       "minimum": 1,
       "description": "Quantity of the dish prepared."
     },
+    "isRedo": {
+      "type": "boolean",
+      "description": "Whether this preparation is an extraordinary redo."
+    },
     "correlationId": {
       "type": [
         "string",
