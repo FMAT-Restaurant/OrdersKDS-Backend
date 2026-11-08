@@ -1,0 +1,132 @@
+# Shared staging stack for the Orders & KDS integration environment.
+#
+# The host is a team-managed VM with Docker Engine and a restricted firewall.
+# All values are injected from the VM's untracked .env.staging file or from
+# GitHub Environments during deployment. Never commit that file.
+#
+# First deployment:
+#   docker compose --env-file .env.staging -f docker-compose.staging.yml up -d postgres redis rabbitmq
+#   docker compose --env-file .env.staging -f docker-compose.staging.yml --profile migrate run --rm migrate
+#   docker compose --env-file .env.staging -f docker-compose.staging.yml up -d api workers
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ordenes_staging}
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:?POSTGRES_SUPERUSER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?POSTGRES_SUPERUSER_PASSWORD is required}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:?POSTGRES_APP_USER is required}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD is required}
+      POSTGRES_MIGRATION_USER: ${POSTGRES_MIGRATION_USER:?POSTGRES_MIGRATION_USER is required}
+      POSTGRES_MIGRATION_PASSWORD: ${POSTGRES_MIGRATION_PASSWORD:?POSTGRES_MIGRATION_PASSWORD is required}
+      POSTGRES_READONLY_USER: ${POSTGRES_READONLY_USER:?POSTGRES_READONLY_USER is required}
+      POSTGRES_READONLY_PASSWORD: ${POSTGRES_READONLY_PASSWORD:?POSTGRES_READONLY_PASSWORD is required}
+    volumes:
+      - staging_postgres_data:/var/lib/postgresql/data
+      - ./ops/staging/postgres-init.sh:/docker-entrypoint-initdb.d/10-staging-roles.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"]
+    volumes:
+      - staging_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?RABBITMQ_USER is required}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:-staging}
+    ports:
+      - "${STAGING_RABBITMQ_PORT:-5672}:5672"
+      - "127.0.0.1:${STAGING_RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - staging_rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+
+  api:
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE is required}
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER}:${POSTGRES_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-ordenes_staging}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/${RABBITMQ_VHOST:-}
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-restaurant.topic}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/staging}
+      SAGA_TIMEOUT_SECONDS: ${SAGA_TIMEOUT_SECONDS:-60}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "${STAGING_API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health')\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  workers:
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE is required}
+    command: ["python", "-m", "app.workers.run_all"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER}:${POSTGRES_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-ordenes_staging}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/${RABBITMQ_VHOST:-}
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-restaurant.topic}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/staging}
+      SAGA_TIMEOUT_SECONDS: ${SAGA_TIMEOUT_SECONDS:-60}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      api:
+        condition: service_healthy
+
+  migrate:
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE is required}
+    profiles: ["migrate"]
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_MIGRATION_USER}:${POSTGRES_MIGRATION_PASSWORD}@postgres:5432/${POSTGRES_DB:-ordenes_staging}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  smoke:
+    image: ${BACKEND_IMAGE:?BACKEND_IMAGE is required}
+    profiles: ["smoke"]
+    command: ["python", "/opt/staging-smoke.py"]
+    environment:
+      API_HEALTH_URL: http://api:8000/health
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/${RABBITMQ_VHOST:-}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/staging}
+    depends_on:
+      api:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+volumes:
+  staging_postgres_data:
+  staging_redis_data:
+  staging_rabbitmq_data:

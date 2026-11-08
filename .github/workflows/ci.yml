@@ -324,7 +324,7 @@ jobs:
   build-and-push:
     name: Build & Push Docker Image
     needs: [sonarcloud, integration-tests, api-and-contract, zap-api-scan]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') && github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
