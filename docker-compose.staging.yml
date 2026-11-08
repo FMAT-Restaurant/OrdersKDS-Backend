@@ -68,7 +68,7 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/${RABBITMQ_VHOST:-}
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-restaurant.topic}
-      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/staging}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-staging}
       SAGA_TIMEOUT_SECONDS: ${SAGA_TIMEOUT_SECONDS:-60}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
@@ -95,7 +95,7 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/${RABBITMQ_VHOST:-}
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-restaurant.topic}
-      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/staging}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-staging}
       SAGA_TIMEOUT_SECONDS: ${SAGA_TIMEOUT_SECONDS:-60}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
@@ -119,7 +119,7 @@ services:
     environment:
       API_HEALTH_URL: http://api:8000/health
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/${RABBITMQ_VHOST:-}
-      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/staging}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-staging}
     depends_on:
       api:
         condition: service_healthy
