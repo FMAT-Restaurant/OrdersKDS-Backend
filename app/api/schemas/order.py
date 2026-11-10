@@ -220,7 +220,7 @@ class OrderItemResponse(BaseModel):
         now = datetime.now(UTC)
         item_id = item.public_id or uuid4()
         return cls(
-            id=str(item.id) if item.id is not None else str(item_id),
+            id=str(item_id),
             publicId=item_id,
             itemId=item_id,
             dishId=item.dish_id,
@@ -273,7 +273,7 @@ class OrderResponse(BaseModel):
         now = datetime.now(UTC)
         order_public_id = order.public_id or uuid4()
         return cls(
-            id=str(order.id) if order.id is not None else str(order_public_id),
+            id=str(order_public_id),
             publicId=order_public_id,
             orderId=order_public_id,
             tableNumber=order.table_number,
