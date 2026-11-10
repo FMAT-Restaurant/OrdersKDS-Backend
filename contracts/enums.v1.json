@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://restaurant.example.com/contracts/enums.v1.json",
+  "title": "OrdersKDSSharedEnums",
+  "type": "object",
+  "required": ["orderStatus", "itemStatus", "roles", "errorCode"],
+  "properties": {
+    "orderStatus": {
+      "type": "array",
+      "const": [
+        "CREATED",
+        "RESERVED",
+        "IN_PREPARATION",
+        "DELIVERED",
+        "PAID",
+        "CANCELLED",
+        "REJECTED",
+        "WASTED",
+        "VOIDED",
+        "EXPIRED"
+      ]
+    },
+    "itemStatus": {
+      "type": "array",
+      "const": ["PENDING", "READY", "DELIVERED", "CANCELLED"]
+    },
+    "roles": {
+      "type": "array",
+      "const": ["waiter", "kitchen", "chef", "admin"]
+    },
+    "errorCode": {
+      "type": "array",
+      "const": [
+        "VALIDATION_ERROR",
+        "UNAUTHENTICATED",
+        "FORBIDDEN_ROLE",
+        "ORDER_NOT_FOUND",
+        "INVALID_STATE_TRANSITION",
+        "VERSION_CONFLICT",
+        "NOTE_REQUIRED",
+        "DISH_UNAVAILABLE",
+        "INTERNAL_ERROR",
+        "FORBIDDEN_CHANNEL"
+      ]
+    }
+  }
+}

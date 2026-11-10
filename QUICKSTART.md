@@ -353,6 +353,120 @@ time).  In pgAdmin: *Register → Server*.
 > shared test data by accident.
 
 ---
+
+### §8 — Quick Test Environment Startup (Terminal & Docker Desktop)
+
+Use this step-by-step guide to start the entire backend environment from scratch, populate realistic test data (*seed*), and run manual functional tests using **PowerShell** and **Docker Desktop**.
+
+#### Step 1 — Start Docker Desktop
+1. Open the **Docker Desktop** application on your machine.
+2. Wait until the bottom-left status bar turns green and displays **Engine running**.
+3. Click on the **Containers** tab in the left sidebar to keep it visible; the project containers will appear here in Step 3.
+
+#### Step 2 — Open Terminal & Activate the Python Virtual Environment
+Open a **PowerShell** terminal and run the following commands in order:
+
+```powershell
+# 1. Navigate to the backend repository root
+cd C:\path\to\orders-backend
+
+# 2. (First time only) If .venv does not exist yet, run the bootstrap script:
+# .\scripts\bootstrap.ps1
+
+# 3. Activate the Python virtual environment (.venv)
+.\.venv\Scripts\Activate.ps1
+# Confirm that "(.venv)" appears at the beginning of your terminal prompt.
+
+# 4. Ensure the local .env file exists with Docker Compose defaults
+python scripts/setup_env.py
+```
+
+#### Step 3 — Start Infrastructure & Verify in Docker Desktop
+In the same terminal (with `(.venv)` active), start PostgreSQL, Redis, and RabbitMQ:
+
+```powershell
+# 1. Start the containers in the background
+docker compose up -d
+
+# 2. Check container health in the terminal
+docker compose ps
+```
+
+**How to verify in Docker Desktop:**
+1. Switch to **Docker Desktop → Containers**.
+2. Expand the `orders-backend` compose group.
+3. Verify that all three containers show a green status dot (**Running**):
+   - `ordenes-postgres` (Port `5432:5432`)
+   - `ordenes-redis` (Port `6379:6379`)
+   - `ordenes-rabbitmq` (Ports `5672:5672`, `15672:15672`)
+4. You can click any container name in Docker Desktop to view its live **Logs** or open its **Exec** terminal.
+
+#### Step 4 — Run Migrations & Seed Demo Data
+Because this microservice uses a choreographed Saga (orders only enter `RESERVED` / `IN_PREPARATION` after an Inventory event), an empty database has no active orders in the KDS queue. Run the migration and the demo seed script:
+
+```powershell
+# 1. Create or update all PostgreSQL tables (orders, order_items, outbox, processed_events)
+alembic upgrade head
+
+# 2. Populate Redis catalog and insert 4 demo orders across all lifecycle states
+python scripts/seed_demo.py
+
+# TIP: During testing or demos, run with --reset at any time to restore the 4 demo orders
+# back to their initial states:
+python scripts/seed_demo.py --reset
+```
+
+**Seeded Data Reference for Manual Testing:**
+
+| Order UUID (`orderId`) | Table | Initial Status | Main Item UUID (`itemId`) | What to test with this order |
+|---|---|---|---|---|
+| `11111111-1111-1111-1111-111111111111` | Table 5 | `RESERVED` | `11111111-0000-0000-0000-000000000001` | Visible in KDS Active queue. Test `PATCH /orders/{orderId}/start-preparation` or `kitchen-reject`. |
+| `22222222-2222-2222-2222-222222222222` | Table 12 | `IN_PREPARATION` | `22222222-0000-0000-0000-000000000001` | Visible in KDS Active queue. Test marking item ready (`PATCH .../ready`), Admin void (`PATCH .../void`), or Chef void (`PATCH .../void-kitchen-error`). |
+| `33333333-3333-3333-3333-333333333333` | Table 3 | `DELIVERED` | `33333333-0000-0000-0000-000000000001` | Visible in KDS Delivered tab (`view=delivered`). Test dish redo (`PATCH .../redo`) or bill settlement (`POST .../close-bill`). |
+| `44444444-4444-4444-4444-444444444444` | Table 8 | `CREATED` | `44444444-0000-0000-0000-000000000001` | Draft order. Test `PATCH /orders/{orderId}/items`, table transfer (`PATCH .../transfer`), confirm (`POST .../confirm`), or cancel (`PATCH .../cancel`). |
+
+*Redis Catalog (`dish_id` values):*
+- Available dishes: `dish-tacos`, `dish-horchata`, `dish-arrachera`, `dish-guacamole`, `dish-hamburguesa`, `dish-ensalada`.
+- Unavailable dish (returns `422 DISH_UNAVAILABLE`): `dish-agotado`.
+
+#### Step 5 — Generate Dev JWT Tokens & Start the API Server
+Still in your terminal (with `(.venv)` active):
+
+```powershell
+# 1. Generate 24-hour JWT tokens for each role to use in Swagger / Postman
+python scripts/dev_token.py --role waiter --ttl 86400
+python scripts/dev_token.py --role kitchen --ttl 86400
+python scripts/dev_token.py --role chef --ttl 86400
+python scripts/dev_token.py --role admin --ttl 86400
+
+# 2. Start the FastAPI server (listening on 0.0.0.0:8000 for local & LAN testing)
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+*(Optional)* If you also want the **Transactional Outbox Worker** and **Saga Timeout Watcher** running in the background, open a second PowerShell terminal, activate `.venv`, and run:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m app.workers.run_all
+```
+
+#### Step 6 — Run Manual Tests in Swagger UI & Inspect via Docker Desktop
+1. Open **`http://localhost:8000/docs`** in your browser.
+2. Click the green **Authorize** button at the top right, paste one of the JWT strings generated in Step 5 (only the token string, without the word `Bearer`), and click **Authorize**.
+3. Execute endpoints using the deterministic UUIDs from the table in Step 4 (e.g. `GET /orders` with `waiter`/`admin`, `GET /kds/queue` with `kitchen`/`chef`/`admin`).
+4. **Verify database changes directly inside Docker Desktop:**
+   - In **Docker Desktop → Containers**, click on `ordenes-postgres` and open the **Exec** tab.
+   - Run:
+     ```sql
+     psql -U ordenes -d ordenes -c "SELECT public_id, table_number, status, total_amount, version FROM orders ORDER BY table_number;"
+     ```
+   - Or inspect the `outbox` table to see events generated by your actions:
+     ```sql
+     psql -U ordenes -d ordenes -c "SELECT id, event_type, aggregate_id, published_at FROM outbox ORDER BY id;"
+     ```
+   - To inspect RabbitMQ queues visually, open **`http://localhost:15672`** (login with the local compose credentials defined in `.env`).
+
+---
 ---
 
 ## Versión en Español
@@ -673,3 +787,127 @@ En DBeaver: *Database → New Database Connection → PostgreSQL*, llena los cam
 | **Versión final (release)** | Desplegada desde `main` | El sistema liberado | Credenciales restringidas; no se usa para experimentos |
 
 > Usa el mismo cliente para inspeccionar la base de staging compartida creando una segunda conexión. Prefiere **credenciales de solo lectura** para que nadie altere los datos de prueba compartidos por accidente.
+
+---
+
+### §8 — Inicio de entorno rápido para pruebas manuales (Terminal y Docker Desktop)
+
+Esta sección describe **paso a paso desde cero** cómo levantar la infraestructura, activar el entorno de Python en la terminal, poblar datos de prueba (*seeds*), iniciar la API y verificar el funcionamiento usando **PowerShell** y **Docker Desktop**.
+
+#### Paso 1 — Iniciar y verificar Docker Desktop
+1. Abre la aplicación **Docker Desktop** en Windows (o macOS).
+2. Espera a que la esquina inferior izquierda se ponga en color verde y muestre el texto **Engine running**.
+3. En el menú lateral izquierdo de Docker Desktop, haz clic en **Containers** y déjalo abierto para visualizar los contenedores que se crearán en el Paso 3.
+
+#### Paso 2 — Abrir la Terminal y activar el entorno de Python (`.venv`)
+Abre una ventana de **PowerShell** y ejecuta los siguientes comandos en orden:
+
+```powershell
+# 1. Entrar a la carpeta raíz del repositorio backend
+cd C:\ruta\a\orders-backend
+
+# 2. (Solo la primera vez) Si aún no existe la carpeta .venv, ejecuta el bootstrap:
+# .\scripts\bootstrap.ps1
+
+# 3. Activar el entorno virtual de Python (.venv)
+.\.venv\Scripts\Activate.ps1
+# Verifica que aparezca el prefijo "(.venv)" al inicio de tu línea de comandos.
+
+# 4. Generar o verificar el archivo .env local con las variables de Docker Compose
+python scripts/setup_env.py
+```
+
+#### Paso 3 — Levantar los contenedores y comprobarlos en Docker Desktop y Terminal
+En la misma terminal (con `(.venv)` activo), levanta PostgreSQL, Redis y RabbitMQ:
+
+```powershell
+# 1. Levantar los contenedores en segundo plano
+docker compose up -d
+
+# 2. Verificar en la terminal que los 3 servicios estén en estado "healthy"
+docker compose ps
+```
+
+**Cómo comprobarlo paso a paso dentro de Docker Desktop:**
+1. Ve a la ventana de **Docker Desktop → Containers**.
+2. Despliega el grupo llamado `orders-backend`.
+3. Confirma que los 3 contenedores tengan el círculo verde (**Running**):
+   - `ordenes-postgres` (Puerto `5432:5432`)
+   - `ordenes-redis` (Puerto `6379:6379`)
+   - `ordenes-rabbitmq` (Puertos `5672:5672` y `15672:15672`)
+4. Desde Docker Desktop puedes hacer clic sobre cualquiera de los 3 contenedores para:
+   - Ver la pestaña **Logs** en tiempo real.
+   - Abrir la pestaña **Exec** (terminal interna del contenedor) o **Stats** (uso de CPU/RAM).
+
+#### Paso 4 — Ejecutar migraciones de PostgreSQL e inyectar los datos de prueba (*Seed*)
+Debido a que el microservicio implementa una Saga coreografiada (una orden solo pasa a `RESERVED` / `IN_PREPARATION` cuando el microservicio de Inventario emite `inventario.stock.reservado`), una base de datos recién migrada está vacía y no mostraría órdenes en la cola del KDS. Para solucionarlo durante pruebas manuales y demostraciones, ejecuta las migraciones seguidas del script `scripts/seed_demo.py`:
+
+```powershell
+# 1. Crear/actualizar las tablas en PostgreSQL (orders, order_items, outbox, processed_events)
+alembic upgrade head
+
+# 2. Inyectar el catálogo de platillos en Redis y 4 órdenes de prueba en PostgreSQL
+python scripts/seed_demo.py
+
+# TIP: Si durante las pruebas modificas, anulas o cancelas las órdenes y quieres
+# regresarlas a su estado original limpio, ejecuta en cualquier momento:
+python scripts/seed_demo.py --reset
+```
+
+**Tabla de referencia de los datos insertados por `seed_demo.py`:**
+
+| UUID de la Orden (`orderId`) | Mesa | Estado Inicial | UUID del Ítem Principal (`itemId`) | Qué probar con esta orden |
+|---|---|---|---|---|
+| `11111111-1111-1111-1111-111111111111` | Mesa 5 | `RESERVED` | `11111111-0000-0000-0000-000000000001` | Aparece en la cola activa del KDS (`GET /kds/queue`). Lista para probar iniciar preparación (`PATCH /orders/{orderId}/start-preparation`) o rechazo de cocina (`kitchen-reject`). |
+| `22222222-2222-2222-2222-222222222222` | Mesa 12 | `IN_PREPARATION` | `22222222-0000-0000-0000-000000000001` | Aparece en cocción en el KDS. Lista para probar marcar ítem como listo (`PATCH .../items/{itemId}/ready`), anulación administrativa con cargo (`PATCH .../void`, rol `admin`) o anulación por error de cocina sin cargo (`PATCH .../void-kitchen-error`, rol `chef`). |
+| `33333333-3333-3333-3333-333333333333` | Mesa 3 | `DELIVERED` | `33333333-0000-0000-0000-000000000001` | Aparece en la pestaña de entregadas (`GET /kds/queue?view=delivered`). Lista para probar rehechura de platillo (`PATCH .../items/{itemId}/redo`) o cierre de cuenta (`POST /orders/{orderId}/close-bill`). |
+| `44444444-4444-4444-4444-444444444444` | Mesa 8 | `CREATED` | `44444444-0000-0000-0000-000000000001` | Orden en borrador de mesero. Lista para probar edición de platillos (`PATCH /orders/{orderId}/items`), transferencia de mesa (`PATCH .../transfer`), confirmación (`POST .../confirm`) o cancelación (`PATCH .../cancel`). |
+
+*Platillos cargados en Redis (`dish_id`):*
+- **Disponibles (`available=true`):** `dish-tacos`, `dish-horchata`, `dish-arrachera`, `dish-guacamole`, `dish-hamburguesa`, `dish-ensalada`.
+- **Agotado (`available=false`):** `dish-agotado` (útil para probar que `PATCH /orders/{orderId}/items` rechaza platillos no disponibles con `422 DISH_UNAVAILABLE`).
+
+#### Paso 5 — Generar tokens JWT por rol y levantar el servidor de la API
+En la misma terminal (con `(.venv)` activo):
+
+```powershell
+# 1. Generar tokens JWT (válidos por 24 horas) para cada rol del sistema
+python scripts/dev_token.py --role waiter --ttl 86400
+python scripts/dev_token.py --role kitchen --ttl 86400
+python scripts/dev_token.py --role chef --ttl 86400
+python scripts/dev_token.py --role admin --ttl 86400
+
+# 2. Arrancar la API de FastAPI (expuesta en 0.0.0.0:8000 para pruebas locales o en red local)
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+*(Opcional)* Si deseas que también estén corriendo el **Event Outbox Worker** (que publica los eventos de la tabla `outbox` hacia RabbitMQ) y el **Saga Timeout Watcher** (que expira órdenes confirmadas sin respuesta de Inventario tras 60 s), abre una **segunda terminal de PowerShell**, activa `.venv` y ejecuta:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m app.workers.run_all
+```
+
+#### Paso 6 — Probar manualmente en Swagger UI (`/docs`) y verificar desde Docker Desktop
+1. Abre en tu navegador **`http://localhost:8000/docs`**.
+2. Haz clic en el botón verde **Authorize** (arriba a la derecha), pega el token JWT del rol que quieras probar (solo el código del token, **sin** la palabra `Bearer`) y haz clic en **Authorize**.
+3. Prueba los endpoints copiando y pegando los UUIDs de la tabla del Paso 4:
+   - Con token de **`waiter`** o **`admin`**: prueba `GET /orders`, `POST /orders`, `PATCH /orders/{orderId}/items`, `PATCH /orders/{orderId}/transfer`, `POST /orders/{orderId}/confirm`, `POST /orders/{orderId}/close-bill`.
+   - Con token de **`kitchen`**, **`chef`** o **`admin`**: prueba `GET /kds/queue`, `PATCH /orders/{orderId}/start-preparation`, `PATCH /orders/{orderId}/items/{itemId}/ready`.
+   - Con token de **`chef`** o **`admin`**: prueba `PATCH /orders/{orderId}/void-kitchen-error`.
+   - Con token de **`admin`**: prueba `PATCH /orders/{orderId}/void` (si intentas llamarlo con un token de `waiter` o `kitchen`, verificarás que responde `403 FORBIDDEN_ROLE`).
+4. **Cómo verificar en vivo los cambios desde Docker Desktop:**
+   - En **Docker Desktop → Containers**, haz clic sobre `ordenes-postgres` y entra a la pestaña **Exec**.
+   - Ejecuta este comando para ver cómo cambian los estados y versiones (`version`) de las órdenes en PostgreSQL:
+     ```sql
+     psql -U ordenes -d ordenes -c "SELECT public_id, table_number, status, total_amount, version FROM orders ORDER BY table_number;"
+     ```
+   - Ejecuta este comando para ver los eventos transaccionales escritos en la tabla `outbox`:
+     ```sql
+     psql -U ordenes -d ordenes -c "SELECT id, event_type, aggregate_id, published_at FROM outbox ORDER BY id;"
+     ```
+   - Ejecuta este comando en la pestaña **Exec** de `ordenes-redis` para inspeccionar el catálogo en caché:
+     ```sh
+     redis-cli keys "catalog:platillo:*"
+     ```
+   - Para ver las colas e intercambios de eventos en **RabbitMQ**, abre **`http://localhost:15672`** en el navegador e inicia sesión con el usuario y contraseña locales configurados en tu `.env`.
