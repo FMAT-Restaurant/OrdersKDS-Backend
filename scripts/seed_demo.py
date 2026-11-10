@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -240,7 +241,10 @@ def _build_demo_orders(now: datetime) -> list[Order]:
 
 async def _seed_redis_catalog() -> None:
     """Populate Redis with demo dish availability and metadata."""
-    redis = Redis.from_url(get_redis_url(), decode_responses=True)
+    # On Windows + Python 3.14 ProactorEventLoop, connecting to "localhost" tries IPv6 (::1)
+    # first, which can hang on Docker Desktop port forwarding. Prefer 127.0.0.1 for local URLs.
+    redis_url = get_redis_url().replace("://localhost:", "://127.0.0.1:")
+    redis = Redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=3.0)
     try:
         catalog_repo = CatalogRepository(_RedisHashAdapter(redis))
         for dish in DEMO_CATALOG:
@@ -260,6 +264,13 @@ async def seed_demo_data(*, reset: bool = False) -> None:
     """Insert demo catalog entries in Redis and demo orders in PostgreSQL."""
     load_dotenv()
     await _seed_redis_catalog()
+
+    # Also normalize localhost -> 127.0.0.1 in DATABASE_URL to avoid IPv6 timeouts on Windows
+    db_url = os.environ.get("DATABASE_URL", "")
+    if "://localhost:" in db_url or "@localhost:" in db_url:
+        os.environ["DATABASE_URL"] = db_url.replace("@localhost:", "@127.0.0.1:").replace(
+            "://localhost:", "://127.0.0.1:"
+        )
 
     session_factory = get_session_factory()
     now = datetime.now(UTC)

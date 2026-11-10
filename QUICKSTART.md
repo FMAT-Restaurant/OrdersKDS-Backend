@@ -356,7 +356,28 @@ time).  In pgAdmin: *Register → Server*.
 
 ### §8 — Quick Test Environment Startup (Terminal & Docker Desktop)
 
-Use this step-by-step guide to start the entire backend environment from scratch, populate realistic test data (*seed*), and run manual functional tests using **PowerShell** and **Docker Desktop**.
+Use this step-by-step guide to package the Docker image, start the entire backend environment from scratch, populate realistic test data (*seed*), and run manual functional tests using **PowerShell** and **Docker Desktop**.
+
+#### Step 0 — Packaging the Backend Docker Image (for Docker Desktop)
+To package the backend application (`Dockerfile`) into a container image visible in **Docker Desktop → Images** (and optionally run the API inside a container instead of local `uvicorn`):
+
+```powershell
+# 1. Navigate to the backend repository root
+cd C:\path\to\orders-backend
+
+# 2. Build (package) the Docker image from the Dockerfile
+docker build -t orders-backend:latest .
+
+# 3. Verify in Docker Desktop -> Images that "orders-backend:latest" appears.
+# (Optional) If you want to run the API itself inside a Docker container on port 8000
+# after running Steps 3 & 4 (instead of running uvicorn in the terminal):
+# docker rm -f orders-backend-api 2>$null
+# docker run -d --name orders-backend-api -p 8000:8000 --env-file .env `
+#   -e DATABASE_URL="postgresql+asyncpg://ordenes:ordenes@host.docker.internal:5432/ordenes" `
+#   -e REDIS_URL="redis://host.docker.internal:6379/0" `
+#   -e RABBITMQ_URL="amqp://ordenes:ordenes@host.docker.internal:5672/" `
+#   orders-backend:latest
+```
 
 #### Step 1 — Start Docker Desktop
 1. Open the **Docker Desktop** application on your machine.
@@ -792,7 +813,28 @@ En DBeaver: *Database → New Database Connection → PostgreSQL*, llena los cam
 
 ### §8 — Inicio de entorno rápido para pruebas manuales (Terminal y Docker Desktop)
 
-Esta sección describe **paso a paso desde cero** cómo levantar la infraestructura, activar el entorno de Python en la terminal, poblar datos de prueba (*seeds*), iniciar la API y verificar el funcionamiento usando **PowerShell** y **Docker Desktop**.
+Esta sección describe **paso a paso desde cero** cómo empaquetar la imagen Docker del backend, levantar la infraestructura, activar el entorno de Python en la terminal, poblar datos de prueba (*seeds*), iniciar la API y verificar el funcionamiento usando **PowerShell** y **Docker Desktop**.
+
+#### Paso 0 — Cómo empaquetar el contenedor Docker del Backend (para Docker Desktop)
+Si necesitas empaquetar la aplicación del backend a partir de su `Dockerfile` para mostrar la imagen o ejecutar el contenedor directamente en **Docker Desktop**:
+
+```powershell
+# 1. Entrar a la carpeta raíz del repositorio backend
+cd C:\ruta\a\orders-backend
+
+# 2. Empaquetar (construir) la imagen Docker del backend
+docker build -t orders-backend:latest .
+
+# 3. En Docker Desktop -> Images verás aparecer la imagen "orders-backend:latest".
+# (Opcional) Si después de correr los Pasos 3 y 4 deseas correr la API dentro de un
+# contenedor en Docker Desktop en lugar de usar uvicorn en la terminal:
+# docker rm -f orders-backend-api 2>$null
+# docker run -d --name orders-backend-api -p 8000:8000 --env-file .env `
+#   -e DATABASE_URL="postgresql+asyncpg://ordenes:ordenes@host.docker.internal:5432/ordenes" `
+#   -e REDIS_URL="redis://host.docker.internal:6379/0" `
+#   -e RABBITMQ_URL="amqp://ordenes:ordenes@host.docker.internal:5672/" `
+#   orders-backend:latest
+```
 
 #### Paso 1 — Iniciar y verificar Docker Desktop
 1. Abre la aplicación **Docker Desktop** en Windows (o macOS).
