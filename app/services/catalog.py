@@ -29,7 +29,14 @@ def normalize_station_name(name: str | None) -> str | None:
     return "".join(c for c in normalized if unicodedata.category(c) != "Mn")
 
 
-_CATALOG_MOCK_REGISTRY: dict[str, dict[str, str | None]] = {}
+_CATALOG_MOCK_REGISTRY: dict[str, dict[str, str | None]] = {
+    "dish-tacos": {"station": "Parrilla", "preparation_time_text": "12 min"},
+    "dish-horchata": {"station": "Barra", "preparation_time_text": "3 min"},
+    "dish-arrachera": {"station": "Parrilla", "preparation_time_text": "18 min"},
+    "dish-guacamole": {"station": "Fría", "preparation_time_text": "5 min"},
+    "dish-hamburguesa": {"station": "Parrilla", "preparation_time_text": "15 min"},
+    "dish-ensalada": {"station": "Fría", "preparation_time_text": "8 min"},
+}
 
 
 def register_catalog_mock(

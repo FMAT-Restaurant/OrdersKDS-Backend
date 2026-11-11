@@ -123,6 +123,10 @@ class OrderService:
         if auth.role not in KITCHEN_ROLES:
             raise ForbiddenRoleError("Role not allowed for kitchen action.")
 
+    def _verify_waiter_role(self, auth: AuthContext) -> None:
+        if auth.role not in WAITER_ROLES:
+            raise ForbiddenRoleError("Role not allowed for waiter action.")
+
     def _sync_delivery_if_all_ready(self, order: Order) -> bool:
         """Move order and all items to DELIVERED if every item is ready/delivered."""
         if not order.items:
@@ -158,7 +162,7 @@ class OrderService:
             if order.status != OrderStatus.IN_PREPARATION:
                 raise InvalidStateTransitionError(order.status, OrderStatus.DELIVERED)
         elif target_item.status == ItemStatus.PENDING:
-            if order.status != OrderStatus.IN_PREPARATION:
+            if order.status not in (OrderStatus.IN_PREPARATION, OrderStatus.DELIVERED):
                 raise InvalidStateTransitionError(order.status, OrderStatus.DELIVERED)
             target_item.mark_ready()
             self._outbox.add(
@@ -167,8 +171,11 @@ class OrderService:
                     target_item.public_id,
                     offer_id=target_item.dish_id,
                     quantity=target_item.quantity,
+                    is_redo=order.status == OrderStatus.DELIVERED,
                 )
             )
+            if order.status == OrderStatus.DELIVERED:
+                target_item.mark_delivered()
 
         delivered_now = self._sync_delivery_if_all_ready(order)
         self._orders.save(order)
@@ -177,6 +184,36 @@ class OrderService:
         await notify_item_changed(order, target_item, notifier=self._notifier)
         if delivered_now:
             await notify_order_changed(order, notifier=self._notifier)
+        return order
+
+    async def redo_order_item(
+        self,
+        order_id: UUID,
+        item_id: UUID,
+        auth: AuthContext,
+        *,
+        note: str | None,
+    ) -> Order:
+        """Return one delivered item to PENDING without changing its order (RF-22, OP-12)."""
+        self._verify_waiter_role(auth)
+        normalized_note = note.strip() if note is not None else ""
+        if not normalized_note:
+            raise NoteRequiredError()
+
+        order = await self._orders.get_by_public_id(order_id)
+        if order is None:
+            raise OrderNotFoundError(f"Order with id={order_id} not found.")
+
+        target_item = next((i for i in order.items if i.public_id == item_id), None)
+        if target_item is None:
+            raise OrderNotFoundError(f"Item with id={item_id} not found in order {order_id}.")
+        if order.status != OrderStatus.DELIVERED:
+            raise InvalidStateTransitionError(order.status, OrderStatus.DELIVERED)
+
+        target_item.mark_pending_for_redo(normalized_note)
+        self._orders.save(order)
+        await self._session.commit()
+        await notify_item_changed(order, target_item, notifier=self._notifier)
         return order
 
     async def mark_order_ready(

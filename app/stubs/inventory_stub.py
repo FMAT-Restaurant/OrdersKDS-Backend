@@ -211,6 +211,8 @@ class InventoryStub:
             "eventId": str(event_id),
             "orderId": order_id,
             "correlationId": str(correlation_id) if correlation_id else None,
+            "rejectedItems": [],
+            "reservedItems": [],
         }
 
         if self.settings.language_convention in (

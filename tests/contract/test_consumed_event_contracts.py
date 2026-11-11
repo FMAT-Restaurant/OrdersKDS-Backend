@@ -79,6 +79,8 @@ def test_stock_insufficient_schema_and_pydantic_compatibility() -> None:
         "eventId": event_id,
         "orderId": order_id,
         "faltantes": ["carne", "queso"],
+        "rejectedItems": [],
+        "reservedItems": [],
     }
 
     jsonschema.validate(instance=valid_payload, schema=schema)
