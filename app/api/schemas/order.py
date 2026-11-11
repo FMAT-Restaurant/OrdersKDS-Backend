@@ -169,6 +169,11 @@ class VoidOrderRequest(BaseModel):
         max_length=500,
         description="Optional administrative reason for voiding the order.",
     )
+    charge_customer: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("chargeCustomer", "charge_customer"),
+        description="Whether to request a charge to the customer for the wasted order.",
+    )
 
 
 class VoidKitchenErrorRequest(BaseModel):

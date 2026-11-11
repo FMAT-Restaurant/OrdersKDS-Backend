@@ -249,6 +249,28 @@ def test_void_order_with_reason_payload(
     assert resp_invalid.json()["error"]["code"] == ErrorCode.VALIDATION_ERROR.value
 
 
+def test_void_order_with_charge_customer_false(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Void order accepts chargeCustomer=false."""
+    order = Order(
+        public_id=uuid4(),
+        status=OrderStatus.IN_PREPARATION,
+        table_number=10,
+    )
+    test_db[order.public_id] = order
+
+    resp = client.patch(
+        f"/orders/{order.public_id}/void",
+        headers=auth_headers("admin"),
+        json={"reason": "Error de captura del mesero", "chargeCustomer": False},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "WASTED"
+
+
 def test_void_order_post_alias(
     client: TestClient,
     auth_headers: Callable[[str], dict[str, str]],

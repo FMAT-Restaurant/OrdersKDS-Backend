@@ -352,4 +352,21 @@ async def test_realtime_router_station_switching_and_reset() -> None:
     mock_ws.reset_mock()
     await _handle_incoming_text(mock_ws, json.dumps({"channel": "kds:all"}))
 
+    # Subscribe via channels list (OP-02 / ADR-0002)
+    mock_ws.reset_mock()
+    await _handle_incoming_text(
+        mock_ws, json.dumps({"type": "subscribe", "channels": ["kds:all"]})
+    )
+    mock_ws.send_json.assert_not_called()
+
+    # Waiter connection with automatic channels: idempotent re-subscription should succeed
+    waiter_ws = AsyncMock()
+    waiter_ctx = AuthContext(user_id="waiter-uuid-42", role=Role.WAITER)
+    await realtime_router.register(waiter_ws, waiter_ctx, "/ws/waiter")
+    await _handle_incoming_text(
+        waiter_ws,
+        json.dumps({"type": "subscribe", "channels": ["floor", "user:waiter-uuid-42"]}),
+    )
+    waiter_ws.send_json.assert_not_called()
+
     await realtime_router.reset()

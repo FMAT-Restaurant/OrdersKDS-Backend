@@ -381,10 +381,12 @@ async def void_order(
         InvalidStateTransitionError: If order is not in IN_PREPARATION status (409).
         ForbiddenRoleError: If caller is not admin (403).
     """
+    charge_customer = payload.charge_customer if payload is not None else True
     order = await order_service.void_order(
         order_id=order_id,
         auth=auth,
         reason=payload.reason if payload else None,
+        charge_customer=charge_customer,
     )
     return OrderResponse.from_model(order)
 
