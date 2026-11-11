@@ -49,6 +49,8 @@ DEMO_ORDER_IDS: tuple[UUID, ...] = (
     UUID("22222222-2222-2222-2222-222222222222"),
     UUID("33333333-3333-3333-3333-333333333333"),
     UUID("44444444-4444-4444-4444-444444444444"),
+    UUID("55555555-5555-5555-5555-555555555555"),
+    UUID("66666666-6666-6666-6666-666666666666"),
 )
 
 DEMO_CATALOG: tuple[dict[str, Any], ...] = (
@@ -237,7 +239,177 @@ def _build_demo_orders(now: datetime) -> list[Order]:
     )
     order_created.recalculate_total()
 
-    return [order_reserved, order_in_prep, order_delivered, order_created]
+    order_large_prep = Order(
+        public_id=UUID("55555555-5555-5555-5555-555555555555"),
+        table_number=5,
+        is_takeaway=False,
+        dining_session_id=DEFAULT_DINING_SESSION_ID,
+        status=OrderStatus.IN_PREPARATION,
+        confirmed_at=now - timedelta(minutes=10),
+        confirmed_by=DEFAULT_WAITER_ID,
+        stock_reserved_at=now - timedelta(minutes=9),
+        in_preparation_at=now - timedelta(minutes=8),
+        created_by=DEFAULT_WAITER_ID,
+        responsible_waiter_id=DEFAULT_WAITER_ID,
+        items=[
+            OrderItem(
+                public_id=UUID("55555555-0000-0000-0000-000000000001"),
+                dish_id="dish-hamburguesa",
+                name="Hamburguesa Clásica",
+                quantity=2,
+                unit_price=Decimal("165.00"),
+                modifiers=["Sin cebolla", "Queso extra"],
+                notes="Término 3/4",
+                status=ItemStatus.PENDING,
+            ),
+            OrderItem(
+                public_id=UUID("55555555-0000-0000-0000-000000000002"),
+                dish_id="dish-tacos",
+                name="Tacos de Ribeye (3 pzas)",
+                quantity=1,
+                unit_price=Decimal("120.00"),
+                modifiers=["Cebolla asada"],
+                notes=None,
+                status=ItemStatus.PENDING,
+            ),
+            OrderItem(
+                public_id=UUID("55555555-0000-0000-0000-000000000003"),
+                dish_id="dish-guacamole",
+                name="Guacamole con Totopos",
+                quantity=1,
+                unit_price=Decimal("95.00"),
+                modifiers=["Sin picante"],
+                notes=None,
+                status=ItemStatus.READY,
+            ),
+            OrderItem(
+                public_id=UUID("55555555-0000-0000-0000-000000000004"),
+                dish_id="dish-ensalada",
+                name="Ensalada de la Casa",
+                quantity=1,
+                unit_price=Decimal("110.00"),
+                modifiers=["Aderezo aparte"],
+                notes=None,
+                status=ItemStatus.PENDING,
+            ),
+            OrderItem(
+                public_id=UUID("55555555-0000-0000-0000-000000000005"),
+                dish_id="dish-horchata",
+                name="Agua de Horchata 1L",
+                quantity=2,
+                unit_price=Decimal("45.00"),
+                modifiers=["Poco hielo"],
+                notes=None,
+                status=ItemStatus.READY,
+            ),
+            OrderItem(
+                public_id=UUID("55555555-0000-0000-0000-000000000006"),
+                dish_id="dish-arrachera",
+                name="Arrachera Norteña 300g",
+                quantity=1,
+                unit_price=Decimal("290.00"),
+                modifiers=["Bien cocida"],
+                notes="Papas cambray",
+                status=ItemStatus.PENDING,
+            ),
+        ],
+    )
+    order_large_prep.recalculate_total()
+
+    order_huge_reserved = Order(
+        public_id=UUID("66666666-6666-6666-6666-666666666666"),
+        table_number=15,
+        is_takeaway=False,
+        dining_session_id=DEFAULT_DINING_SESSION_ID,
+        status=OrderStatus.RESERVED,
+        confirmed_at=now - timedelta(minutes=4),
+        confirmed_by=DEFAULT_WAITER_ID,
+        stock_reserved_at=now - timedelta(minutes=3),
+        created_by=DEFAULT_WAITER_ID,
+        responsible_waiter_id=DEFAULT_WAITER_ID,
+        items=[
+            OrderItem(
+                public_id=UUID("66666666-0000-0000-0000-000000000001"),
+                dish_id="dish-tacos",
+                name="Tacos de Ribeye (3 pzas)",
+                quantity=3,
+                unit_price=Decimal("120.00"),
+                modifiers=["Salsa habanera aparte"],
+                notes=None,
+                status=ItemStatus.PENDING,
+            ),
+            OrderItem(
+                public_id=UUID("66666666-0000-0000-0000-000000000002"),
+                dish_id="dish-hamburguesa",
+                name="Hamburguesa BBQ",
+                quantity=2,
+                unit_price=Decimal("165.00"),
+                modifiers=["Papas gajo"],
+                notes="Sin mostaza",
+                status=ItemStatus.PENDING,
+            ),
+            OrderItem(
+                public_id=UUID("66666666-0000-0000-0000-000000000003"),
+                dish_id="dish-arrachera",
+                name="Arrachera Especial 400g",
+                quantity=1,
+                unit_price=Decimal("290.00"),
+                modifiers=["Término medio"],
+                notes="Tortillas de maíz",
+                status=ItemStatus.PENDING,
+            ),
+            OrderItem(
+                public_id=UUID("66666666-0000-0000-0000-000000000004"),
+                dish_id="dish-guacamole",
+                name="Guacamole Rústico",
+                quantity=2,
+                unit_price=Decimal("95.00"),
+                modifiers=["Extra totopos"],
+                notes=None,
+                status=ItemStatus.PENDING,
+            ),
+            OrderItem(
+                public_id=UUID("66666666-0000-0000-0000-000000000005"),
+                dish_id="dish-ensalada",
+                name="Ensalada Griega",
+                quantity=1,
+                unit_price=Decimal("110.00"),
+                modifiers=[],
+                notes="Sin aceitunas",
+                status=ItemStatus.PENDING,
+            ),
+            OrderItem(
+                public_id=UUID("66666666-0000-0000-0000-000000000006"),
+                dish_id="dish-horchata",
+                name="Agua de Horchata 1L",
+                quantity=3,
+                unit_price=Decimal("45.00"),
+                modifiers=[],
+                notes=None,
+                status=ItemStatus.PENDING,
+            ),
+            OrderItem(
+                public_id=UUID("66666666-0000-0000-0000-000000000007"),
+                dish_id="dish-hamburguesa",
+                name="Hamburguesa Doble Queso",
+                quantity=1,
+                unit_price=Decimal("185.00"),
+                modifiers=["Pepinillos extra"],
+                notes=None,
+                status=ItemStatus.PENDING,
+            ),
+        ],
+    )
+    order_huge_reserved.recalculate_total()
+
+    return [
+        order_reserved,
+        order_in_prep,
+        order_large_prep,
+        order_huge_reserved,
+        order_delivered,
+        order_created,
+    ]
 
 
 async def _seed_redis_catalog() -> None:

@@ -251,6 +251,7 @@ class OrderResponse(BaseModel):
     status: OrderStatus
     version: int
     total_amount: Decimal = Field(alias="totalAmount")
+    order_number: int | None = Field(default=None, alias="orderNumber")
     items: list[OrderItemResponse] = Field(default_factory=list)
     confirmed_at: datetime | None = Field(default=None, alias="confirmedAt")
     confirmed_by: UUID | None = Field(default=None, alias="confirmedBy")
@@ -281,6 +282,7 @@ class OrderResponse(BaseModel):
             status=order.status or OrderStatus.CREATED,
             version=order.version if order.version is not None else 1,
             totalAmount=order.total_amount if order.total_amount is not None else Decimal("0.00"),
+            orderNumber=order.id if order.id is not None else None,
             items=(
                 items
                 if items is not None
