@@ -36,7 +36,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from app.cache.catalog import CatalogRepository  # noqa: E402
 from app.core.config import get_redis_url  # noqa: E402
-from app.db.models import Order, OrderItem  # noqa: E402
+from app.db.models import Order, OrderItem, Outbox, ProcessedEvent  # noqa: E402
 from app.db.session import get_engine, get_session_factory  # noqa: E402
 from app.domain.order_status import ItemStatus, OrderStatus  # noqa: E402
 from app.services.catalog import _RedisHashAdapter  # noqa: E402
@@ -119,9 +119,9 @@ def _build_demo_orders(now: datetime) -> list[Order]:
         is_takeaway=False,
         dining_session_id=DEFAULT_DINING_SESSION_ID,
         status=OrderStatus.RESERVED,
-        confirmed_at=now - timedelta(minutes=8),
+        confirmed_at=now - timedelta(minutes=4),
         confirmed_by=DEFAULT_WAITER_ID,
-        stock_reserved_at=now - timedelta(minutes=7),
+        stock_reserved_at=now - timedelta(minutes=3),
         created_by=DEFAULT_WAITER_ID,
         responsible_waiter_id=DEFAULT_WAITER_ID,
         items=[
@@ -155,10 +155,10 @@ def _build_demo_orders(now: datetime) -> list[Order]:
         is_takeaway=False,
         dining_session_id=DEFAULT_DINING_SESSION_ID,
         status=OrderStatus.IN_PREPARATION,
-        confirmed_at=now - timedelta(minutes=15),
+        confirmed_at=now - timedelta(minutes=5),
         confirmed_by=DEFAULT_WAITER_ID,
-        stock_reserved_at=now - timedelta(minutes=14),
-        in_preparation_at=now - timedelta(minutes=10),
+        stock_reserved_at=now - timedelta(minutes=4),
+        in_preparation_at=now - timedelta(minutes=3),
         created_by=DEFAULT_WAITER_ID,
         responsible_waiter_id=DEFAULT_WAITER_ID,
         items=[
@@ -192,10 +192,11 @@ def _build_demo_orders(now: datetime) -> list[Order]:
         is_takeaway=False,
         dining_session_id=DEFAULT_DINING_SESSION_ID,
         status=OrderStatus.DELIVERED,
-        confirmed_at=now - timedelta(minutes=30),
+        confirmed_at=now - timedelta(minutes=8),
         confirmed_by=DEFAULT_WAITER_ID,
-        stock_reserved_at=now - timedelta(minutes=29),
-        in_preparation_at=now - timedelta(minutes=25),
+        stock_reserved_at=now - timedelta(minutes=7),
+        in_preparation_at=now - timedelta(minutes=6),
+        updated_at=now - timedelta(minutes=2),
         created_by=DEFAULT_WAITER_ID,
         responsible_waiter_id=DEFAULT_WAITER_ID,
         items=[
@@ -279,6 +280,10 @@ async def seed_demo_data(*, reset: bool = False) -> None:
     try:
         async with session_factory() as session:
             if reset:
+                await session.execute(
+                    delete(ProcessedEvent).where(ProcessedEvent.order_id.in_(DEMO_ORDER_IDS))
+                )
+                await session.execute(delete(Outbox))
                 await session.execute(delete(Order).where(Order.public_id.in_(DEMO_ORDER_IDS)))
                 await session.commit()
 
