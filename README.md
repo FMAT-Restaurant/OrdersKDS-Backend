@@ -85,6 +85,16 @@ Key design rules:
 | **k6** | Load, stress and performance-regression tests |
 | **OWASP ZAP** | Dynamic security scanning (DAST) |
 
+### Shared staging environment
+
+The reproducible shared environment runs on a team-managed Linux VM with
+Docker. The API is published on VM port `8000`, RabbitMQ AMQP on `5672`, and
+the RabbitMQ management UI is private on `15672`. PostgreSQL (`ordenes_staging`)
+and Redis are internal services; team members use an SSH tunnel to connect
+with the read-only PostgreSQL role from DBeaver or pgAdmin. See
+[docs/STAGING.md](docs/STAGING.md) for deployment, migration ownership,
+GitHub Environments, ports, and the smoke test.
+
 ---
 
 ### Architecture Overview

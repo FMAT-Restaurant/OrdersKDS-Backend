@@ -6,7 +6,9 @@
   "type": "object",
   "required": [
     "eventId",
-    "orderId"
+    "orderId",
+    "rejectedItems",
+    "reservedItems"
   ],
   "properties": {
     "eventId": {

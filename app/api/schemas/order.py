@@ -29,6 +29,18 @@ class MarkReadyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class RedoItemRequest(BaseModel):
+    """Payload for returning a delivered item to kitchen (RF-22, OP-12)."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    note: str | None = Field(
+        default=None,
+        max_length=500,
+        description="Mandatory explanation for redoing the delivered dish.",
+    )
+
+
 class KitchenRejectRequest(BaseModel):
     """Payload for kitchen rejecting an item due to physical lack of stock."""
 
@@ -208,7 +220,7 @@ class OrderItemResponse(BaseModel):
         now = datetime.now(UTC)
         item_id = item.public_id or uuid4()
         return cls(
-            id=str(item.id) if item.id is not None else str(item_id),
+            id=str(item_id),
             publicId=item_id,
             itemId=item_id,
             dishId=item.dish_id,
@@ -239,6 +251,7 @@ class OrderResponse(BaseModel):
     status: OrderStatus
     version: int
     total_amount: Decimal = Field(alias="totalAmount")
+    order_number: int | None = Field(default=None, alias="orderNumber")
     items: list[OrderItemResponse] = Field(default_factory=list)
     confirmed_at: datetime | None = Field(default=None, alias="confirmedAt")
     confirmed_by: UUID | None = Field(default=None, alias="confirmedBy")
@@ -261,7 +274,7 @@ class OrderResponse(BaseModel):
         now = datetime.now(UTC)
         order_public_id = order.public_id or uuid4()
         return cls(
-            id=str(order.id) if order.id is not None else str(order_public_id),
+            id=str(order_public_id),
             publicId=order_public_id,
             orderId=order_public_id,
             tableNumber=order.table_number,
@@ -269,6 +282,7 @@ class OrderResponse(BaseModel):
             status=order.status or OrderStatus.CREATED,
             version=order.version if order.version is not None else 1,
             totalAmount=order.total_amount if order.total_amount is not None else Decimal("0.00"),
+            orderNumber=order.id if order.id is not None else None,
             items=(
                 items
                 if items is not None

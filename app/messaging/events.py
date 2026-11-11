@@ -199,6 +199,7 @@ class DishPreparedEvent(OrderEvent):
     item_id: UUID | None = Field(default=None, alias="itemId")
     offer_id: str | None = Field(default=None, alias="offerId")
     quantity: int = Field(default=1, gt=0, alias="quantity")
+    is_redo: bool = Field(default=False, alias="isRedo")
 
     @classmethod
     def for_item(
@@ -208,6 +209,7 @@ class DishPreparedEvent(OrderEvent):
         *,
         offer_id: str | None = None,
         quantity: int = 1,
+        is_redo: bool = False,
         correlation_id: UUID | None = None,
     ) -> DishPreparedEvent:
         """Build a repeatable event for an individual prepared dish/offer (RF-10)."""
@@ -217,6 +219,7 @@ class DishPreparedEvent(OrderEvent):
             itemId=item_id,
             offerId=offer_id,
             quantity=quantity,
+            isRedo=is_redo,
             correlationId=correlation_id,
         )
 
