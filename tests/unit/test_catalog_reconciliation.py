@@ -199,3 +199,133 @@ async def test_worker_bootstraps_then_reconciles_at_configured_interval() -> Non
         await worker.run(stop_event)
 
     assert call_count == 2
+
+
+@pytest.mark.unit
+def test_extract_items_validation_branches() -> None:
+    from app.workers.catalog_reconciliation import CatalogSnapshotError, _extract_items
+
+    with pytest.raises(CatalogSnapshotError, match="must be a JSON object"):
+        _extract_items(["not", "a", "mapping"])
+
+    with pytest.raises(CatalogSnapshotError, match="must contain an items list"):
+        _extract_items({"items": "not a list"})
+
+    with pytest.raises(
+        CatalogSnapshotError, match="Every Menu catalog item must be a JSON object"
+    ):
+        _extract_items({"items": ["string_instead_of_dict"]})
+
+    nested = _extract_items({"data": {"items": [{"id": "item-1"}]}})
+    assert len(nested) == 1
+    assert nested[0]["id"] == "item-1"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_reconcile_once_invalid_json_raises_catalog_snapshot_error() -> None:
+    from app.workers.catalog_reconciliation import CatalogSnapshotError
+
+    redis = InMemoryRedisHash()
+    repository = CatalogRepository(redis)
+    handler = httpx.MockTransport(
+        lambda _request: httpx.Response(
+            200,
+            text="invalid json <not json>",
+            headers={"content-type": "application/json"},
+        )
+    )
+
+    async with httpx.AsyncClient(transport=handler) as client:
+        worker = CatalogReconciliationWorker(
+            repository,
+            sync_url="http://menu.example/menu/catalogo/completo",
+            interval_seconds=None,
+        )
+        with pytest.raises(CatalogSnapshotError, match="Menu returned invalid JSON"):
+            await worker.reconcile_once(client)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_discrepancy_alert_logged_and_item_without_id_handled(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    redis = InMemoryRedisHash()
+    repository = CatalogRepository(redis)
+    # Item without any ID field will fail projection in CatalogConsumer
+    handler = httpx.MockTransport(
+        lambda _request: httpx.Response(
+            200,
+            json={"items": [{"name": "No ID Item", "status": "ACTIVE"}]},
+        )
+    )
+
+    async with httpx.AsyncClient(transport=handler) as client:
+        worker = CatalogReconciliationWorker(
+            repository,
+            sync_url="http://menu.example/menu/catalogo/completo",
+            interval_seconds=None,
+        )
+        with caplog.at_level("WARNING"):
+            updated, discrepancies = await worker.reconcile_once(client)
+
+    assert updated == 0
+    assert discrepancies == 1
+    assert "exceeding alert threshold" in caplog.text
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_worker_run_creates_own_http_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    redis = InMemoryRedisHash()
+    repository = CatalogRepository(redis)
+    handler = httpx.MockTransport(lambda _request: httpx.Response(200, json={"items": []}))
+
+    from typing import Any
+
+    original_client_init = httpx.AsyncClient.__init__
+
+    def patched_init(self: httpx.AsyncClient, *args: Any, **kwargs: Any) -> None:
+        kwargs["transport"] = handler
+        original_client_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", patched_init)
+
+    worker = CatalogReconciliationWorker(
+        repository,
+        sync_url="http://menu.example/menu/catalogo/completo",
+        interval_seconds=None,
+    )
+    # Should run with its own created client and terminate cleanly
+    await worker.run()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_worker_run_with_none_stop_event_terminates_after_sleep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    redis = InMemoryRedisHash()
+    repository = CatalogRepository(redis)
+    handler = httpx.MockTransport(lambda _request: httpx.Response(200, json={"items": []}))
+
+    call_count = 0
+
+    async def mock_sleep(_duration: float) -> None:
+        nonlocal call_count
+        call_count += 1
+        worker._interval_seconds = None  # Stop the loop
+
+    monkeypatch.setattr(asyncio, "sleep", mock_sleep)
+
+    async with httpx.AsyncClient(transport=handler) as client:
+        worker = CatalogReconciliationWorker(
+            repository,
+            sync_url="http://menu.example/menu/catalogo/completo",
+            interval_seconds=1,
+            http_client=client,
+        )
+        await worker.run(stop_event=None)
+
+    assert call_count == 1

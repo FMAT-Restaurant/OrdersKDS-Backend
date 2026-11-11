@@ -233,6 +233,42 @@ async def test_unparseable_updated_at_does_not_overwrite_cached_item() -> None:
 
 
 @pytest.mark.asyncio
+async def test_naive_timestamp_updated_at_parses_to_utc() -> None:
+    redis = AsyncMock()
+    # Cache has a timestamp without timezone suffix (naive ISO format)
+    redis.hgetall.return_value = {"updated_at": "2026-10-25T12:00:00"}
+
+    # Incoming timestamp is older
+    stored = await CatalogRepository(redis).upsert(
+        "dish-naive",
+        station="Kitchen",
+        updated_at="2026-10-25T11:00:00Z",
+    )
+
+    assert stored is False
+    redis.hset.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_redis_hash_adapter_methods() -> None:
+    from app.cache.catalog import RedisHashAdapter
+
+    mock_redis = AsyncMock()
+    mock_redis.hgetall.return_value = {"key": "val"}
+    mock_redis.hset.return_value = 1
+
+    adapter = RedisHashAdapter(mock_redis)
+
+    res_get = await adapter.hgetall("cat:1")
+    assert res_get == {"key": "val"}
+    mock_redis.hgetall.assert_awaited_once_with("cat:1")
+
+    res_set = await adapter.hset("cat:1", {"key": "val2"})
+    assert res_set == 1
+    mock_redis.hset.assert_awaited_once_with("cat:1", mapping={"key": "val2"})
+
+
+@pytest.mark.asyncio
 async def test_get_decodes_redis_bytes() -> None:
     redis = AsyncMock()
     redis.hgetall.return_value = {b"station": b"plancha", "available": b"true"}
