@@ -12,6 +12,22 @@ Full setup instructions are in [README.md](README.md); the contributing
 workflow is in [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).  A basic guide
 (in Spanish) on how Docker works locally and the cloud scope (TASK-38) is in
 [docs/GUIA_DOCKER.md](docs/GUIA_DOCKER.md).
+The shared staging runbook is in [docs/STAGING.md](docs/STAGING.md).
+
+### Shared staging quick reference
+
+| Service | Staging endpoint/port | Access |
+|---|---|---|
+| Orders API | `https://staging.<team-domain>` / VM `8000` | Team and integration services |
+| PostgreSQL | SSH tunnel `127.0.0.1:15432` → VM `5432` | `POSTGRES_READONLY_USER` only |
+| RabbitMQ AMQP | VM `5672` | Integration network |
+| RabbitMQ management | SSH tunnel `127.0.0.1:15672` → VM `15672` | Maintainers |
+| Redis | Docker network | API/workers only |
+
+Staging uses `ghcr.io/fmat-restaurant/orderskds-backend:develop`. The
+database is `ordenes_staging`; production uses separate volumes, credentials,
+and GitHub Environment secrets. Do not replace the documented placeholder
+hostname with an unverified URL.
 
 ---
 
