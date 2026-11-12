@@ -333,6 +333,8 @@ class OrderService:
             order_id=order.public_id,
             item_id=target_item.public_id,
             offer_id=dish_id,
+            plate_id=dish_id,
+            source_id=dish_id,
             quantity=target_item.quantity,
             reason=reason,
         )

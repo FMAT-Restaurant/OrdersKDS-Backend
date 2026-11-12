@@ -35,6 +35,7 @@ class EventName(StrEnum):
 
     # Published events
     ORDER_CREATED = "ordenes.orden.creada"
+    ORDER_CONFIRMED = "ordenes.order.confirmed"
     ORDER_IN_PREPARATION = "ordenes.orden.en_preparacion"
     KITCHEN_DISH_REJECTED = "ordenes.platillo.rechazado_cocina"
     ORDER_CANCELLED = "ordenes.orden.cancelada"
@@ -43,6 +44,9 @@ class EventName(StrEnum):
     CHARGE_REQUESTED = "ordenes.cobro.solicitado"
     BILL_REQUESTED = "ordenes.cuenta.solicitada"
     ORDER_EXPIRED = "ordenes.orden.expirada"
+    ORDER_CREATED_EN = "ordenes.order.created"
+    ORDER_CANCELLED_EN = "ordenes.order.cancelled"
+    ORDER_SERVED_EN = "ordenes.order.served"
     MENU_DISH_PRICE_UPDATED = "menu.platillo.precio_actualizado"
     MENU_CATALOG_UPDATED = "menu.catalogo.actualizado"
     MENU_DISH_AVAILABILITY_UPDATED = "menu.platillo.disponibilidad_actualizada"
@@ -55,6 +59,8 @@ class EventName(StrEnum):
     # Consumed events
     STOCK_RESERVED = "inventario.stock.reservado"
     STOCK_INSUFFICIENT = "inventario.stock.insuficiente"
+    STOCK_RESERVED_EN = "inventory.reservation.confirmed"
+    STOCK_INSUFFICIENT_EN = "inventory.reservation.rejected"
     PAYMENT_COMPLETED = "pagos.pago.completado"
     DINING_SESSION_STARTED = "sala.dining_session.iniciada"
 
@@ -92,7 +98,16 @@ class OrderCreatedItem(BaseModel):
 
     offer_id: str = Field(
         alias="offerId",
-        validation_alias=AliasChoices("offerId", "offer_id", "plateId", "plate_id"),
+        validation_alias=AliasChoices(
+            "offerId",
+            "offer_id",
+            "plateId",
+            "plate_id",
+            "itemId",
+            "item_id",
+            "sourceId",
+            "source_id",
+        ),
         serialization_alias="offerId",
         min_length=1,
     )
@@ -100,7 +115,17 @@ class OrderCreatedItem(BaseModel):
 
     @property
     def plate_id(self) -> str:
-        """Backward-compatible property alias for offer_id."""
+        """Universal property alias for offer_id matching inventory plate conventions."""
+        return self.offer_id
+
+    @property
+    def source_id(self) -> str:
+        """Universal property alias for offer_id matching inventory source conventions."""
+        return self.offer_id
+
+    @property
+    def item_id(self) -> str:
+        """Universal property alias for offer_id matching inventory item conventions."""
         return self.offer_id
 
 
@@ -132,10 +157,32 @@ class OrderCreatedEvent(OrderEvent):
         )
 
 
+class OrderConfirmedEvent(OrderEvent):
+    """Event emitted when order reservation is confirmed by inventory (moves to RESERVED)."""
+
+    event_name: ClassVar[EventName] = EventName.ORDER_CONFIRMED
+
+    @classmethod
+    def for_order(
+        cls,
+        order_id: UUID,
+        *,
+        correlation_id: UUID | None = None,
+    ) -> OrderConfirmedEvent:
+        """Build the deterministic order confirmed event."""
+        event_id = uuid5(NAMESPACE_URL, f"{cls.event_name}:{order_id}")
+        return cls(
+            eventId=event_id,
+            orderId=order_id,
+            correlationId=correlation_id,
+        )
+
+
 class OrderInPreparationEvent(OrderEvent):
     """Event emitted when kitchen starts order preparation (moves to IN_PREPARATION)."""
 
     event_name: ClassVar[EventName] = EventName.ORDER_IN_PREPARATION
+    reason: str = Field(default="Started preparation in kitchen", alias="reason")
     items: list[OrderCreatedItem] = Field(default_factory=list, alias="items")
 
     @classmethod
@@ -164,8 +211,31 @@ class KitchenDishRejectedEvent(OrderEvent):
 
     item_id: UUID = Field(alias="itemId")
     offer_id: str = Field(alias="offerId")
+    plate_id: str | None = Field(
+        default=None,
+        alias="plateId",
+        validation_alias=AliasChoices("plateId", "plate_id"),
+        serialization_alias="plateId",
+    )
+    source_id: str | None = Field(
+        default=None,
+        alias="sourceId",
+        validation_alias=AliasChoices("sourceId", "source_id"),
+        serialization_alias="sourceId",
+    )
     quantity: int = Field(alias="quantity", gt=0)
     reason: str = Field(alias="reason", min_length=1)
+    motivo: str | None = Field(default=None, alias="motivo")
+
+    @model_validator(mode="after")
+    def _populate_aliases(self) -> Self:
+        if self.plate_id is None:
+            self.plate_id = self.offer_id
+        if self.source_id is None:
+            self.source_id = self.offer_id
+        if self.motivo is None:
+            self.motivo = self.reason
+        return self
 
     @classmethod
     def for_item(
@@ -176,16 +246,23 @@ class KitchenDishRejectedEvent(OrderEvent):
         offer_id: str,
         quantity: int,
         reason: str,
+        plate_id: str | None = None,
+        source_id: str | None = None,
         correlation_id: UUID | None = None,
     ) -> KitchenDishRejectedEvent:
         """Build a repeatable event for item rejected by kitchen."""
+        effective_plate_id = plate_id or source_id or offer_id
+        effective_source_id = source_id or plate_id or offer_id
         return cls(
             eventId=uuid4(),
             orderId=order_id,
             itemId=item_id,
             offerId=offer_id,
+            plateId=effective_plate_id,
+            sourceId=effective_source_id,
             quantity=quantity,
             reason=reason,
+            motivo=reason,
             correlationId=correlation_id,
         )
 
@@ -267,6 +344,7 @@ class OrderCancelledEvent(OrderEvent):
     """
 
     event_name: ClassVar[EventName] = EventName.ORDER_CANCELLED
+    reason: str = Field(default="Order cancelled", alias="reason")
     items_cancelled: list[OrderCreatedItem] = Field(
         default_factory=list,
         alias="itemsCancelados",
@@ -280,6 +358,7 @@ class OrderCancelledEvent(OrderEvent):
         order_id: UUID,
         *,
         items: list[OrderCreatedItem] | None = None,
+        reason: str = "Order cancelled",
         correlation_id: UUID | None = None,
     ) -> OrderCancelledEvent:
         """Build the deterministic cancellation event for an order."""
@@ -288,6 +367,7 @@ class OrderCancelledEvent(OrderEvent):
             eventId=event_id,
             orderId=order_id,
             correlationId=correlation_id,
+            reason=reason,
             itemsCancelados=items or [],
         )
 
@@ -456,12 +536,17 @@ class StockReservedMessage(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    event_id: UUID = Field(alias="eventId")
-    order_id: UUID = Field(alias="orderId")
+    event_id: UUID = Field(
+        default_factory=uuid4,
+        validation_alias=AliasChoices("eventId", "event_id", "id"),
+    )
+    order_id: UUID = Field(
+        validation_alias=AliasChoices("orderId", "order_id", "id"),
+    )
     correlation_id: UUID | None = Field(default=None, alias="correlationId")
     reservations: list[dict[str, object] | str] = Field(
         default_factory=list[dict[str, object] | str],
-        alias="reservas",
+        validation_alias=AliasChoices("reservas", "reservations", "items"),
     )
 
 
@@ -471,20 +556,46 @@ class RejectedItemDetail(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
     offer_id: str = Field(
-        validation_alias=AliasChoices("offerId", "offer_id", "plateId", "plate_id", "dishId"),
+        validation_alias=AliasChoices(
+            "offerId",
+            "offer_id",
+            "plateId",
+            "plate_id",
+            "dishId",
+            "itemId",
+            "item_id",
+            "sourceId",
+            "source_id",
+        ),
         serialization_alias="offerId",
+    )
+    item_name: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("itemName", "item_name", "name", "nombre"),
+        serialization_alias="itemName",
     )
     requested_quantity: int | None = Field(
         default=None,
         validation_alias=AliasChoices(
-            "requestedQuantity", "requested_quantity", "requested", "solicitado"
+            "requestedQuantity",
+            "requested_quantity",
+            "requested",
+            "solicitado",
+            "quantity",
+            "cantidad",
         ),
         serialization_alias="requestedQuantity",
     )
     available_quantity: int = Field(
         default=0,
         validation_alias=AliasChoices(
-            "availableQuantity", "available_quantity", "available", "disponible"
+            "availableQuantity",
+            "available_quantity",
+            "available",
+            "disponible",
+            "availableStock",
+            "available_stock",
+            "stockDisponible",
         ),
         serialization_alias="availableQuantity",
     )
@@ -495,16 +606,27 @@ class StockInsufficientMessage(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    event_id: UUID = Field(alias="eventId")
-    order_id: UUID = Field(alias="orderId")
+    event_id: UUID = Field(
+        default_factory=uuid4,
+        validation_alias=AliasChoices("eventId", "event_id", "id"),
+    )
+    order_id: UUID = Field(
+        validation_alias=AliasChoices("orderId", "order_id", "id"),
+    )
     correlation_id: UUID | None = Field(default=None, alias="correlationId")
+    reason: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("reason", "motivo", "error", "mensaje"),
+    )
     missing_ingredients: list[str] = Field(
         default_factory=list,
         validation_alias=AliasChoices("faltantes", "missingIngredients", "missing_ingredients"),
     )
     rejected_items: list[RejectedItemDetail] = Field(
         default_factory=list,
-        validation_alias=AliasChoices("rejectedItems", "rejected_items", "itemsRechazados"),
+        validation_alias=AliasChoices(
+            "rejectedItems", "rejected_items", "itemsRechazados", "items"
+        ),
     )
     reserved_items: list[OrderCreatedItem] = Field(
         default_factory=list,

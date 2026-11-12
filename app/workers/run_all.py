@@ -26,8 +26,10 @@ from app.core.config import (
     get_redis_url,
     get_saga_timeout_settings,
 )
+from app.messaging.consumers.base import EventConsumerDispatcher
 from app.messaging.publisher import EventPublisher
 from app.workers.catalog_reconciliation import CatalogReconciliationWorker
+from app.workers.inbound_consumer import InboundConsumerWorker
 from app.workers.outbox_worker import OutboxWorker
 from app.workers.saga_timeout_watcher import SagaTimeoutWatcher
 
@@ -64,6 +66,7 @@ async def main() -> None:
         url=rabbitmq_settings.url,
         exchange_name=rabbitmq_settings.exchange,
         vhost=rabbitmq_settings.vhost,
+        dual_routing=True,
     )
 
     stop_event = asyncio.Event()
@@ -95,10 +98,19 @@ async def main() -> None:
             session_factory=session_factory,
             settings=saga_settings,
         )
+        dispatcher = EventConsumerDispatcher(
+            session_factory=session_factory,
+        )
+        inbound_worker = InboundConsumerWorker(
+            dispatcher=dispatcher,
+            url=rabbitmq_settings.url,
+            vhost=rabbitmq_settings.vhost,
+        )
 
         workers = [
             outbox_worker.run(stop_event=stop_event),
             saga_watcher.run(stop_event=stop_event),
+            inbound_worker.run(stop_event=stop_event),
         ]
         if catalog_settings.sync_url is not None:
             catalog_redis = Redis.from_url(get_redis_url(), decode_responses=True)

@@ -56,6 +56,18 @@
             "type": "string",
             "minLength": 1
           },
+          "plateId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "itemId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourceId": {
+            "type": "string",
+            "minLength": 1
+          },
           "quantity": {
             "type": "integer",
             "minimum": 1

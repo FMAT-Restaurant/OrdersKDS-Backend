@@ -6,6 +6,8 @@ Satisfies: RNF-01, RNF-13, RF-10, RF-19, OP-10
 from __future__ import annotations
 
 import json
+import logging
+import os
 from collections.abc import Mapping
 from types import TracebackType
 from uuid import UUID
@@ -18,6 +20,41 @@ from aio_pika.abc import (
 )
 
 from app.messaging.validator import validate_event_payload
+
+logger = logging.getLogger(__name__)
+
+_DUAL_ROUTING_KEY_MAP: dict[str, tuple[str, ...]] = {
+    "ordenes.orden.creada": ("ordenes.order.created",),
+    "ordenes.orden.cancelada": ("ordenes.order.cancelled",),
+    "ordenes.orden.expirada": ("ordenes.order.cancelled",),
+    "ordenes.orden.en_preparacion": ("ordenes.order.served", "ordenes.order.in_preparation"),
+}
+
+
+def _enrich_payload_for_inventory(payload: Mapping[str, object]) -> dict[str, object]:
+    """Ensure items in payload contain plateId and itemId for inventory compatibility."""
+    enriched = dict(payload)
+    items = enriched.get("items")
+    if isinstance(items, list):
+        enriched_items: list[dict[str, object]] = []
+        for item in items:
+            if isinstance(item, dict):
+                item_copy = dict(item)
+                oid = str(
+                    item_copy.get("offerId")
+                    or item_copy.get("plateId")
+                    or item_copy.get("itemId")
+                    or ""
+                )
+                if oid:
+                    item_copy.setdefault("plateId", oid)
+                    item_copy.setdefault("itemId", oid)
+                    item_copy.setdefault("sourceId", oid)
+                enriched_items.append(item_copy)
+            else:
+                enriched_items.append(item)
+        enriched["items"] = enriched_items
+    return enriched
 
 
 class EventPublishError(RuntimeError):
@@ -32,6 +69,7 @@ class EventPublisher:
         url: str,
         exchange_name: str,
         vhost: str,
+        dual_routing: bool = False,
     ) -> None:
         """Initialize publisher settings.
 
@@ -39,6 +77,7 @@ class EventPublisher:
             url: RabbitMQ connection string.
             exchange_name: Name of the topic exchange.
             vhost: Virtual host to connect to.
+            dual_routing: Whether to emit secondary routing keys for inter-service integration.
 
         Raises:
             ValueError: If url, exchange_name or vhost is empty.
@@ -53,6 +92,10 @@ class EventPublisher:
         self._url = url.strip()
         self._exchange_name = exchange_name.strip()
         self._vhost = vhost.strip()
+        self._dual_routing = (
+            dual_routing
+            or os.getenv("RABBITMQ_DUAL_ROUTING", "").strip().lower() in ("true", "1", "yes")
+        )
         self._connection: AbstractRobustConnection | None = None
         self._channel: AbstractRobustChannel | None = None
         self._exchange: AbstractRobustExchange | None = None
@@ -147,6 +190,22 @@ class EventPublisher:
                 routing_key=event_type,
                 mandatory=mandatory,
             )
+            if self._dual_routing:
+                dual_payload = _enrich_payload_for_inventory(payload)
+                dual_body = json.dumps(dual_payload).encode("utf-8")
+                for dual_rk in _DUAL_ROUTING_KEY_MAP.get(event_type, ()):
+                    dual_msg = aio_pika.Message(
+                        body=dual_body,
+                        delivery_mode=message.delivery_mode,
+                        content_type=message.content_type,
+                        message_id=str(event_id),
+                        correlation_id=str(correlation_id) if correlation_id is not None else None,
+                    )
+                    await self._exchange.publish(
+                        message=dual_msg,
+                        routing_key=dual_rk,
+                        mandatory=False,
+                    )
         except Exception as exc:
             raise EventPublishError(
                 f"Broker rejected or failed to confirm event '{event_id}': {exc}"

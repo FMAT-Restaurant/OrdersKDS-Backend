@@ -20,6 +20,16 @@ class EventContractError(RuntimeError):
 _DEFAULT_SCHEMA_DIR = Path(__file__).resolve().parents[2] / "contracts" / "events"
 _SCHEMA_CACHE: dict[str, dict[str, object]] = {}
 
+_SCHEMA_ALIASES: dict[str, str] = {
+    "ordenes.order.created": "ordenes.orden.creada",
+    "ordenes.order.confirmed": "ordenes.order.confirmed",
+    "ordenes.order.cancelled": "ordenes.orden.cancelada",
+    "ordenes.order.in_preparation": "ordenes.orden.en_preparacion",
+    "ordenes.order.served": "ordenes.orden.en_preparacion",
+    "inventory.reservation.confirmed": "inventario.stock.reservado",
+    "inventory.reservation.rejected": "inventario.stock.insuficiente",
+}
+
 
 def _resolve_schema_path(event_type: str, schema_dir: Path) -> Path:
     """Find the JSON schema file for the given event type.
@@ -34,10 +44,11 @@ def _resolve_schema_path(event_type: str, schema_dir: Path) -> Path:
     Raises:
         EventContractError: If no matching schema file is found.
     """
-    versioned = schema_dir / f"{event_type}.v1.json"
+    effective_event_type = _SCHEMA_ALIASES.get(event_type, event_type)
+    versioned = schema_dir / f"{effective_event_type}.v1.json"
     if versioned.is_file():
         return versioned
-    plain = schema_dir / f"{event_type}.json"
+    plain = schema_dir / f"{effective_event_type}.json"
     if plain.is_file():
         return plain
     raise EventContractError(f"No schema contract found for event type: '{event_type}'")

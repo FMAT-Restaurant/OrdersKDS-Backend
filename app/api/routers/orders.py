@@ -260,7 +260,9 @@ async def update_order_items(
 
     for item_input in payload.items:
         effective_dish_id = (
-            item_input.dish_id
+            item_input.source_id
+            or item_input.dish_id
+            or item_input.offer_id
             or next(
                 (
                     it.dish_id

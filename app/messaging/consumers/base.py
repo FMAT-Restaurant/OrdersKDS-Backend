@@ -105,6 +105,12 @@ def _resolve_target_event(
     for key in ("eventType", "event_type"):
         if key in parsed_data:
             return str(parsed_data[key])
+    status = str(parsed_data.get("status", "")).lower()
+    has_order = "orderId" in parsed_data or "order_id" in parsed_data
+    if status == "confirmed" and has_order:
+        return str(EventName.STOCK_RESERVED)
+    if status == "rejected" and has_order:
+        return str(EventName.STOCK_INSUFFICIENT)
     if "faltantes" in parsed_data or "missing_ingredients" in parsed_data:
         return str(EventName.STOCK_INSUFFICIENT)
     if "reservas" in parsed_data or "reservations" in parsed_data:
@@ -121,12 +127,28 @@ async def _execute_typed_handler(
 ) -> bool:
     """Validate data against specific Pydantic model and execute domain handler."""
     target_lower = target_event.lower()
-    stock_res_keys = (EventName.STOCK_RESERVED, "stock_reserved", "stock.reservado")
+    stock_res_keys = (
+        EventName.STOCK_RESERVED,
+        EventName.STOCK_RESERVED_EN,
+        "stock_reserved",
+        "stock.reservado",
+        "reservation.confirmed",
+        "reservation_confirmed",
+        "reservation.confirmada",
+    )
     if any(k in target_lower for k in stock_res_keys):
         msg_res = StockReservedMessage.model_validate(parsed_data)
         return await handle_stock_reserved(msg_res, uow, notifier=notifier)
 
-    stock_ins_keys = (EventName.STOCK_INSUFFICIENT, "stock_insufficient", "stock.insuficiente")
+    stock_ins_keys = (
+        EventName.STOCK_INSUFFICIENT,
+        EventName.STOCK_INSUFFICIENT_EN,
+        "stock_insufficient",
+        "stock.insuficiente",
+        "reservation.rejected",
+        "reservation_rejected",
+        "reservation.rechazada",
+    )
     if any(k in target_lower for k in stock_ins_keys):
         msg_ins = StockInsufficientMessage.model_validate(parsed_data)
         return await handle_stock_insufficient(msg_ins, uow, notifier=notifier)

@@ -106,6 +106,18 @@ class OrderItemInput(BaseModel):
         max_length=64,
         description="Unique catalog plate/item identifier.",
     )
+    source_id: str | None = Field(
+        default=None,
+        alias="sourceId",
+        max_length=64,
+        description="Recipe/plate source identifier from Menu.",
+    )
+    offer_id: str | None = Field(
+        default=None,
+        alias="offerId",
+        max_length=64,
+        description="Commercial offer identifier from Menu.",
+    )
     name: str = Field(
         min_length=1,
         max_length=200,
