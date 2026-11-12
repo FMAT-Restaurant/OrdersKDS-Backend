@@ -19,7 +19,7 @@ from app.domain.errors import DishUnavailableError
 from app.domain.order_status import OrderStatus
 from app.main import app
 from app.services.catalog import CatalogValidatorProtocol, get_catalog_validator
-from app.services.notifications import OrderNotifier
+from app.services.notifications import OrderNotifier, get_order_notifier
 from app.services.orders import OrderService, get_order_service
 
 EMPTY_MODIFIERS: Final[list[str]] = []
@@ -151,6 +151,7 @@ def override_dependencies(
 
     app.dependency_overrides[get_session] = _get_test_session
     app.dependency_overrides[get_catalog_validator] = lambda: fake_catalog
+    app.dependency_overrides[get_order_notifier] = lambda: spy_notifier
     app.dependency_overrides[get_order_service] = lambda: OrderService(
         session=cast(AsyncSession, fake_session),
         notifier=spy_notifier,

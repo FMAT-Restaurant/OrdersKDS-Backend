@@ -214,6 +214,9 @@ class RealtimeChannelRouter:
             if conn is None:
                 return False
 
+            if channel in conn.channels:
+                return True
+
             if not can_subscribe(channel, conn.auth_context.role, conn.path):
                 logger.info(
                     "forbidden channel subscription attempt",
@@ -305,6 +308,25 @@ class RealtimeChannelRouter:
 realtime_router = RealtimeChannelRouter()
 
 
+async def _handle_subscribe_action(websocket: WebSocket, data: dict[str, Any]) -> None:
+    channels = data.get("channels")
+    if isinstance(channels, list):
+        for ch in channels:
+            if isinstance(ch, str):
+                await realtime_router.handle_subscribe(websocket, ch)
+        return
+
+    channel = data.get("channel")
+    if not channel and data.get("station"):
+        channel = f"{CHANNEL_KDS_STATION_PREFIX}{data['station']}"
+
+    if not channel or not isinstance(channel, str):
+        await websocket.send_json(FORBIDDEN_CHANNEL_ERROR)
+        return
+
+    await realtime_router.handle_subscribe(websocket, channel)
+
+
 async def _handle_incoming_text(websocket: WebSocket, raw_text: str) -> None:
     try:
         data = json.loads(raw_text)
@@ -316,19 +338,9 @@ async def _handle_incoming_text(websocket: WebSocket, raw_text: str) -> None:
 
     action = data.get("action") or data.get("type")
     if action == "subscribe":
-        channel = data.get("channel")
-        if not channel and data.get("station"):
-            channel = f"{CHANNEL_KDS_STATION_PREFIX}{data['station']}"
-
-        if not channel or not isinstance(channel, str):
-            await websocket.send_json(FORBIDDEN_CHANNEL_ERROR)
-            return
-
-        await realtime_router.handle_subscribe(websocket, channel)
-    elif "channel" in data:
-        channel = data["channel"]
-        if isinstance(channel, str):
-            await realtime_router.handle_subscribe(websocket, channel)
+        await _handle_subscribe_action(websocket, data)
+    elif "channel" in data and isinstance(data["channel"], str):
+        await realtime_router.handle_subscribe(websocket, data["channel"])
 
 
 async def serve_websocket_connection(

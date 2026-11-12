@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 from uuid import UUID, uuid4
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
@@ -91,9 +91,18 @@ class OrderItemInput(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
-    dish_id: str = Field(
+    id: str | None = Field(
+        default=None,
+        description="Optional client-side item identifier.",
+    )
+    item_id: str | None = Field(
+        default=None,
+        alias="itemId",
+        description="Optional legacy/client item identifier.",
+    )
+    dish_id: str | None = Field(
+        default=None,
         alias="dishId",
-        min_length=1,
         max_length=64,
         description="Unique catalog plate/item identifier.",
     )
@@ -108,6 +117,7 @@ class OrderItemInput(BaseModel):
         description="Quantity of dishes requested.",
     )
     unit_price: Decimal = Field(
+        default=Decimal("0.00"),
         alias="unitPrice",
         ge=Decimal("0.00"),
         description="Unit price frozen at ordering time.",
@@ -121,6 +131,13 @@ class OrderItemInput(BaseModel):
         max_length=500,
         description="Special preparation instructions for kitchen.",
     )
+
+    @model_validator(mode="after")
+    def validate_identifier_and_dish_id(self) -> Self:
+        """Ensure dish_id is not empty string when provided."""
+        if self.dish_id is not None and not self.dish_id.strip():
+            raise ValueError("dish_id cannot be an empty string")
+        return self
 
 
 class UpdateOrderItemsRequest(BaseModel):
@@ -168,6 +185,11 @@ class VoidOrderRequest(BaseModel):
         default=None,
         max_length=500,
         description="Optional administrative reason for voiding the order.",
+    )
+    charge_customer: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("chargeCustomer", "charge_customer"),
+        description="Whether to request a charge to the customer for the wasted order.",
     )
 
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from decimal import Decimal
 from typing import Annotated
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
@@ -42,6 +43,11 @@ from app.domain.order_status import ItemStatus, OrderStatus
 from app.domain.roles import VOID_KITCHEN_ERROR_ROLES, WAITER_ROLES, Role
 from app.repositories.orders import OrderRepository
 from app.services.catalog import CatalogValidatorProtocol, get_catalog_validator
+from app.services.notifications import (
+    OrderNotifier,
+    get_order_notifier,
+    notify_order_changed,
+)
 from app.services.orders import OrderService, get_order_service
 
 logger = logging.getLogger(__name__)
@@ -209,6 +215,7 @@ async def update_order_items(
     auth: Annotated[AuthContext, Depends(require_roles(Role.WAITER, Role.ADMIN))],
     session: Annotated[AsyncSession, Depends(get_session)],
     catalog_validator: Annotated[CatalogValidatorProtocol, Depends(get_catalog_validator)],
+    notifier: Annotated[OrderNotifier, Depends(get_order_notifier)],
 ) -> OrderResponse:
     """Update dish items, quantities, modifiers and notes in a draft order (RF-14, RF-17, RF-23).
 
@@ -246,30 +253,65 @@ async def update_order_items(
             "Cannot modify items on confirmed order awaiting stock",
         )
 
-    # Validate catalog availability for every item (RF-17)
-    for item_input in payload.items:
-        await catalog_validator.validate_dish_available(item_input.dish_id)
-
-    # Replace items with new entities with frozen prices (RF-14)
+    # Preserve original item information for price and dish_id fallbacks
+    original_items = list(order.items)
     order.items.clear()
-    new_items = [
-        OrderItem(
-            public_id=uuid4(),
-            dish_id=item_input.dish_id,
-            name=item_input.name,
-            quantity=item_input.quantity,
-            unit_price=item_input.unit_price,
-            modifiers=list(item_input.modifiers),
-            notes=item_input.notes,
-            status=ItemStatus.PENDING,
+    new_items: list[OrderItem] = []
+
+    for item_input in payload.items:
+        effective_dish_id = (
+            item_input.dish_id
+            or next(
+                (
+                    it.dish_id
+                    for it in original_items
+                    if (item_input.id and str(it.public_id) == item_input.id)
+                    or (item_input.item_id and str(it.public_id) == item_input.item_id)
+                    or it.name == item_input.name
+                ),
+                None,
+            )
+            or item_input.item_id
+            or item_input.id
+            or "unknown"
         )
-        for item_input in payload.items
-    ]
+        await catalog_validator.validate_dish_available(effective_dish_id)
+
+        effective_price = item_input.unit_price
+        if effective_price <= Decimal("0.00"):
+            matched_price = next(
+                (
+                    it.unit_price
+                    for it in original_items
+                    if (it.dish_id and it.dish_id == effective_dish_id)
+                    or (item_input.id and str(it.public_id) == item_input.id)
+                    or (item_input.item_id and str(it.public_id) == item_input.item_id)
+                    or it.name == item_input.name
+                ),
+                Decimal("0.00"),
+            )
+            effective_price = matched_price
+
+        new_items.append(
+            OrderItem(
+                public_id=uuid4(),
+                dish_id=effective_dish_id,
+                name=item_input.name,
+                quantity=item_input.quantity,
+                unit_price=effective_price,
+                modifiers=list(item_input.modifiers),
+                notes=item_input.notes,
+                status=ItemStatus.PENDING,
+            )
+        )
+
     order.items.extend(new_items)
     order.recalculate_total()
 
     repo.save(order)
     await session.commit()
+
+    await notify_order_changed(order, notifier=notifier)
 
     logger.info(
         "Updated %d items on order %s by user %s (total=%s)",
@@ -381,10 +423,12 @@ async def void_order(
         InvalidStateTransitionError: If order is not in IN_PREPARATION status (409).
         ForbiddenRoleError: If caller is not admin (403).
     """
+    charge_customer = payload.charge_customer if payload is not None else True
     order = await order_service.void_order(
         order_id=order_id,
         auth=auth,
         reason=payload.reason if payload else None,
+        charge_customer=charge_customer,
     )
     return OrderResponse.from_model(order)
 

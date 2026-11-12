@@ -64,6 +64,11 @@ class DefaultOrderNotifier:
 default_notifier: OrderNotifier = DefaultOrderNotifier()
 
 
+def get_order_notifier() -> OrderNotifier:
+    """Dependency yielding the active OrderNotifier singleton."""
+    return default_notifier
+
+
 async def notify_order_changed(
     order: Order,
     notifier: OrderNotifier | None = None,

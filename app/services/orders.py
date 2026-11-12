@@ -131,7 +131,10 @@ class OrderService:
         """Move order and all items to DELIVERED if every item is ready/delivered."""
         if not order.items:
             return False
-        all_ready = all(i.status in (ItemStatus.READY, ItemStatus.DELIVERED) for i in order.items)
+        all_ready = all(
+            i.status in (ItemStatus.READY, ItemStatus.DELIVERED, ItemStatus.CANCELLED)
+            for i in order.items
+        )
         if all_ready and order.status == OrderStatus.IN_PREPARATION:
             order.mark_delivered()
             for item in order.items:
@@ -304,12 +307,15 @@ class OrderService:
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
 
-        if order.status != OrderStatus.RESERVED:
+        if order.status not in (OrderStatus.RESERVED, OrderStatus.DELIVERED):
             raise InvalidStateTransitionError(order.status, OrderStatus.REJECTED)
 
         target_item = next((i for i in order.items if i.public_id == item_id), None)
         if target_item is None:
             raise OrderNotFoundError(f"Item with id={item_id} not found in order {order_id}.")
+
+        if order.status == OrderStatus.DELIVERED and target_item.status != ItemStatus.PENDING:
+            raise InvalidStateTransitionError(target_item.status, ItemStatus.CANCELLED)
 
         dish_id = target_item.dish_id or str(target_item.public_id)
 
@@ -329,24 +335,30 @@ class OrderService:
         validate_event_payload(event.event_name, payload)
         self._outbox.add(event)
 
-        # 3. Transition order to REJECTED (recording details for waiter)
-        rejection_details: dict[str, object] = {
-            "source": "kitchen",
-            "rejectedItems": [
-                {
-                    "itemId": str(target_item.public_id),
-                    "offerId": dish_id,
-                    "name": target_item.name,
-                    "requestedQuantity": target_item.quantity,
-                    "availableQuantity": 0,
-                    "reason": reason,
-                }
-            ],
-        }
-        order.mark_rejected(details=rejection_details)
+        # 3. Transition handling (RESERVED -> REJECTED; DELIVERED -> cancel item & keep DELIVERED)
+        if order.status == OrderStatus.RESERVED:
+            rejection_details: dict[str, object] = {
+                "source": "kitchen",
+                "rejectedItems": [
+                    {
+                        "itemId": str(target_item.public_id),
+                        "offerId": dish_id,
+                        "name": target_item.name,
+                        "requestedQuantity": target_item.quantity,
+                        "availableQuantity": 0,
+                        "reason": reason,
+                    }
+                ],
+            }
+            order.mark_rejected(details=rejection_details)
+        else:
+            target_item.mark_cancelled()
+            order.recalculate_total()
+
         self._orders.save(order)
         await self._session.commit()
 
+        await notify_item_changed(order, target_item, notifier=self._notifier)
         await notify_order_changed(order, notifier=self._notifier)
         return order
 
@@ -363,12 +375,16 @@ class OrderService:
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
 
-        if order.status not in (OrderStatus.CREATED, OrderStatus.RESERVED):
-            raise InvalidStateTransitionError(order.status, ItemStatus.CANCELLED)
-
         target_item = next((i for i in order.items if i.public_id == item_id), None)
         if target_item is None:
             raise OrderNotFoundError(f"Item with id={item_id} not found in order {order_id}.")
+
+        is_creatable_or_reserved = order.status in (OrderStatus.CREATED, OrderStatus.RESERVED)
+        is_delivered_redo_pending = (
+            order.status == OrderStatus.DELIVERED and target_item.status == ItemStatus.PENDING
+        )
+        if not (is_creatable_or_reserved or is_delivered_redo_pending):
+            raise InvalidStateTransitionError(order.status, ItemStatus.CANCELLED)
 
         logger.info(
             "Item %s of order %s cancelled by actor %s (role=%s). Reason: %s",
@@ -478,6 +494,7 @@ class OrderService:
         order_id: UUID,
         auth: AuthContext,
         reason: str | None = None,
+        charge_customer: bool = True,
     ) -> Order:
         """Administratively void an order in IN_PREPARATION status (RF-26, RF-27, ADR-0012).
 
@@ -521,37 +538,40 @@ class OrderService:
 
         order.mark_wasted()
 
-        # 1. Stage OrderWastedEvent in outbox
-        wasted_items = _consolidate_order_items(order.items)
-        wasted_event = OrderWastedEvent.for_order(
-            order.public_id,
-            items=wasted_items,
-            reason="ADMINISTRATIVE",
-            motivo="administrativo",
-        )
-        payload_wasted = wasted_event.model_dump(mode="json", by_alias=True)
-        validate_event_payload(wasted_event.event_name, payload_wasted)
-        self._outbox.add(wasted_event)
-
-        # 2. Stage ChargeRequestedEvent in outbox with frozen prices
-        if order.total_amount is None:
-            order.recalculate_total()
-        effective_total = order.total_amount if order.total_amount is not None else Decimal("0.00")
-        charge_items = _build_charge_items(order.items)
-        waiter_id = order.responsible_waiter_id or order.confirmed_by or order.created_by
-        table_id = f"MESA-{order.table_number}" if order.table_number is not None else None
-        charge_event = ChargeRequestedEvent.for_order(
-            order.public_id,
-            total_amount=effective_total,
-            items=charge_items,
-            session_id=order.dining_session_id,
-            table_id=table_id,
-            waiter_id=waiter_id,
-            status=order.status.value,
-        )
-        payload_charge = charge_event.model_dump(mode="json", by_alias=True)
-        validate_event_payload(charge_event.event_name, payload_charge)
-        self._outbox.add(charge_event)
+        if charge_customer:
+            # 1. Stage ChargeRequestedEvent in outbox with frozen prices when customer is charged
+            if order.total_amount is None:
+                order.recalculate_total()
+            effective_total = (
+                order.total_amount if order.total_amount is not None else Decimal("0.00")
+            )
+            charge_items = _build_charge_items(order.items)
+            waiter_id = order.responsible_waiter_id or order.confirmed_by or order.created_by
+            table_id = f"MESA-{order.table_number}" if order.table_number is not None else None
+            charge_event = ChargeRequestedEvent.for_order(
+                order.public_id,
+                total_amount=effective_total,
+                items=charge_items,
+                session_id=order.dining_session_id,
+                table_id=table_id,
+                waiter_id=waiter_id,
+                status=order.status.value,
+            )
+            payload_charge = charge_event.model_dump(mode="json", by_alias=True)
+            validate_event_payload(charge_event.event_name, payload_charge)
+            self._outbox.add(charge_event)
+        else:
+            # 2. Stage OrderWastedEvent in outbox for pure waste (no customer charge)
+            wasted_items = _consolidate_order_items(order.items)
+            wasted_event = OrderWastedEvent.for_order(
+                order.public_id,
+                items=wasted_items,
+                reason="ADMINISTRATIVE",
+                motivo="administrativo",
+            )
+            payload_wasted = wasted_event.model_dump(mode="json", by_alias=True)
+            validate_event_payload(wasted_event.event_name, payload_wasted)
+            self._outbox.add(wasted_event)
 
         # 3. Save and commit transaction atomically
         self._orders.save(order)

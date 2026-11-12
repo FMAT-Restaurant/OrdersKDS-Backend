@@ -15,6 +15,9 @@ from app.cache.catalog import CatalogRepository, RedisHashAdapter
 from app.core.config import get_redis_url
 from app.domain.errors import DishUnavailableError
 
+# Backwards compatibility alias
+_RedisHashAdapter = RedisHashAdapter
+
 
 def normalize_station_name(name: str | None) -> str | None:
     """Normalize station name: strip, lowercase, and remove accents (NFD).

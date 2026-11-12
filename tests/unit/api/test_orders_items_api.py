@@ -17,8 +17,8 @@ from fastapi.testclient import TestClient
 
 from app.core.error_codes import ErrorCode
 from app.db.models import Order, OrderItem
-from app.domain.order_status import OrderStatus
-from tests.unit.api.conftest import EMPTY_MODIFIERS, FakeCatalogValidator
+from app.domain.order_status import ItemStatus, OrderStatus
+from tests.unit.api.conftest import EMPTY_MODIFIERS, FakeCatalogValidator, SpyOrderNotifier
 
 pytestmark = [
     pytest.mark.unit,
@@ -459,3 +459,58 @@ def test_update_order_items_on_rejected_order_reopens_to_created(
     assert data["confirmedAt"] is None
     assert test_db[order.public_id].status == OrderStatus.CREATED
     assert test_db[order.public_id].rejection_details is None
+
+
+def test_update_order_items_supports_client_identifiers_and_recovers_price(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    spy_notifier: SpyOrderNotifier,
+) -> None:
+    """Accept client id/itemId and recover existing price when unitPrice is omitted."""
+    existing_item = OrderItem(
+        public_id=uuid4(),
+        dish_id="dish-burger-01",
+        name="Hamburguesa Clásica",
+        quantity=2,
+        unit_price=Decimal("120.00"),
+        status=ItemStatus.PENDING,
+    )
+    order = Order(
+        public_id=uuid4(),
+        table_number=7,
+        status=OrderStatus.CREATED,
+        items=[existing_item],
+    )
+    order.recalculate_total()
+    test_db[order.public_id] = order
+
+    # Client sends id and itemId without unitPrice (editing quantity only)
+    resp = client.patch(
+        f"/orders/{order.public_id}/items",
+        headers=auth_headers("waiter"),
+        json={
+            "items": [
+                {
+                    "id": str(existing_item.public_id),
+                    "itemId": str(existing_item.public_id),
+                    "dishId": "dish-burger-01",
+                    "name": "Hamburguesa Clásica",
+                    "quantity": 1,
+                    "modifiers": ["Sin cebolla"],
+                    "notes": "Bien cocida",
+                }
+            ]
+        },
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["totalAmount"] == "120.00"
+    assert len(data["items"]) == 1
+    assert data["items"][0]["quantity"] == 1
+    assert data["items"][0]["unitPrice"] == "120.00"
+    assert data["items"][0]["modifiers"] == ["Sin cebolla"]
+    assert data["items"][0]["notes"] == "Bien cocida"
+    # Verifies notify_order_changed was called
+    assert any(o.public_id == order.public_id for o in spy_notifier.notified_orders)
