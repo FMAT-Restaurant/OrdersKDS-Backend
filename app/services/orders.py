@@ -28,7 +28,12 @@ from app.domain.errors import (
     VersionConflictError,
 )
 from app.domain.order_status import ItemStatus, OrderStatus
-from app.domain.roles import KITCHEN_ROLES, VOID_KITCHEN_ERROR_ROLES, WAITER_ROLES, Role
+from app.domain.roles import (
+    ADMIN_ONLY_ROLES,
+    KITCHEN_ROLES,
+    VOID_KITCHEN_ERROR_ROLES,
+    WAITER_ROLES,
+)
 from app.messaging.events import (
     BillRequestedEvent,
     ChargeRequestedEvent,
@@ -120,11 +125,11 @@ class OrderService:
         self._catalog_repo = catalog_repo
 
     def _verify_kitchen_role(self, auth: AuthContext) -> None:
-        if auth.role not in KITCHEN_ROLES:
+        if not auth.has_any_role(KITCHEN_ROLES):
             raise ForbiddenRoleError("Role not allowed for kitchen action.")
 
     def _verify_waiter_role(self, auth: AuthContext) -> None:
-        if auth.role not in WAITER_ROLES:
+        if not auth.has_any_role(WAITER_ROLES):
             raise ForbiddenRoleError("Role not allowed for waiter action.")
 
     def _sync_delivery_if_all_ready(self, order: Order) -> bool:
@@ -518,7 +523,7 @@ class OrderService:
             ForbiddenRoleError: If caller lacks admin role (403).
             InvalidStateTransitionError: If order is not in IN_PREPARATION status (409).
         """
-        if auth.role != Role.ADMIN:
+        if not auth.has_any_role(ADMIN_ONLY_ROLES):
             raise ForbiddenRoleError("Only administrators can administratively void an order.")
 
         order = await self._orders.get_by_public_id(order_id)
@@ -609,7 +614,7 @@ class OrderService:
             OrderNotFoundError: If order does not exist (404).
             InvalidStateTransitionError: If order is not in IN_PREPARATION status (409).
         """
-        if auth.role not in VOID_KITCHEN_ERROR_ROLES:
+        if not auth.has_any_role(VOID_KITCHEN_ERROR_ROLES):
             raise ForbiddenRoleError(
                 "Only administrators and chefs can void an order for kitchen error."
             )
@@ -680,7 +685,7 @@ class OrderService:
             OrderNotFoundError: If order does not exist (404).
             InvalidStateTransitionError: If order is not in DELIVERED status (409).
         """
-        if auth.role not in WAITER_ROLES:
+        if not auth.has_any_role(WAITER_ROLES):
             raise ForbiddenRoleError(
                 "Only waiters and administrators can request the bill for an order."
             )

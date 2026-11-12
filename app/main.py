@@ -34,3 +34,12 @@ def health_check() -> dict[str, str]:
 app.include_router(orders.router)
 app.include_router(kds.router)
 app.include_router(websocket_routes.router)
+
+# Mounts for Kong API Gateway (strip_path: false)
+app.include_router(orders.router, prefix="/api/v1")
+app.include_router(kds.router, prefix="/api/v1")
+app.include_router(websocket_routes.router, prefix="/api/v1")
+
+app.include_router(orders.router, prefix="/api/v1/orders")
+app.include_router(kds.router, prefix="/api/v1/orders")
+app.include_router(websocket_routes.router, prefix="/api/v1/orders")

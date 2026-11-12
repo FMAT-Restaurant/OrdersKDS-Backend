@@ -1,8 +1,18 @@
-"""Authentication context and role guards built from JWT claims.
+"""Authentication context and access guards built from the gateway identity.
 
-The API Gateway verifies the JWT signature (ADR-0011); this module only reads the
-``user_id`` and ``role`` claims of the token it forwards, so the identity never comes
-from the request body (RF-15) and no signing key is configured in this service.
+The API Gateway verifies the JWT signature (ADR-0011). This module only *reads* the identity
+it forwards, in this order of preference:
+
+1. the headers Kong's ``auth-perimeter`` plugin injects once the token is verified
+   (``X-User-Id``, ``X-User-Roles``, ``X-User-Permissions``, ``X-Staff-Id``);
+2. the claims of the ``Authorization: Bearer`` token (``user_id``/``sub``, ``roles``/``role``,
+   ``permissions``) for local development and direct calls without the gateway.
+
+The identity never comes from the request body (RF-15) and no signing key is configured in
+this service. Because the gateway is the trust boundary, this service must only be reachable
+through it in shared environments (the same assumption ADR-0011 already makes for the JWT).
+
+Authorization is PBAC first with a role fallback, see :mod:`app.domain.access`.
 
 Satisfies: RNF-03, RF-15 (Guidelines §5.7)
 """
@@ -13,7 +23,7 @@ import base64
 import json
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Iterable, Mapping
 from typing import Annotated, Any, Final
 
 from fastapi import Depends, WebSocket
@@ -21,16 +31,27 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import HTTPConnection
 
 from app.core.error_codes import ErrorCode
+from app.domain.access import WILDCARD_PERMISSION, AccessPolicy
 from app.domain.errors import ForbiddenRoleError, UnauthenticatedError
-from app.domain.roles import Role
+from app.domain.roles import Role, primary_role, resolve_roles
 
 logger = logging.getLogger(__name__)
 
-# Claim names are pending final confirmation from Auth (V&V H-07). ``sub`` is the
-# standard fallback while ``user_id`` is not guaranteed.
+# Claim names issued by ``Auth-Backend``. ``sub`` is the standard fallback while ``user_id``
+# is not guaranteed; ``role`` (singular) is kept for development tokens.
 USER_ID_CLAIM: Final = "user_id"
 SUBJECT_CLAIM: Final = "sub"
 ROLE_CLAIM: Final = "role"
+ROLES_CLAIM: Final = "roles"
+PERMISSIONS_CLAIM: Final = "permissions"
+STAFF_ID_CLAIM: Final = "staffId"
+
+# Headers injected by the Kong ``auth-perimeter`` plugin (lowercase: lookups are case-insensitive).
+HEADER_USER_ID: Final = "x-user-id"
+HEADER_STAFF_ID: Final = "x-staff-id"
+HEADER_USER_ROLES: Final = "x-user-roles"
+HEADER_USER_ROLE: Final = "x-user-role"  # singular spelling used by the shared integration guide
+HEADER_USER_PERMISSIONS: Final = "x-user-permissions"
 
 _BEARER_SCHEME: Final = "bearer"
 _AUTH_REQUIRED_MESSAGE: Final = "Authentication required."
@@ -41,24 +62,66 @@ WS_CLOSE_FORBIDDEN_ROLE: Final = 4403
 
 
 class AuthContext(BaseModel):
-    """Identity of the caller, resolved from the JWT claims."""
+    """Identity of the caller, resolved from the gateway headers or the JWT claims.
+
+    Attributes:
+        user_id: Caller identifier.
+        role: Primary (highest-privilege) role, used for audit logs and channel routing.
+        roles: Every role of the caller; guards evaluate all of them.
+        permissions: PBAC permissions issued by Auth. ``None`` means the identity carried no
+            permission list (development token) and the role fallback applies; an explicit
+            empty set means "no permissions" and denies everything except for ``admin``.
+        staff_id: Employee identifier, when issued by Auth.
+        exp: Expiration timestamp (epoch seconds), when known.
+    """
 
     model_config = ConfigDict(frozen=True)
 
-    user_id: str = Field(min_length=1, description="Caller identifier taken from the JWT.")
-    role: Role = Field(description="Caller role taken from the JWT.")
+    user_id: str = Field(min_length=1, description="Caller identifier taken from the identity.")
+    role: Role = Field(description="Primary role of the caller.")
+    roles: frozenset[Role] = Field(default_factory=frozenset, description="All caller roles.")
+    permissions: frozenset[str] | None = Field(
+        default=None, description="PBAC permissions, or None when none were issued."
+    )
+    staff_id: str | None = Field(default=None, description="Employee identifier.")
     exp: float | None = Field(default=None, description="Expiration timestamp (epoch seconds).")
+
+    @property
+    def effective_roles(self) -> frozenset[Role]:
+        """Every role of the caller, always including the primary one."""
+        return self.roles | {self.role}
+
+    def has_any_role(self, allowed_roles: Collection[Role]) -> bool:
+        """Whether any role of the caller is part of ``allowed_roles``."""
+        return not self.effective_roles.isdisjoint(allowed_roles)
+
+    def has_permission(self, permission: str) -> bool:
+        """Whether the caller holds ``permission``; ``admin`` and ``*`` hold everything."""
+        granted = self.permissions or frozenset()
+        if Role.ADMIN in self.effective_roles or WILDCARD_PERMISSION in granted:
+            return True
+        return permission in granted
+
+    def is_authorized(self, policy: AccessPolicy) -> bool:
+        """Evaluate ``policy``: PBAC when permissions were issued, role fallback otherwise."""
+        if self.permissions is None:
+            return self.has_any_role(policy.fallback_roles)
+        return any(self.has_permission(permission) for permission in policy.permissions)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, AuthContext):
             return False
-        if other.exp is None or self.exp is None:
-            return self.user_id == other.user_id and self.role == other.role
-        return (
+        same_identity = (
             self.user_id == other.user_id
             and self.role == other.role
-            and abs(self.exp - other.exp) < 1.0
+            and self.effective_roles == other.effective_roles
+            and self.permissions == other.permissions
         )
+        if not same_identity:
+            return False
+        if other.exp is None or self.exp is None:
+            return True
+        return abs(self.exp - other.exp) < 1.0
 
     def __hash__(self) -> int:
         return hash((self.user_id, self.role))
@@ -120,18 +183,94 @@ def _decode_claims(token: str) -> dict[str, Any]:
         raise UnauthenticatedError(_AUTH_REQUIRED_MESSAGE) from exc
 
 
-def _context_from_claims(claims: dict[str, Any]) -> AuthContext:
-    user_id = claims.get(USER_ID_CLAIM) or claims.get(SUBJECT_CLAIM)
-    raw_role = claims.get(ROLE_CLAIM)
-    if not (isinstance(user_id, str) and user_id and isinstance(raw_role, str)):
+def _split_csv(value: str | None) -> list[str]:
+    """Split a comma-separated header/claim value, dropping blanks."""
+    return [part.strip() for part in (value or "").split(",") if part.strip()]
+
+
+def _permissions_from_claim(value: object) -> frozenset[str] | None:
+    """Parse the ``permissions`` claim: absent -> ``None``; malformed -> deny-by-default."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return frozenset(_split_csv(value))
+    if isinstance(value, (list, tuple)):
+        return frozenset(item.strip() for item in value if isinstance(item, str) and item.strip())
+    return frozenset()
+
+
+def _roles_from_claims(claims: Mapping[str, Any]) -> list[object]:
+    """Collect the raw role labels of ``roles`` (list or CSV string) and ``role``."""
+    roles_claim = claims.get(ROLES_CLAIM)
+    if isinstance(roles_claim, str):
+        candidates: list[object] = list(_split_csv(roles_claim))
+    elif isinstance(roles_claim, (list, tuple)):
+        candidates = list(roles_claim)
+    else:
+        candidates = []
+    candidates.append(claims.get(ROLE_CLAIM))
+    return candidates
+
+
+def _expiration(value: object) -> float | None:
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def _build_context(
+    user_id: object,
+    raw_roles: Iterable[object],
+    *,
+    permissions: frozenset[str] | None,
+    staff_id: object,
+    exp: float | None,
+) -> AuthContext:
+    """Assemble the caller identity, or raise ``UnauthenticatedError`` when it is unusable."""
+    roles = resolve_roles(raw_roles)
+    primary = primary_role(roles)
+    if not (isinstance(user_id, str) and user_id and primary is not None):
         raise UnauthenticatedError(_AUTH_REQUIRED_MESSAGE)
-    try:
-        role = Role(raw_role)
-    except ValueError as exc:
-        raise UnauthenticatedError(_AUTH_REQUIRED_MESSAGE) from exc
-    exp_val = claims.get("exp")
-    exp = float(exp_val) if isinstance(exp_val, (int, float)) else None
-    return AuthContext(user_id=user_id, role=role, exp=exp)
+    return AuthContext(
+        user_id=user_id,
+        role=primary,
+        roles=roles,
+        permissions=permissions,
+        staff_id=staff_id if isinstance(staff_id, str) and staff_id else None,
+        exp=exp,
+    )
+
+
+def _context_from_claims(claims: dict[str, Any]) -> AuthContext:
+    return _build_context(
+        claims.get(USER_ID_CLAIM) or claims.get(SUBJECT_CLAIM),
+        _roles_from_claims(claims),
+        permissions=_permissions_from_claim(claims.get(PERMISSIONS_CLAIM)),
+        staff_id=claims.get(STAFF_ID_CLAIM),
+        exp=_expiration(claims.get("exp")),
+    )
+
+
+def _context_from_gateway_headers(
+    headers: Mapping[str, str], authorization: str | None
+) -> AuthContext | None:
+    """Build the identity from the headers Kong injects, or ``None`` when they are absent.
+
+    The expiration is read from the forwarded token, when there is one, so that long-lived
+    WebSocket connections are still closed when the token expires.
+    """
+    user_id = (headers.get(HEADER_USER_ID) or "").strip()
+    if not user_id:
+        return None
+    raw_permissions = headers.get(HEADER_USER_PERMISSIONS)
+    exp = None
+    if authorization:
+        exp = _expiration(_decode_claims(_extract_bearer_token(authorization)).get("exp"))
+    return _build_context(
+        user_id,
+        _split_csv(headers.get(HEADER_USER_ROLES) or headers.get(HEADER_USER_ROLE)),
+        permissions=None if raw_permissions is None else frozenset(_split_csv(raw_permissions)),
+        staff_id=(headers.get(HEADER_STAFF_ID) or "").strip(),
+        exp=exp,
+    )
 
 
 def resolve_auth_context(authorization: str | None) -> AuthContext:
@@ -145,37 +284,65 @@ def resolve_auth_context(authorization: str | None) -> AuthContext:
 
     Raises:
         UnauthenticatedError: If the token is missing, malformed, unsigned (``alg: none``),
-            expired, or lacks a valid ``user_id``/``role`` claim.
+            expired, or lacks a valid ``user_id`` and a recognised role claim.
     """
     return _context_from_claims(_decode_claims(_extract_bearer_token(authorization)))
 
 
+def _authorization_value(connection: HTTPConnection) -> str | None:
+    """``Authorization`` header, or the token offered in ``Sec-WebSocket-Protocol`` (SEC-09)."""
+    authorization = connection.headers.get("authorization")
+    if authorization:
+        return authorization
+    ws_protocol = connection.headers.get("sec-websocket-protocol")
+    if not ws_protocol:
+        return None
+    parts = [p.strip() for p in ws_protocol.split(",")]
+    if len(parts) >= 2 and parts[0].lower() == "bearer":
+        return f"Bearer {parts[1]}"
+    if len(parts) == 1 and "." in parts[0]:
+        return f"Bearer {parts[0]}"
+    return None
+
+
 def get_auth_context(connection: HTTPConnection) -> AuthContext:
     """FastAPI dependency resolving the caller of an HTTP request or WebSocket handshake."""
-    authorization = connection.headers.get("authorization")
-    if not authorization:
-        # Check Sec-WebSocket-Protocol header for browser websockets (SEC-09)
-        ws_protocol = connection.headers.get("sec-websocket-protocol")
-        if ws_protocol:
-            parts = [p.strip() for p in ws_protocol.split(",")]
-            if len(parts) >= 2 and parts[0].lower() == "bearer":
-                authorization = f"Bearer {parts[1]}"
-            elif len(parts) == 1 and "." in parts[0]:
-                authorization = f"Bearer {parts[0]}"
+    authorization = _authorization_value(connection)
+    gateway_context = _context_from_gateway_headers(connection.headers, authorization)
+    if gateway_context is not None:
+        return gateway_context
     return resolve_auth_context(authorization)
 
 
 def ensure_role_allowed(context: AuthContext, allowed_roles: frozenset[Role]) -> None:
-    """Raise unless the caller's role is part of ``allowed_roles``.
+    """Raise unless one of the caller's roles is part of ``allowed_roles``.
 
     Raises:
-        ForbiddenRoleError: If the role is not allowed.
+        ForbiddenRoleError: If no role is allowed.
     """
-    if context.role not in allowed_roles:
+    if not context.has_any_role(allowed_roles):
         logger.warning(
             "role not allowed", extra={"role": context.role.value, "user_id": context.user_id}
         )
         raise ForbiddenRoleError("Role not allowed for this action.")
+
+
+def ensure_authorized(context: AuthContext, policy: AccessPolicy) -> None:
+    """Raise unless ``context`` satisfies ``policy`` (PBAC first, role fallback).
+
+    Raises:
+        ForbiddenRoleError: If the caller lacks the permission (or an allowed role).
+    """
+    if not context.is_authorized(policy):
+        logger.warning(
+            "access denied",
+            extra={
+                "role": context.role.value,
+                "user_id": context.user_id,
+                "required_permissions": sorted(policy.permissions),
+            },
+        )
+        raise ForbiddenRoleError("Role or permission not allowed for this action.")
 
 
 def require_roles(*allowed_roles: Role) -> Callable[[AuthContext], AuthContext]:
@@ -197,8 +364,36 @@ def require_roles(*allowed_roles: Role) -> Callable[[AuthContext], AuthContext]:
     return _guard
 
 
+def require_access(policy: AccessPolicy) -> Callable[[AuthContext], AuthContext]:
+    """Build a router dependency enforcing ``policy`` (see ``app.domain.access``).
+
+    Returns:
+        A dependency that yields the ``AuthContext`` or raises ``UnauthenticatedError``
+        (401) / ``ForbiddenRoleError`` (403).
+    """
+
+    def _guard(context: Annotated[AuthContext, Depends(get_auth_context)]) -> AuthContext:
+        ensure_authorized(context, policy)
+        return context
+
+    return _guard
+
+
+def require_permissions(
+    *permissions: str, fallback_roles: frozenset[Role]
+) -> Callable[[AuthContext], AuthContext]:
+    """Build a dependency that requires any of ``permissions``, with a role fallback.
+
+    The PBAC permission is evaluated first; ``fallback_roles`` only apply to identities that
+    carry no permission list at all (backwards compatibility with role-only tokens).
+    """
+    return require_access(AccessPolicy(frozenset(permissions), fallback_roles))
+
+
 async def authorize_websocket(
-    websocket: WebSocket, allowed_roles: frozenset[Role]
+    websocket: WebSocket,
+    allowed_roles: frozenset[Role],
+    policy: AccessPolicy | None = None,
 ) -> AuthContext | None:
     """Accept the handshake, then close it with 4401/4403 if the caller is not allowed.
 
@@ -207,7 +402,8 @@ async def authorize_websocket(
 
     Args:
         websocket: Incoming connection.
-        allowed_roles: Roles authorized to use the endpoint.
+        allowed_roles: Roles authorized to use the endpoint (used when ``policy`` is ``None``).
+        policy: Access policy of the endpoint; takes precedence over ``allowed_roles``.
 
     Returns:
         The caller identity, or ``None`` when the connection was closed.
@@ -221,7 +417,10 @@ async def authorize_websocket(
     await websocket.accept(subprotocol=selected_subprotocol)
     try:
         context = get_auth_context(websocket)
-        ensure_role_allowed(context, allowed_roles)
+        if policy is not None:
+            ensure_authorized(context, policy)
+        else:
+            ensure_role_allowed(context, allowed_roles)
     except UnauthenticatedError:
         await websocket.close(
             code=WS_CLOSE_UNAUTHENTICATED, reason=ErrorCode.UNAUTHENTICATED.value
