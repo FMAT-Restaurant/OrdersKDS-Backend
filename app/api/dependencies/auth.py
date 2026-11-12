@@ -290,10 +290,20 @@ def resolve_auth_context(authorization: str | None) -> AuthContext:
 
 
 def _authorization_value(connection: HTTPConnection) -> str | None:
-    """``Authorization`` header, or the token offered in ``Sec-WebSocket-Protocol`` (SEC-09)."""
+    """Read token from ``Authorization`` header, query parameter, or subprotocol (SEC-09)."""
     authorization = connection.headers.get("authorization")
     if authorization:
         return authorization
+    scope = getattr(connection, "scope", None)
+    if isinstance(scope, dict) and "query_string" in scope:
+        raw_query = scope.get("query_string")
+        if isinstance(raw_query, (bytes, bytearray)) and raw_query:
+            from urllib.parse import parse_qs
+
+            parsed = parse_qs(raw_query.decode("latin1", errors="replace"))
+            tokens = parsed.get("token") or parsed.get("access_token")
+            if tokens and tokens[0].strip():
+                return f"Bearer {tokens[0].strip()}"
     ws_protocol = connection.headers.get("sec-websocket-protocol")
     if not ws_protocol:
         return None

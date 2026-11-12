@@ -375,3 +375,32 @@ def test_api_v1_and_orders_prefix_routes_mounted(client: TestClient) -> None:
     assert client.get("/kds/queue").status_code == 401
     assert client.get("/api/v1/kds/queue").status_code == 401
     assert client.get("/api/v1/orders/kds/queue").status_code == 401
+
+
+def test_get_auth_context_from_query_params(make_token: TokenFactory) -> None:
+    token = make_token(role="waiter", user_id="query-user")
+    req_token = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/ws/waiter",
+            "headers": [],
+            "query_string": f"token={token}".encode(),
+        }
+    )
+    ctx = get_auth_context(req_token)
+    assert ctx.user_id == "query-user"
+    assert ctx.role == Role.WAITER
+
+    req_access_token = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/ws/waiter",
+            "headers": [],
+            "query_string": f"access_token={token}".encode(),
+        }
+    )
+    ctx2 = get_auth_context(req_access_token)
+    assert ctx2.user_id == "query-user"
+    assert ctx2.role == Role.WAITER
