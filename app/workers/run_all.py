@@ -14,6 +14,7 @@ import os
 import signal
 import sys
 
+from dotenv import load_dotenv
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -29,6 +30,8 @@ from app.messaging.publisher import EventPublisher
 from app.workers.catalog_reconciliation import CatalogReconciliationWorker
 from app.workers.outbox_worker import OutboxWorker
 from app.workers.saga_timeout_watcher import SagaTimeoutWatcher
+
+load_dotenv()
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
@@ -74,7 +77,7 @@ async def main() -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
             loop.add_signal_handler(sig, _on_signal)
-        except RuntimeError:
+        except (RuntimeError, NotImplementedError):
             # Signal handlers via loop are not implemented on Windows
             signal.signal(sig, lambda *_: _on_signal())
 

@@ -537,20 +537,8 @@ class OrderService:
 
         order.mark_wasted()
 
-        # 1. Stage OrderWastedEvent in outbox
-        wasted_items = _consolidate_order_items(order.items)
-        wasted_event = OrderWastedEvent.for_order(
-            order.public_id,
-            items=wasted_items,
-            reason="ADMINISTRATIVE",
-            motivo="administrativo",
-        )
-        payload_wasted = wasted_event.model_dump(mode="json", by_alias=True)
-        validate_event_payload(wasted_event.event_name, payload_wasted)
-        self._outbox.add(wasted_event)
-
-        # 2. Stage ChargeRequestedEvent in outbox with frozen prices if charge_customer is True
         if charge_customer:
+            # 1. Stage ChargeRequestedEvent in outbox with frozen prices when customer is charged
             if order.total_amount is None:
                 order.recalculate_total()
             effective_total = (
@@ -571,6 +559,18 @@ class OrderService:
             payload_charge = charge_event.model_dump(mode="json", by_alias=True)
             validate_event_payload(charge_event.event_name, payload_charge)
             self._outbox.add(charge_event)
+        else:
+            # 2. Stage OrderWastedEvent in outbox for pure waste (no customer charge)
+            wasted_items = _consolidate_order_items(order.items)
+            wasted_event = OrderWastedEvent.for_order(
+                order.public_id,
+                items=wasted_items,
+                reason="ADMINISTRATIVE",
+                motivo="administrativo",
+            )
+            payload_wasted = wasted_event.model_dump(mode="json", by_alias=True)
+            validate_event_payload(wasted_event.event_name, payload_wasted)
+            self._outbox.add(wasted_event)
 
         # 3. Save and commit transaction atomically
         self._orders.save(order)

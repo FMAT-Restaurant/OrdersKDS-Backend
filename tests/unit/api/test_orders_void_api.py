@@ -82,14 +82,14 @@ def test_void_administrative_by_kitchen_and_chef_is_forbidden(
         assert test_db[order.public_id].status == OrderStatus.IN_PREPARATION
 
 
-def test_void_administrative_publishes_wasted_and_charge_requested(
+def test_void_administrative_publishes_charge_requested_when_charged(
     client: TestClient,
     auth_headers: Callable[[str], dict[str, str]],
     test_db: dict[UUID, Order],
     fake_session: FakeAsyncSession,
     spy_notifier: SpyOrderNotifier,
 ) -> None:
-    """UT-BE-17 & CT-12: Admin void transitions to WASTED and publishes wasted + charge events."""
+    """UT-BE-17 & CT-12: Admin void with charge transitions to WASTED and stages charge event."""
     order_id = uuid4()
     item_id = uuid4()
     order = Order(
@@ -113,6 +113,7 @@ def test_void_administrative_publishes_wasted_and_charge_requested(
     response = client.patch(
         f"/orders/{order_id}/void",
         headers=auth_headers("admin"),
+        json={"chargeCustomer": True, "reason": "Deserción del comensal"},
     )
 
     assert response.status_code == 200
@@ -123,28 +124,14 @@ def test_void_administrative_publishes_wasted_and_charge_requested(
     # Verify DB state
     assert test_db[order_id].status == OrderStatus.WASTED
 
-    # Verify staged events in outbox (both wasted and charge requested)
-    assert len(fake_session.outbox_rows) == 2
+    # Verify staged events in outbox (only charge requested, no duplicate merma)
+    assert len(fake_session.outbox_rows) == 1
     event_types = [entry.event_type for entry in fake_session.outbox_rows]
-    assert "ordenes.comanda.mermada" in event_types
     assert "ordenes.cobro.solicitado" in event_types
-
-    # Verify ordenes.comanda.mermada payload
-    wasted_entry = next(
-        e for e in fake_session.outbox_rows if e.event_type == "ordenes.comanda.mermada"
-    )
-    assert wasted_entry.payload["orderId"] == str(order_id)
-    assert wasted_entry.payload["motivo"] == "administrativo"
-    assert wasted_entry.payload["reason"] == "ADMINISTRATIVE"
-    items_afectados = cast(list[dict[str, Any]], wasted_entry.payload.get("itemsAfectados", []))
-    assert len(items_afectados) == 1
-    assert items_afectados[0]["offerId"] == "dish-202"
-    assert items_afectados[0]["quantity"] == 2
+    assert "ordenes.comanda.mermada" not in event_types
 
     # Verify ordenes.cobro.solicitado payload
-    charge_entry = next(
-        e for e in fake_session.outbox_rows if e.event_type == "ordenes.cobro.solicitado"
-    )
+    charge_entry = fake_session.outbox_rows[0]
     assert charge_entry.payload["orderId"] == str(order_id)
     assert charge_entry.payload["status"] == "WASTED"
     assert charge_entry.payload["totalAmount"] == 150.0
@@ -156,6 +143,56 @@ def test_void_administrative_publishes_wasted_and_charge_requested(
 
     # Verify WebSocket broadcast
     assert any(o.public_id == order_id for o in spy_notifier.notified_orders)
+
+
+def test_void_administrative_without_charge_publishes_only_wasted(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+    spy_notifier: SpyOrderNotifier,
+) -> None:
+    """Admin void without customer charge transitions to WASTED and stages only merma event."""
+    order_id = uuid4()
+    item_id = uuid4()
+    order = Order(
+        public_id=order_id,
+        table_number=5,
+        status=OrderStatus.IN_PREPARATION,
+        dining_session_id=uuid4(),
+        total_amount=Decimal("150.00"),
+    )
+    item = OrderItem(
+        public_id=item_id,
+        dish_id="dish-202",
+        name="Ceviche Clásico",
+        quantity=2,
+        unit_price=Decimal("75.00"),
+        status=ItemStatus.PENDING,
+    )
+    order.items.append(item)
+    test_db[order_id] = order
+
+    response = client.patch(
+        f"/orders/{order_id}/void",
+        headers=auth_headers("admin"),
+        json={"chargeCustomer": False, "reason": "Error de captura del mesero"},
+    )
+
+    assert response.status_code == 200
+    assert test_db[order_id].status == OrderStatus.WASTED
+
+    # Verify staged events in outbox (only merma, no charge event)
+    assert len(fake_session.outbox_rows) == 1
+    wasted_entry = fake_session.outbox_rows[0]
+    assert wasted_entry.event_type == "ordenes.comanda.mermada"
+    assert wasted_entry.payload["orderId"] == str(order_id)
+    assert wasted_entry.payload["motivo"] == "administrativo"
+    assert wasted_entry.payload["reason"] == "ADMINISTRATIVE"
+    items_afectados = cast(list[dict[str, Any]], wasted_entry.payload.get("itemsAfectados", []))
+    assert len(items_afectados) == 1
+    assert items_afectados[0]["offerId"] == "dish-202"
+    assert items_afectados[0]["quantity"] == 2
 
 
 @pytest.mark.parametrize(

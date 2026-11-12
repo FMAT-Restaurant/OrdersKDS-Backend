@@ -9,7 +9,6 @@ Feature: Administrative Order Void (Wasted with Charge)
     Given an order exists in "IN_PREPARATION" status with items
     When the administrator voids the order via "PATCH /orders/{orderId}/void"
     Then the order status becomes "WASTED"
-    And an event "ordenes.comanda.mermada" is staged in the outbox with motive "administrativo"
     And a billing event "ordenes.cobro.solicitado" is staged in the outbox with frozen prices
 
   Scenario: Reject administrative void by a waiter
