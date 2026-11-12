@@ -25,6 +25,7 @@ import logging
 import time
 from collections.abc import Callable, Collection, Iterable, Mapping
 from typing import Annotated, Any, Final
+from urllib.parse import parse_qs
 
 from fastapi import Depends, WebSocket
 from pydantic import BaseModel, ConfigDict, Field
@@ -289,22 +290,20 @@ def resolve_auth_context(authorization: str | None) -> AuthContext:
     return _context_from_claims(_decode_claims(_extract_bearer_token(authorization)))
 
 
-def _authorization_value(connection: HTTPConnection) -> str | None:
-    """Read token from ``Authorization`` header, query parameter, or subprotocol (SEC-09)."""
-    authorization = connection.headers.get("authorization")
-    if authorization:
-        return authorization
-    scope = getattr(connection, "scope", None)
-    if isinstance(scope, dict) and "query_string" in scope:
-        raw_query = scope.get("query_string")
-        if isinstance(raw_query, (bytes, bytearray)) and raw_query:
-            from urllib.parse import parse_qs
+def _token_from_query_string(scope: object) -> str | None:
+    if not isinstance(scope, dict):
+        return None
+    raw_query = scope.get("query_string")
+    if not isinstance(raw_query, (bytes, bytearray)) or not raw_query:
+        return None
+    parsed = parse_qs(raw_query.decode("latin1", errors="replace"))
+    tokens = parsed.get("token") or parsed.get("access_token")
+    if tokens and tokens[0].strip():
+        return f"Bearer {tokens[0].strip()}"
+    return None
 
-            parsed = parse_qs(raw_query.decode("latin1", errors="replace"))
-            tokens = parsed.get("token") or parsed.get("access_token")
-            if tokens and tokens[0].strip():
-                return f"Bearer {tokens[0].strip()}"
-    ws_protocol = connection.headers.get("sec-websocket-protocol")
+
+def _token_from_ws_protocol(ws_protocol: str | None) -> str | None:
     if not ws_protocol:
         return None
     parts = [p.strip() for p in ws_protocol.split(",")]
@@ -313,6 +312,17 @@ def _authorization_value(connection: HTTPConnection) -> str | None:
     if len(parts) == 1 and "." in parts[0]:
         return f"Bearer {parts[0]}"
     return None
+
+
+def _authorization_value(connection: HTTPConnection) -> str | None:
+    """Read token from ``Authorization`` header, query parameter, or subprotocol (SEC-09)."""
+    authorization = connection.headers.get("authorization")
+    if authorization:
+        return authorization
+    query_token = _token_from_query_string(getattr(connection, "scope", None))
+    if query_token:
+        return query_token
+    return _token_from_ws_protocol(connection.headers.get("sec-websocket-protocol"))
 
 
 def get_auth_context(connection: HTTPConnection) -> AuthContext:
