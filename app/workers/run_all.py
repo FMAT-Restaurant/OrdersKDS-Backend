@@ -77,8 +77,9 @@ async def main() -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
             loop.add_signal_handler(sig, _on_signal)
-        except (RuntimeError, NotImplementedError):
+        except RuntimeError:
             # Signal handlers via loop are not implemented on Windows
+            # (NotImplementedError derives from RuntimeError)
             signal.signal(sig, lambda *_: _on_signal())
 
     try:

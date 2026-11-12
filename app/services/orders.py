@@ -379,11 +379,12 @@ class OrderService:
         if target_item is None:
             raise OrderNotFoundError(f"Item with id={item_id} not found in order {order_id}.")
 
-        if order.status not in (OrderStatus.CREATED, OrderStatus.RESERVED):
-            if order.status == OrderStatus.DELIVERED and target_item.status == ItemStatus.PENDING:
-                pass
-            else:
-                raise InvalidStateTransitionError(order.status, ItemStatus.CANCELLED)
+        is_creatable_or_reserved = order.status in (OrderStatus.CREATED, OrderStatus.RESERVED)
+        is_delivered_redo_pending = (
+            order.status == OrderStatus.DELIVERED and target_item.status == ItemStatus.PENDING
+        )
+        if not (is_creatable_or_reserved or is_delivered_redo_pending):
+            raise InvalidStateTransitionError(order.status, ItemStatus.CANCELLED)
 
         logger.info(
             "Item %s of order %s cancelled by actor %s (role=%s). Reason: %s",
