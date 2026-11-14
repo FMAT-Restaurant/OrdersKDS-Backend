@@ -73,6 +73,8 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "${STAGING_API_PORT:-8000}:8000"
+      - "${STAGING_ORDERS_PORT:-8082}:8000"
+      - "${STAGING_KITCHEN_PORT:-8086}:8000"
     depends_on:
       postgres:
         condition: service_healthy

@@ -30,7 +30,12 @@ pytestmark = [pytest.mark.unit, pytest.mark.requirement("RNF-03", "RF-15", "RNF-
 ORDER_ID = UUID("00000000-0000-4000-8000-000000000001")
 ITEM_ID = UUID("00000000-0000-4000-8000-000000000002")
 
-PUBLIC_PATHS = {"/health"}
+PUBLIC_PATHS = {
+    "/health",
+    "/api/v1/health",
+    "/api/v1/orders/health",
+    "/api/v1/kitchen/health",
+}
 PATH_PARAMETER = re.compile(r"\{[^}]+\}")
 
 # Kitchen routes (§5.7: kitchen, chef, admin). Waiter is rejected with 403 FORBIDDEN_ROLE.

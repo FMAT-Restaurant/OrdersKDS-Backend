@@ -27,19 +27,15 @@ register_error_handlers(app)
 
 
 @app.get("/health")
+@app.get("/api/v1/health")
+@app.get("/api/v1/orders/health")
+@app.get("/api/v1/kitchen/health")
 def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
-app.include_router(orders.router)
-app.include_router(kds.router)
-app.include_router(websocket_routes.router)
-
-# Mounts for Kong API Gateway (strip_path: false)
-app.include_router(orders.router, prefix="/api/v1")
-app.include_router(kds.router, prefix="/api/v1")
-app.include_router(websocket_routes.router, prefix="/api/v1")
-
-app.include_router(orders.router, prefix="/api/v1/orders")
-app.include_router(kds.router, prefix="/api/v1/orders")
-app.include_router(websocket_routes.router, prefix="/api/v1/orders")
+# Direct mounts plus Kong API Gateway mounts (strip_path: false)
+for _prefix in ("", "/api/v1", "/api/v1/orders", "/api/v1/kitchen"):
+    app.include_router(orders.router, prefix=_prefix)
+    app.include_router(kds.router, prefix=_prefix)
+    app.include_router(websocket_routes.router, prefix=_prefix)

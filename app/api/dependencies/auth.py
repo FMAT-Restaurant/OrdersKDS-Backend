@@ -46,6 +46,7 @@ ROLE_CLAIM: Final = "role"
 ROLES_CLAIM: Final = "roles"
 PERMISSIONS_CLAIM: Final = "permissions"
 STAFF_ID_CLAIM: Final = "staffId"
+USER_TYPE_CLAIM: Final = "userType"
 
 # Headers injected by the Kong ``auth-perimeter`` plugin (lowercase: lookups are case-insensitive).
 HEADER_USER_ID: Final = "x-user-id"
@@ -53,6 +54,7 @@ HEADER_STAFF_ID: Final = "x-staff-id"
 HEADER_USER_ROLES: Final = "x-user-roles"
 HEADER_USER_ROLE: Final = "x-user-role"  # singular spelling used by the shared integration guide
 HEADER_USER_PERMISSIONS: Final = "x-user-permissions"
+HEADER_USER_TYPE: Final = "x-user-type"
 
 _BEARER_SCHEME: Final = "bearer"
 _AUTH_REQUIRED_MESSAGE: Final = "Authentication required."
@@ -217,6 +219,28 @@ def _expiration(value: object) -> float | None:
     return float(value) if isinstance(value, (int, float)) else None
 
 
+def _infer_roles_from_identity(
+    raw_roles: Iterable[object],
+    user_type: object,
+    permissions: frozenset[str] | None,
+) -> frozenset[Role]:
+    """Resolve caller roles and infer fallback roles from userType or PBAC permissions."""
+    roles = set(resolve_roles(raw_roles))
+    is_admin_type = isinstance(user_type, str) and user_type.strip().upper() == "ADMIN"
+    if is_admin_type or (permissions is not None and WILDCARD_PERMISSION in permissions):
+        roles.add(Role.ADMIN)
+
+    if not roles and permissions:
+        if "kitchen:orders:void_error" in permissions:
+            roles.add(Role.CHEF)
+        elif any(permission.startswith("kitchen:") for permission in permissions):
+            roles.add(Role.KITCHEN)
+        elif any(permission.startswith("orders:") for permission in permissions):
+            roles.add(Role.WAITER)
+
+    return frozenset(roles)
+
+
 def _build_context(
     user_id: object,
     raw_roles: Iterable[object],
@@ -224,9 +248,10 @@ def _build_context(
     permissions: frozenset[str] | None,
     staff_id: object,
     exp: float | None,
+    user_type: object = None,
 ) -> AuthContext:
     """Assemble the caller identity, or raise ``UnauthenticatedError`` when it is unusable."""
-    roles = resolve_roles(raw_roles)
+    roles = _infer_roles_from_identity(raw_roles, user_type, permissions)
     primary = primary_role(roles)
     if not (isinstance(user_id, str) and user_id and primary is not None):
         raise UnauthenticatedError(_AUTH_REQUIRED_MESSAGE)
@@ -247,6 +272,7 @@ def _context_from_claims(claims: dict[str, Any]) -> AuthContext:
         permissions=_permissions_from_claim(claims.get(PERMISSIONS_CLAIM)),
         staff_id=claims.get(STAFF_ID_CLAIM),
         exp=_expiration(claims.get("exp")),
+        user_type=claims.get(USER_TYPE_CLAIM),
     )
 
 
@@ -271,6 +297,7 @@ def _context_from_gateway_headers(
         permissions=None if raw_permissions is None else frozenset(_split_csv(raw_permissions)),
         staff_id=(headers.get(HEADER_STAFF_ID) or "").strip(),
         exp=exp,
+        user_type=headers.get(HEADER_USER_TYPE),
     )
 
 
