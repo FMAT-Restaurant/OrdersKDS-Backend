@@ -13,6 +13,7 @@ from typing import Final
 
 from fastapi import APIRouter, WebSocket
 
+from app.domain.access import KDS_WS
 from app.domain.roles import KITCHEN_ROLES, Role
 from app.realtime.router import KDS_WS_PATH, serve_websocket_connection
 
@@ -26,7 +27,7 @@ router = APIRouter()
 @router.websocket(KDS_WS_PATH)
 async def kds_websocket(websocket: WebSocket) -> None:
     """Kitchen channel endpoint. Roles: kitchen, chef, admin."""
-    await serve_websocket_connection(websocket, KDS_WS_PATH, KDS_ALLOWED_ROLES)
+    await serve_websocket_connection(websocket, KDS_WS_PATH, KDS_ALLOWED_ROLES, policy=KDS_WS)
 
 
 __all__ = [

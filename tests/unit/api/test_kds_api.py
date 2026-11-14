@@ -984,3 +984,55 @@ def test_cancel_redo_item_on_delivered_order_success(
     assert Decimal(str(data["totalAmount"])) == Decimal("200.00")
     cancelled = next(i for i in data["items"] if i["itemId"] == str(redo_item.public_id))
     assert cancelled["status"] == "CANCELLED"
+
+
+def test_kitchen_reject_item_with_partial_available_quantity(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_catalog: FakeCatalogValidator,
+) -> None:
+    """Rejecting 3 requested units with 2 available keeps 2 in availableQuantity & reserved."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=7,
+        status=OrderStatus.RESERVED,
+    )
+    rejected_target = OrderItem(
+        public_id=uuid4(),
+        dish_id="dish-tacos",
+        name="Tacos al Pastor",
+        quantity=3,
+        unit_price=Decimal("120.00"),
+        status=ItemStatus.PENDING,
+    )
+    other_item = OrderItem(
+        public_id=uuid4(),
+        dish_id="dish-agua",
+        name="Agua de Horchata",
+        quantity=1,
+        unit_price=Decimal("40.00"),
+        status=ItemStatus.PENDING,
+    )
+    order.items.extend([rejected_target, other_item])
+    order.recalculate_total()
+    test_db[order.public_id] = order
+
+    resp = client.patch(
+        f"/orders/{order.public_id}/items/{rejected_target.public_id}/kitchen-reject",
+        headers=auth_headers("chef"),
+        json={"reason": "Solo alcanza para 2 órdenes", "availableQuantity": 2},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "REJECTED"
+    details = data["rejectionDetails"]
+    assert details["rejectedItems"][0]["requestedQuantity"] == 3
+    assert details["rejectedItems"][0]["availableQuantity"] == 2
+    reserved_by_item = {
+        entry["itemId"]: entry["reservedQuantity"] for entry in details["reservedItems"]
+    }
+    assert reserved_by_item[str(rejected_target.public_id)] == 2
+    assert reserved_by_item[str(other_item.public_id)] == 1
+    assert fake_catalog.availabilities.get("dish-tacos") is None

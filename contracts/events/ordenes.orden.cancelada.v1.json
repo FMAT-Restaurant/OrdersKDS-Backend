@@ -23,6 +23,9 @@
         "null"
       ]
     },
+    "reason": {
+      "type": "string"
+    },
     "itemsCancelados": {
       "type": "array",
       "description": "List of dishes and quantities cancelled with the order.",
@@ -34,6 +37,18 @@
         ],
         "properties": {
           "offerId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "plateId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "itemId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourceId": {
             "type": "string",
             "minLength": 1
           },

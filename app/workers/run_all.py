@@ -26,8 +26,14 @@ from app.core.config import (
     get_redis_url,
     get_saga_timeout_settings,
 )
+from app.messaging.consumers.base import EventConsumerDispatcher
+from app.messaging.consumers.catalog import CatalogConsumer
 from app.messaging.publisher import EventPublisher
+from app.realtime.redis_bridge import RedisRealtimeBridge
+from app.realtime.router import realtime_router
+from app.services.notifications import default_notifier
 from app.workers.catalog_reconciliation import CatalogReconciliationWorker
+from app.workers.inbound_consumer import InboundConsumerWorker
 from app.workers.outbox_worker import OutboxWorker
 from app.workers.saga_timeout_watcher import SagaTimeoutWatcher
 
@@ -64,6 +70,7 @@ async def main() -> None:
         url=rabbitmq_settings.url,
         exchange_name=rabbitmq_settings.exchange,
         vhost=rabbitmq_settings.vhost,
+        dual_routing=True,
     )
 
     stop_event = asyncio.Event()
@@ -95,15 +102,31 @@ async def main() -> None:
             session_factory=session_factory,
             settings=saga_settings,
         )
+        catalog_redis = Redis.from_url(get_redis_url(), decode_responses=True)
+        realtime_bridge = RedisRealtimeBridge(catalog_redis, router=realtime_router)
+        realtime_router.set_external_publisher(realtime_bridge.publish)
+        catalog_repository = CatalogRepository(RedisHashAdapter(catalog_redis))
+        catalog_consumer = CatalogConsumer(catalog_repository)
+        dispatcher = EventConsumerDispatcher(
+            session_factory=session_factory,
+            notifier=default_notifier,
+            catalog_consumer=catalog_consumer,
+        )
+        inbound_worker = InboundConsumerWorker(
+            dispatcher=dispatcher,
+            url=rabbitmq_settings.url,
+            vhost=rabbitmq_settings.vhost,
+            orders_exchange=rabbitmq_settings.exchange,
+        )
 
         workers = [
             outbox_worker.run(stop_event=stop_event),
             saga_watcher.run(stop_event=stop_event),
+            inbound_worker.run(stop_event=stop_event),
         ]
         if catalog_settings.sync_url is not None:
-            catalog_redis = Redis.from_url(get_redis_url(), decode_responses=True)
             catalog_worker = CatalogReconciliationWorker(
-                CatalogRepository(RedisHashAdapter(catalog_redis)),
+                catalog_repository,
                 sync_url=catalog_settings.sync_url,
                 interval_seconds=catalog_settings.interval_seconds,
             )
@@ -111,6 +134,7 @@ async def main() -> None:
         await asyncio.gather(*workers)
     finally:
         logger.info("Cleaning up worker resources...")
+        realtime_router.set_external_publisher(None)
         if catalog_redis is not None:
             await catalog_redis.aclose()
         await publisher.close()

@@ -514,3 +514,69 @@ def test_update_order_items_supports_client_identifiers_and_recovers_price(
     assert data["items"][0]["notes"] == "Bien cocida"
     # Verifies notify_order_changed was called
     assert any(o.public_id == order.public_id for o in spy_notifier.notified_orders)
+
+
+def test_update_order_items_persists_distinct_source_id_and_offer_id(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_catalog: FakeCatalogValidator,
+) -> None:
+    """Persist physical sourceId in dish_id and commercial offerId in offer_id, returning both."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=9,
+        status=OrderStatus.CREATED,
+    )
+    test_db[order.public_id] = order
+
+    resp = client.patch(
+        f"/orders/{order.public_id}/items",
+        headers=auth_headers("waiter"),
+        json={
+            "items": [
+                {
+                    "dishId": "offer-promo-1",
+                    "offerId": "offer-promo-1",
+                    "sourceId": "recipe-taco-al-pastor",
+                    "name": "Orden de Tacos al Pastor",
+                    "quantity": 2,
+                    "unitPrice": "110.00",
+                    "modifiers": [],
+                }
+            ]
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["items"]) == 1
+    item_json = body["items"][0]
+    assert item_json["dishId"] == "recipe-taco-al-pastor"
+    assert item_json["sourceId"] == "recipe-taco-al-pastor"
+    assert item_json["offerId"] == "offer-promo-1"
+
+    saved_item = order.items[0]
+    assert saved_item.dish_id == "recipe-taco-al-pastor"
+    assert saved_item.offer_id == "offer-promo-1"
+
+    # Unavailable offerId is also rejected even when physical sourceId is available
+    fake_catalog.unavailable_ids.add("offer-promo-1")
+    blocked_resp = client.patch(
+        f"/orders/{order.public_id}/items",
+        headers=auth_headers("waiter"),
+        json={
+            "items": [
+                {
+                    "dishId": "offer-promo-1",
+                    "offerId": "offer-promo-1",
+                    "sourceId": "recipe-taco-al-pastor",
+                    "name": "Orden de Tacos al Pastor",
+                    "quantity": 1,
+                    "unitPrice": "110.00",
+                }
+            ]
+        },
+    )
+    assert blocked_resp.status_code == 422
+    assert blocked_resp.json()["error"]["code"] == ErrorCode.DISH_UNAVAILABLE

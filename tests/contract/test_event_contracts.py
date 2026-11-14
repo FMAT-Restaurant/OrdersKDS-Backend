@@ -262,6 +262,60 @@ def test_void_kitchen_error_event_satisfies_contract() -> None:
 
 
 @pytest.mark.contract
+@pytest.mark.requirement("RNF-13", "CT-23")
+def test_dual_source_and_offer_identifiers_satisfy_event_contracts() -> None:
+    """Verify OrderCreated, OrderInPreparation, KitchenDishRejected, DishPrepared carry IDs."""
+    order_id = uuid4()
+    item_id = uuid4()
+    dual_item = OrderCreatedItem(
+        offerId="offer-combo-1",
+        plateId="recipe-burger-1",
+        sourceId="recipe-burger-1",
+        quantity=2,
+    )
+
+    created_payload = OrderCreatedEvent.for_order(order_id, items=[dual_item]).model_dump(
+        mode="json", by_alias=True
+    )
+    validate_event_payload(EventName.ORDER_CREATED, created_payload)
+    assert created_payload["items"][0]["plateId"] == "recipe-burger-1"
+    assert created_payload["items"][0]["sourceId"] == "recipe-burger-1"
+    assert created_payload["items"][0]["offerId"] == "offer-combo-1"
+
+    prep_payload = OrderInPreparationEvent.for_order(order_id, items=[dual_item]).model_dump(
+        mode="json", by_alias=True
+    )
+    validate_event_payload(EventName.ORDER_IN_PREPARATION, prep_payload)
+    assert prep_payload["items"][0]["plateId"] == "recipe-burger-1"
+    assert prep_payload["items"][0]["offerId"] == "offer-combo-1"
+
+    rejected_payload = KitchenDishRejectedEvent.for_item(
+        order_id,
+        item_id,
+        offer_id="offer-combo-1",
+        plate_id="recipe-burger-1",
+        quantity=2,
+        reason="Sin pan brioche",
+    ).model_dump(mode="json", by_alias=True)
+    validate_event_payload(EventName.KITCHEN_DISH_REJECTED, rejected_payload)
+    assert rejected_payload["plateId"] == "recipe-burger-1"
+    assert rejected_payload["offerId"] == "offer-combo-1"
+
+    prepared_payload = DishPreparedEvent.for_item(
+        order_id,
+        item_id,
+        offer_id="offer-combo-1",
+        plate_id="recipe-burger-1",
+        source_id="recipe-burger-1",
+        quantity=2,
+    ).model_dump(mode="json", by_alias=True)
+    validate_event_payload(EventName.DISH_PREPARED, prepared_payload)
+    assert prepared_payload["plateId"] == "recipe-burger-1"
+    assert prepared_payload["sourceId"] == "recipe-burger-1"
+    assert prepared_payload["offerId"] == "offer-combo-1"
+
+
+@pytest.mark.contract
 @pytest.mark.requirement("RF-20", "RF-21", "RNF-13", "CT-08", "CT-15", "IT-18")
 def test_bill_requested_event_satisfies_contract() -> None:
     """CT-08, CT-15: Verify BillRequestedEvent validates against its JSON Schema contract."""

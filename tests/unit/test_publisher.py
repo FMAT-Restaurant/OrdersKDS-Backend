@@ -5,6 +5,7 @@ Satisfies: RNF-01, RNF-13, RF-10, RF-19, OP-10
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -231,3 +232,37 @@ async def test_async_context_manager() -> None:
         ) as pub:
             assert pub.is_connected
         assert not pub.is_connected
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("RNF-01")
+@pytest.mark.asyncio
+async def test_publish_with_dual_routing_emits_secondary_routing_key() -> None:
+    mock_exchange = AsyncMock()
+    publisher = EventPublisher(
+        url="amqp://user:pass@localhost:5672/",
+        exchange_name="test.topic",
+        vhost="/",
+        dual_routing=True,
+    )
+    publisher._exchange = mock_exchange
+    publisher._connection = MagicMock(is_closed=False)
+    publisher._channel = MagicMock(is_closed=False)
+
+    event = OrderCreatedEvent.for_order(uuid4(), correlation_id=uuid4())
+    payload = event.model_dump(mode="json", by_alias=True)
+
+    await publisher.publish(
+        event_type=EventName.ORDER_CREATED,
+        payload=payload,
+        event_id=event.event_id,
+        correlation_id=event.correlation_id,
+    )
+
+    # Primary key + secondary key
+    assert mock_exchange.publish.await_count == 2
+    calls = mock_exchange.publish.call_args_list
+    assert calls[0].kwargs["routing_key"] == EventName.ORDER_CREATED
+    assert calls[1].kwargs["routing_key"] == "ordenes.order.created"
+    dual_body = json.loads(calls[1].kwargs["message"].body.decode("utf-8"))
+    assert "items" in dual_body

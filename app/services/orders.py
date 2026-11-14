@@ -19,6 +19,18 @@ from sqlalchemy.orm.exc import StaleDataError
 from app.api.dependencies.auth import AuthContext
 from app.db.models import Order, OrderItem
 from app.db.session import get_session
+from app.domain.access import (
+    ITEM_CANCEL,
+    ITEM_READY,
+    ITEM_REDO,
+    ITEM_REJECT,
+    ORDER_READY,
+    REQUEST_BILL,
+    START_PREPARATION,
+    VOID_ADMIN,
+    VOID_KITCHEN_ERROR,
+    AccessPolicy,
+)
 from app.domain.errors import (
     ForbiddenRoleError,
     InvalidOrderItemError,
@@ -28,7 +40,6 @@ from app.domain.errors import (
     VersionConflictError,
 )
 from app.domain.order_status import ItemStatus, OrderStatus
-from app.domain.roles import KITCHEN_ROLES, VOID_KITCHEN_ERROR_ROLES, WAITER_ROLES, Role
 from app.messaging.events import (
     BillRequestedEvent,
     ChargeRequestedEvent,
@@ -67,13 +78,29 @@ _NO_REASON_PROVIDED = "No reason provided"
 
 
 def _consolidate_order_items(items: list[OrderItem]) -> list[OrderCreatedItem]:
-    """Group active non-cancelled items by dish_id (offerId) and sum quantities."""
-    quantities: dict[str, int] = {}
+    """Group active non-cancelled items by physical recipe/offer IDs and sum quantities."""
+    grouped: dict[tuple[str, str | None], int] = {}
     for item in items:
         if item.status == ItemStatus.CANCELLED or not item.dish_id:
             continue
-        quantities[item.dish_id] = quantities.get(item.dish_id, 0) + item.quantity
-    return [OrderCreatedItem(offerId=dish_id, quantity=qty) for dish_id, qty in quantities.items()]
+        raw_offer_id = getattr(item, "offer_id", None)
+        key = (item.dish_id, raw_offer_id)
+        grouped[key] = grouped.get(key, 0) + item.quantity
+
+    consolidated: list[OrderCreatedItem] = []
+    for (dish_id, raw_offer_id), qty in grouped.items():
+        if raw_offer_id and raw_offer_id != dish_id:
+            consolidated.append(
+                OrderCreatedItem(
+                    offerId=raw_offer_id,
+                    plateId=dish_id,
+                    sourceId=dish_id,
+                    quantity=qty,
+                )
+            )
+        else:
+            consolidated.append(OrderCreatedItem(offerId=dish_id, quantity=qty))
+    return consolidated
 
 
 def _validate_order_items(items: list[OrderItem]) -> None:
@@ -89,10 +116,11 @@ def _build_charge_items(items: list[OrderItem]) -> list[ChargeRequestedItem]:
     for item in items:
         if item.status == ItemStatus.CANCELLED:
             continue
+        offer_id = getattr(item, "offer_id", None) or item.dish_id or str(item.public_id)
         charge_items.append(
             ChargeRequestedItem(
                 itemId=item.public_id,
-                plateId=item.dish_id or str(item.public_id),
+                plateId=offer_id,
                 name=item.name,
                 quantity=item.quantity,
                 unitPrice=item.unit_price,
@@ -119,13 +147,32 @@ class OrderService:
         self._notifier = notifier or default_notifier
         self._catalog_repo = catalog_repo
 
-    def _verify_kitchen_role(self, auth: AuthContext) -> None:
-        if auth.role not in KITCHEN_ROLES:
-            raise ForbiddenRoleError("Role not allowed for kitchen action.")
+    def _verify_policy(self, auth: AuthContext, policy: AccessPolicy, message: str) -> None:
+        if not auth.is_authorized(policy):
+            raise ForbiddenRoleError(message)
 
-    def _verify_waiter_role(self, auth: AuthContext) -> None:
-        if auth.role not in WAITER_ROLES:
-            raise ForbiddenRoleError("Role not allowed for waiter action.")
+    def _stage_dish_prepared(
+        self,
+        order: Order,
+        item: OrderItem,
+        *,
+        is_redo: bool = False,
+    ) -> None:
+        dish_id = item.dish_id
+        raw_offer_id = getattr(item, "offer_id", None)
+        effective_offer_id = raw_offer_id or dish_id
+        has_distinct_plate = bool(raw_offer_id and dish_id and raw_offer_id != dish_id)
+        self._outbox.add(
+            DishPreparedEvent.for_item(
+                order.public_id,
+                item.public_id,
+                offer_id=effective_offer_id,
+                plate_id=dish_id if has_distinct_plate else None,
+                source_id=dish_id if has_distinct_plate else None,
+                quantity=item.quantity,
+                is_redo=is_redo,
+            )
+        )
 
     def _sync_delivery_if_all_ready(self, order: Order) -> bool:
         """Move order and all items to DELIVERED if every item is ready/delivered."""
@@ -150,7 +197,11 @@ class OrderService:
         auth: AuthContext,
     ) -> Order:
         """Mark an individual order item as READY (RF-09, RF-10, OP-08)."""
-        self._verify_kitchen_role(auth)
+        self._verify_policy(
+            auth,
+            ITEM_READY,
+            "Role or permission not allowed for marking item ready.",
+        )
         order = await self._orders.get_by_public_id(order_id)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
@@ -167,18 +218,16 @@ class OrderService:
         elif target_item.status == ItemStatus.PENDING:
             if order.status not in (OrderStatus.IN_PREPARATION, OrderStatus.DELIVERED):
                 raise InvalidStateTransitionError(order.status, OrderStatus.DELIVERED)
+            is_redo = order.status == OrderStatus.DELIVERED
             target_item.mark_ready()
-            self._outbox.add(
-                DishPreparedEvent.for_item(
-                    order.public_id,
-                    target_item.public_id,
-                    offer_id=target_item.dish_id,
-                    quantity=target_item.quantity,
-                    is_redo=order.status == OrderStatus.DELIVERED,
-                )
+            self._stage_dish_prepared(
+                order,
+                target_item,
+                is_redo=is_redo,
             )
-            if order.status == OrderStatus.DELIVERED:
+            if is_redo:
                 target_item.mark_delivered()
+                self._restore_pre_redo_note(order, target_item)
 
         delivered_now = self._sync_delivery_if_all_ready(order)
         self._orders.save(order)
@@ -198,7 +247,7 @@ class OrderService:
         note: str | None,
     ) -> Order:
         """Return one delivered item to PENDING without changing its order (RF-22, OP-12)."""
-        self._verify_waiter_role(auth)
+        self._verify_policy(auth, ITEM_REDO, "Role or permission not allowed for redoing item.")
         normalized_note = note.strip() if note is not None else ""
         if not normalized_note:
             raise NoteRequiredError()
@@ -213,6 +262,7 @@ class OrderService:
         if order.status != OrderStatus.DELIVERED:
             raise InvalidStateTransitionError(order.status, OrderStatus.DELIVERED)
 
+        self._save_pre_redo_note(order, target_item)
         target_item.mark_pending_for_redo(normalized_note)
         self._orders.save(order)
         await self._session.commit()
@@ -225,7 +275,11 @@ class OrderService:
         auth: AuthContext,
     ) -> Order:
         """Mark all pending items of an order as READY and deliver order (RF-11, OP-08)."""
-        self._verify_kitchen_role(auth)
+        self._verify_policy(
+            auth,
+            ORDER_READY,
+            "Role or permission not allowed for marking order ready.",
+        )
         order = await self._orders.get_by_public_id(order_id)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
@@ -237,19 +291,13 @@ class OrderService:
         for item in order.items:
             if item.status == ItemStatus.PENDING:
                 item.mark_ready()
-                self._outbox.add(
-                    DishPreparedEvent.for_item(
-                        order.public_id,
-                        item.public_id,
-                        offer_id=item.dish_id,
-                        quantity=item.quantity,
-                    )
-                )
+                self._stage_dish_prepared(order, item)
 
         order.mark_delivered()
         for item in order.items:
             if item.status == ItemStatus.READY:
                 item.mark_delivered()
+                self._restore_pre_redo_note(order, item)
 
         self._orders.save(order)
         await self._session.commit()
@@ -266,7 +314,11 @@ class OrderService:
         Roles: kitchen, chef, admin.
         Inventory consumes reserved stock and closes reservation TTL upon receiving this event.
         """
-        self._verify_kitchen_role(auth)
+        self._verify_policy(
+            auth,
+            START_PREPARATION,
+            "Role or permission not allowed for starting preparation.",
+        )
         order = await self._orders.get_by_public_id(order_id)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
@@ -295,14 +347,19 @@ class OrderService:
         item_id: UUID,
         auth: AuthContext,
         reason: str = "Insumo físico insuficiente en cocina",
+        available_quantity: int = 0,
     ) -> Order:
         """Kitchen rejects an item from RESERVED order due to lack of physical stock.
 
-        Updates local Redis catalog availability (available: false), publishes
-        KitchenDishRejectedEvent to Inventory/Menu, and transitions order to REJECTED
-        so the waiter can edit and re-confirm the order.
+        Updates local Redis catalog availability (available: false when 0 units remain),
+        publishes KitchenDishRejectedEvent to Inventory/Menu, and transitions order to REJECTED
+        with partial/zero availableQuantity so the waiter can edit and re-confirm the order.
         """
-        self._verify_kitchen_role(auth)
+        self._verify_policy(
+            auth,
+            ITEM_REJECT,
+            "Role or permission not allowed for rejecting item.",
+        )
         order = await self._orders.get_by_public_id(order_id)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
@@ -318,16 +375,23 @@ class OrderService:
             raise InvalidStateTransitionError(target_item.status, ItemStatus.CANCELLED)
 
         dish_id = target_item.dish_id or str(target_item.public_id)
+        offer_id = getattr(target_item, "offer_id", None) or dish_id
+        max_partial = max(0, target_item.quantity - 1)
+        effective_available = max(0, min(available_quantity, max_partial))
 
-        # 1. Update local Redis catalog to immediately block new additions
-        if self._catalog_repo is not None:
+        # 1. Update local Redis catalog to block new additions when zero physical units remain
+        if self._catalog_repo is not None and effective_available == 0:
             await self._catalog_repo.set_availability(dish_id, False)
+            if offer_id != dish_id:
+                await self._catalog_repo.set_availability(offer_id, False)
 
         # 2. Stage KitchenDishRejectedEvent into Outbox for Inventory and Menu
         event = KitchenDishRejectedEvent.for_item(
             order_id=order.public_id,
             item_id=target_item.public_id,
-            offer_id=dish_id,
+            offer_id=offer_id,
+            plate_id=dish_id,
+            source_id=dish_id,
             quantity=target_item.quantity,
             reason=reason,
         )
@@ -337,19 +401,14 @@ class OrderService:
 
         # 3. Transition handling (RESERVED -> REJECTED; DELIVERED -> cancel item & keep DELIVERED)
         if order.status == OrderStatus.RESERVED:
-            rejection_details: dict[str, object] = {
-                "source": "kitchen",
-                "rejectedItems": [
-                    {
-                        "itemId": str(target_item.public_id),
-                        "offerId": dish_id,
-                        "name": target_item.name,
-                        "requestedQuantity": target_item.quantity,
-                        "availableQuantity": 0,
-                        "reason": reason,
-                    }
-                ],
-            }
+            rejection_details = self._build_kitchen_rejection_details(
+                order=order,
+                target_item=target_item,
+                offer_id=offer_id,
+                dish_id=dish_id,
+                reason=reason,
+                effective_available=effective_available,
+            )
             order.mark_rejected(details=rejection_details)
         else:
             target_item.mark_cancelled()
@@ -370,7 +429,11 @@ class OrderService:
         reason: str | None = None,
     ) -> Order:
         """Cancel a single item in an order while still in CREATED or RESERVED status."""
-        self._verify_kitchen_role(auth)
+        self._verify_policy(
+            auth,
+            ITEM_CANCEL,
+            "Role or permission not allowed for cancelling item.",
+        )
         order = await self._orders.get_by_public_id(order_id)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
@@ -518,8 +581,11 @@ class OrderService:
             ForbiddenRoleError: If caller lacks admin role (403).
             InvalidStateTransitionError: If order is not in IN_PREPARATION status (409).
         """
-        if auth.role != Role.ADMIN:
-            raise ForbiddenRoleError("Only administrators can administratively void an order.")
+        self._verify_policy(
+            auth,
+            VOID_ADMIN,
+            "Only administrators can administratively void an order.",
+        )
 
         order = await self._orders.get_by_public_id(order_id)
         if order is None:
@@ -609,10 +675,11 @@ class OrderService:
             OrderNotFoundError: If order does not exist (404).
             InvalidStateTransitionError: If order is not in IN_PREPARATION status (409).
         """
-        if auth.role not in VOID_KITCHEN_ERROR_ROLES:
-            raise ForbiddenRoleError(
-                "Only administrators and chefs can void an order for kitchen error."
-            )
+        self._verify_policy(
+            auth,
+            VOID_KITCHEN_ERROR,
+            "Only administrators and chefs can void an order for kitchen error.",
+        )
 
         if not note or not note.strip():
             raise NoteRequiredError("A non-empty note is required for a kitchen error void.")
@@ -680,10 +747,11 @@ class OrderService:
             OrderNotFoundError: If order does not exist (404).
             InvalidStateTransitionError: If order is not in DELIVERED status (409).
         """
-        if auth.role not in WAITER_ROLES:
-            raise ForbiddenRoleError(
-                "Only waiters and administrators can request the bill for an order."
-            )
+        self._verify_policy(
+            auth,
+            REQUEST_BILL,
+            "Only waiters and administrators can request the bill for an order.",
+        )
 
         order = await self._orders.get_by_public_id(order_id)
         if order is None:
@@ -759,6 +827,101 @@ class OrderService:
         self._orders.save(order)
         await self._session.commit()
         return order
+
+    def _save_pre_redo_note(self, order: Order, item: OrderItem) -> None:
+        """Persist pre-redo notes in order metadata so completion restores them cleanly."""
+        details: dict[str, object] = (
+            dict(order.rejection_details) if isinstance(order.rejection_details, dict) else {}
+        )
+        raw_map = details.get("redoOriginalNotes")
+        redo_map: dict[str, str | None] = (
+            {str(k): (str(v) if v is not None else None) for k, v in raw_map.items()}
+            if isinstance(raw_map, dict)
+            else {}
+        )
+        item_key = str(item.public_id)
+        if item_key not in redo_map and not getattr(item, "_has_pre_redo_notes", False):
+            redo_map[item_key] = item.notes
+        details["redoOriginalNotes"] = redo_map
+        order.rejection_details = details
+
+    def _restore_pre_redo_note(self, order: Order, item: OrderItem) -> None:
+        """Restore pre-redo preparation notes once kitchen completes a redone item."""
+        details: dict[str, object] = (
+            dict(order.rejection_details) if isinstance(order.rejection_details, dict) else {}
+        )
+        raw_map = details.get("redoOriginalNotes")
+        item_key = str(item.public_id)
+        if isinstance(raw_map, dict) and item_key in raw_map:
+            redo_map: dict[str, object] = dict(raw_map)
+            raw_original = redo_map.pop(item_key)
+            original_note = str(raw_original) if raw_original is not None else None
+            item.restore_notes_after_redo(fallback_original=original_note, has_fallback=True)
+            if redo_map:
+                details["redoOriginalNotes"] = redo_map
+                order.rejection_details = details
+            else:
+                details.pop("redoOriginalNotes", None)
+                order.rejection_details = details or None
+            return
+        if getattr(item, "_has_pre_redo_notes", False):
+            item.restore_notes_after_redo()
+
+    def _build_kitchen_rejection_details(
+        self,
+        *,
+        order: Order,
+        target_item: OrderItem,
+        offer_id: str,
+        dish_id: str,
+        reason: str,
+        effective_available: int,
+    ) -> dict[str, object]:
+        """Build structured rejectionDetails payload including partial availableQuantity."""
+        reserved_items: list[dict[str, object]] = []
+        if effective_available > 0:
+            reserved_items.append(
+                {
+                    "itemId": str(target_item.public_id),
+                    "offerId": offer_id,
+                    "dishId": dish_id,
+                    "name": target_item.name,
+                    "reservedQuantity": effective_available,
+                }
+            )
+        for item in order.items:
+            if item.public_id == target_item.public_id or item.status == ItemStatus.CANCELLED:
+                continue
+            item_dish = item.dish_id or str(item.public_id)
+            item_offer = getattr(item, "offer_id", None) or item_dish
+            reserved_items.append(
+                {
+                    "itemId": str(item.public_id),
+                    "offerId": item_offer,
+                    "dishId": item_dish,
+                    "name": item.name,
+                    "reservedQuantity": item.quantity,
+                }
+            )
+        details: dict[str, object] = {
+            "source": "kitchen",
+            "reason": reason,
+            "rejectedItems": [
+                {
+                    "itemId": str(target_item.public_id),
+                    "offerId": offer_id,
+                    "dishId": dish_id,
+                    "sourceId": dish_id,
+                    "name": target_item.name,
+                    "requestedQuantity": target_item.quantity,
+                    "availableQuantity": effective_available,
+                    "reason": reason,
+                }
+            ],
+        }
+        if reserved_items:
+            details["reservedItems"] = reserved_items
+        return details
 
 
 def get_order_service(

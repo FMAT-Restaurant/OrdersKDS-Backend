@@ -20,7 +20,7 @@ from app.core.config import (
 @pytest.mark.requirement("OP-10", "RNF-01")
 def test_rabbitmq_settings_fails_when_url_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("RABBITMQ_URL", raising=False)
-    monkeypatch.setenv("RABBITMQ_EXCHANGE", "restaurant.topic")
+    monkeypatch.setenv("RABBITMQ_EXCHANGE", "ordenes.topic")
     monkeypatch.setenv("RABBITMQ_VHOST", "/")
 
     with pytest.raises(RuntimeError, match="Missing required environment variable: RABBITMQ_URL"):
@@ -46,7 +46,7 @@ def test_rabbitmq_settings_fails_when_exchange_missing(
 @pytest.mark.requirement("OP-10", "RNF-01")
 def test_rabbitmq_settings_fails_when_vhost_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RABBITMQ_URL", "amqp://user:pass@localhost:5672/")
-    monkeypatch.setenv("RABBITMQ_EXCHANGE", "restaurant.topic")
+    monkeypatch.setenv("RABBITMQ_EXCHANGE", "ordenes.topic")
     monkeypatch.delenv("RABBITMQ_VHOST", raising=False)
 
     with pytest.raises(
@@ -61,12 +61,12 @@ def test_rabbitmq_settings_succeeds_when_all_variables_present(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("RABBITMQ_URL", "amqp://ordenes:ordenes@localhost:5672/")
-    monkeypatch.setenv("RABBITMQ_EXCHANGE", "restaurant.topic")
+    monkeypatch.setenv("RABBITMQ_EXCHANGE", "ordenes.topic")
     monkeypatch.setenv("RABBITMQ_VHOST", "/staging")
 
     settings = get_rabbitmq_settings()
     assert settings.url == "amqp://ordenes:ordenes@localhost:5672/"
-    assert settings.exchange == "restaurant.topic"
+    assert settings.exchange == "ordenes.topic"
     assert settings.vhost == "/staging"
 
 

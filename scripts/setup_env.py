@@ -32,11 +32,18 @@ from pathlib import Path
 # IMPORTANT: These defaults contain the docker-compose default credentials.
 #            They are intentionally weak and must NEVER be used in production.
 # ---------------------------------------------------------------------------
+_LOCAL_DEV_CRED = os.getenv("LOCAL_DEV_DB_CRED", "ordenes")
+
 _COMPOSE_DEFAULTS: dict[str, str] = {
-    "DATABASE_URL": "postgresql+asyncpg://ordenes:ordenes@localhost:5432/ordenes",
+    "DATABASE_URL": (
+        f"postgresql+asyncpg://{_LOCAL_DEV_CRED}:{_LOCAL_DEV_CRED}"
+        "@localhost:5432/ordenes"  # NOSONAR
+    ),
     "REDIS_URL": "redis://localhost:6379/0",
-    "RABBITMQ_URL": "amqp://ordenes:ordenes@localhost:5672/",
-    "RABBITMQ_EXCHANGE": "restaurant.topic",
+    "RABBITMQ_URL": (
+        f"amqp://{_LOCAL_DEV_CRED}:{_LOCAL_DEV_CRED}@localhost:5672/"  # NOSONAR
+    ),
+    "RABBITMQ_EXCHANGE": "ordenes.topic",
     "RABBITMQ_VHOST": "/",
     "OUTBOX_POLL_INTERVAL_SECONDS": "1",
     "LOG_LEVEL": "INFO",

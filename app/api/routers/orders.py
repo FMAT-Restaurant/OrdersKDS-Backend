@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from collections.abc import Sequence
 from decimal import Decimal
 from typing import Annotated
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
@@ -20,11 +21,12 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from fastapi import APIRouter, Depends, Header, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies.auth import AuthContext, require_roles
+from app.api.dependencies.auth import AuthContext, require_access
 from app.api.schemas.errors import ErrorResponse
 from app.api.schemas.order import (
     CancelOrderRequest,
     CreateOrderRequest,
+    OrderItemInput,
     OrderResponse,
     RedoItemRequest,
     TransferOrderRequest,
@@ -34,13 +36,25 @@ from app.api.schemas.order import (
 )
 from app.db.models import Order, OrderItem
 from app.db.session import get_session
+from app.domain.access import (
+    ITEM_REDO,
+    ORDER_CANCEL,
+    ORDER_CONFIRM,
+    ORDER_CREATE,
+    ORDER_DETAIL,
+    ORDER_LIST,
+    ORDER_TRANSFER,
+    ORDER_UPDATE,
+    REQUEST_BILL,
+    VOID_ADMIN,
+    VOID_KITCHEN_ERROR,
+)
 from app.domain.errors import (
     InvalidStateTransitionError,
     NoteRequiredError,
     OrderNotFoundError,
 )
 from app.domain.order_status import ItemStatus, OrderStatus
-from app.domain.roles import VOID_KITCHEN_ERROR_ROLES, WAITER_ROLES, Role
 from app.repositories.orders import OrderRepository
 from app.services.catalog import CatalogValidatorProtocol, get_catalog_validator
 from app.services.notifications import (
@@ -85,7 +99,7 @@ def _parse_actor_uuid(user_id_str: str) -> UUID:
     description="List orders optionally filtered by status enum or dining session (RF-18).",
 )
 async def list_orders(
-    auth: Annotated[AuthContext, Depends(require_roles(Role.WAITER, Role.ADMIN))],
+    auth: Annotated[AuthContext, Depends(require_access(ORDER_LIST))],
     session: Annotated[AsyncSession, Depends(get_session)],
     status: Annotated[
         OrderStatus | None, Query(description="Filter by order status enum.")
@@ -122,7 +136,7 @@ async def list_orders(
 async def transfer_order(
     order_id: OrderIdPath,
     payload: TransferOrderRequest,
-    auth: Annotated[AuthContext, Depends(require_roles(Role.WAITER, Role.ADMIN))],
+    auth: Annotated[AuthContext, Depends(require_access(ORDER_TRANSFER))],
     order_service: Annotated[OrderService, Depends(get_order_service)],
     if_match: Annotated[str | None, Header(alias="If-Match")] = None,
 ) -> OrderResponse:
@@ -165,7 +179,7 @@ async def transfer_order(
 )
 async def create_order(
     payload: CreateOrderRequest,
-    auth: Annotated[AuthContext, Depends(require_roles(Role.WAITER, Role.ADMIN))],
+    auth: Annotated[AuthContext, Depends(require_access(ORDER_CREATE))],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OrderResponse:
     """Create a new order draft for dining room or takeaway (RF-12, RF-13, RF-15).
@@ -203,6 +217,115 @@ async def create_order(
     return OrderResponse.from_model(order)
 
 
+def _ensure_order_modifiable(order: Order) -> None:
+    """Ensure the order is in a modifiable state and reopen rejected drafts."""
+    if order.status == OrderStatus.REJECTED:
+        order.reopen_as_draft()
+    elif order.status != OrderStatus.CREATED:
+        raise InvalidStateTransitionError(order.status, "ITEMS_MODIFIED")
+
+    if order.confirmed_at is not None:
+        raise InvalidStateTransitionError(
+            order.status,
+            "Cannot modify items on confirmed order awaiting stock",
+        )
+
+
+def _matches_original_item(candidate: OrderItem, item_input: OrderItemInput) -> bool:
+    """Return True when an existing order item matches an incoming item payload."""
+    candidate_id = str(candidate.public_id)
+    matches_id = candidate_id in {
+        identifier for identifier in (item_input.id, item_input.item_id) if identifier
+    }
+    matches_dish = candidate.dish_id in {
+        identifier for identifier in (item_input.source_id, item_input.dish_id) if identifier
+    }
+    return matches_id or matches_dish or candidate.name == item_input.name
+
+
+def _find_matching_original_item(
+    original_items: Sequence[OrderItem],
+    item_input: OrderItemInput,
+) -> OrderItem | None:
+    """Find the matching original item for price and identifier fallback."""
+    return next(
+        (
+            candidate
+            for candidate in original_items
+            if _matches_original_item(candidate, item_input)
+        ),
+        None,
+    )
+
+
+def _first_non_empty(*values: str | None) -> str | None:
+    """Return the first non-empty string value."""
+    return next((value for value in values if value), None)
+
+
+def _resolve_effective_item_ids(
+    item_input: OrderItemInput,
+    matched_original: OrderItem | None,
+) -> tuple[str, str]:
+    """Resolve physical dish/source ID and commercial offer ID with fallbacks."""
+    matched_dish_id = matched_original.dish_id if matched_original else None
+    matched_offer_id = getattr(matched_original, "offer_id", None) if matched_original else None
+    effective_dish_id = (
+        _first_non_empty(
+            item_input.source_id,
+            item_input.dish_id,
+            matched_dish_id,
+            item_input.offer_id,
+            item_input.item_id,
+            item_input.id,
+        )
+        or "unknown"
+    )
+    effective_offer_id = (
+        _first_non_empty(item_input.offer_id, matched_offer_id) or effective_dish_id
+    )
+    return effective_dish_id, effective_offer_id
+
+
+def _resolve_effective_unit_price(
+    item_input: OrderItemInput,
+    matched_original: OrderItem | None,
+) -> Decimal:
+    """Freeze item unit price using matched original item price when omitted."""
+    if item_input.unit_price <= Decimal("0.00") and matched_original is not None:
+        return matched_original.unit_price
+    return item_input.unit_price
+
+
+async def _build_replacement_order_item(
+    item_input: OrderItemInput,
+    original_items: Sequence[OrderItem],
+    catalog_validator: CatalogValidatorProtocol,
+) -> OrderItem:
+    """Validate availability and construct a replacement OrderItem model."""
+    matched_original = _find_matching_original_item(original_items, item_input)
+    effective_dish_id, effective_offer_id = _resolve_effective_item_ids(
+        item_input,
+        matched_original,
+    )
+    await catalog_validator.validate_dish_available(effective_dish_id)
+    if effective_offer_id != effective_dish_id:
+        await catalog_validator.validate_dish_available(effective_offer_id)
+
+    effective_price = _resolve_effective_unit_price(item_input, matched_original)
+    return OrderItem(
+        public_id=uuid4(),
+        dish_id=effective_dish_id,
+        offer_id=effective_offer_id,
+        name=item_input.name,
+        quantity=item_input.quantity,
+        unit_price=effective_price,
+        modifiers=list(item_input.modifiers),
+        notes=item_input.notes,
+        status=ItemStatus.PENDING,
+    )
+
+
 @router.patch(
     "/{orderId}/items",
     status_code=status.HTTP_200_OK,
@@ -212,7 +335,7 @@ async def create_order(
 async def update_order_items(
     order_id: OrderIdPath,
     payload: UpdateOrderItemsRequest,
-    auth: Annotated[AuthContext, Depends(require_roles(Role.WAITER, Role.ADMIN))],
+    auth: Annotated[AuthContext, Depends(require_access(ORDER_UPDATE))],
     session: Annotated[AsyncSession, Depends(get_session)],
     catalog_validator: Annotated[CatalogValidatorProtocol, Depends(get_catalog_validator)],
     notifier: Annotated[OrderNotifier, Depends(get_order_notifier)],
@@ -242,68 +365,15 @@ async def update_order_items(
     if order is None:
         raise OrderNotFoundError(f"Order with id={order_id} not found.")
 
-    if order.status == OrderStatus.REJECTED:
-        order.reopen_as_draft()
-    elif order.status != OrderStatus.CREATED:
-        raise InvalidStateTransitionError(order.status, "ITEMS_MODIFIED")
-
-    if order.confirmed_at is not None:
-        raise InvalidStateTransitionError(
-            order.status,
-            "Cannot modify items on confirmed order awaiting stock",
-        )
+    _ensure_order_modifiable(order)
 
     # Preserve original item information for price and dish_id fallbacks
     original_items = list(order.items)
     order.items.clear()
-    new_items: list[OrderItem] = []
-
-    for item_input in payload.items:
-        effective_dish_id = (
-            item_input.dish_id
-            or next(
-                (
-                    it.dish_id
-                    for it in original_items
-                    if (item_input.id and str(it.public_id) == item_input.id)
-                    or (item_input.item_id and str(it.public_id) == item_input.item_id)
-                    or it.name == item_input.name
-                ),
-                None,
-            )
-            or item_input.item_id
-            or item_input.id
-            or "unknown"
-        )
-        await catalog_validator.validate_dish_available(effective_dish_id)
-
-        effective_price = item_input.unit_price
-        if effective_price <= Decimal("0.00"):
-            matched_price = next(
-                (
-                    it.unit_price
-                    for it in original_items
-                    if (it.dish_id and it.dish_id == effective_dish_id)
-                    or (item_input.id and str(it.public_id) == item_input.id)
-                    or (item_input.item_id and str(it.public_id) == item_input.item_id)
-                    or it.name == item_input.name
-                ),
-                Decimal("0.00"),
-            )
-            effective_price = matched_price
-
-        new_items.append(
-            OrderItem(
-                public_id=uuid4(),
-                dish_id=effective_dish_id,
-                name=item_input.name,
-                quantity=item_input.quantity,
-                unit_price=effective_price,
-                modifiers=list(item_input.modifiers),
-                notes=item_input.notes,
-                status=ItemStatus.PENDING,
-            )
-        )
+    new_items = [
+        await _build_replacement_order_item(item_input, original_items, catalog_validator)
+        for item_input in payload.items
+    ]
 
     order.items.extend(new_items)
     order.recalculate_total()
@@ -342,7 +412,7 @@ async def update_order_items(
 )
 async def cancel_order(
     order_id: OrderIdPath,
-    auth: Annotated[AuthContext, Depends(require_roles(Role.WAITER, Role.ADMIN))],
+    auth: Annotated[AuthContext, Depends(require_access(ORDER_CANCEL))],
     order_service: Annotated[OrderService, Depends(get_order_service)],
     payload: CancelOrderRequest | None = None,
 ) -> OrderResponse:
@@ -403,7 +473,7 @@ async def cancel_order(
 )
 async def void_order(
     order_id: OrderIdPath,
-    auth: Annotated[AuthContext, Depends(require_roles(Role.ADMIN))],
+    auth: Annotated[AuthContext, Depends(require_access(VOID_ADMIN))],
     order_service: Annotated[OrderService, Depends(get_order_service)],
     payload: VoidOrderRequest | None = None,
 ) -> OrderResponse:
@@ -473,7 +543,7 @@ async def void_order(
 )
 async def void_kitchen_error(
     order_id: OrderIdPath,
-    auth: Annotated[AuthContext, Depends(require_roles(*VOID_KITCHEN_ERROR_ROLES))],
+    auth: Annotated[AuthContext, Depends(require_access(VOID_KITCHEN_ERROR))],
     order_service: Annotated[OrderService, Depends(get_order_service)],
     payload: VoidKitchenErrorRequest | None = None,
 ) -> OrderResponse:
@@ -541,7 +611,7 @@ async def void_kitchen_error(
 )
 async def request_bill(
     order_id: OrderIdPath,
-    auth: Annotated[AuthContext, Depends(require_roles(*WAITER_ROLES))],
+    auth: Annotated[AuthContext, Depends(require_access(REQUEST_BILL))],
     order_service: Annotated[OrderService, Depends(get_order_service)],
 ) -> OrderResponse:
     """Request bill for an order in DELIVERED status (RF-20, RF-21).
@@ -576,7 +646,7 @@ async def request_bill(
 )
 async def confirm_order(
     order_id: OrderIdPath,
-    auth: Annotated[AuthContext, Depends(require_roles(Role.WAITER, Role.ADMIN))],
+    auth: Annotated[AuthContext, Depends(require_access(ORDER_CONFIRM))],
     order_service: Annotated[OrderService, Depends(get_order_service)],
 ) -> OrderResponse:
     """Confirm an order once, atomically recording its timestamp and outbox event (TASK-11).
@@ -606,7 +676,7 @@ async def confirm_order(
     summary="Get order details",
     description="Retrieve an order aggregate by public UUID.",
     dependencies=[
-        Depends(require_roles(Role.WAITER, Role.ADMIN, Role.KITCHEN, Role.CHEF)),
+        Depends(require_access(ORDER_DETAIL)),
     ],
 )
 async def get_order_by_id(
@@ -644,7 +714,7 @@ async def get_order_by_id(
 async def redo_order_item(
     order_id: OrderIdPath,
     item_id: Annotated[UUID, Path(alias="itemId", description="Public order item identifier.")],
-    auth: Annotated[AuthContext, Depends(require_roles(*WAITER_ROLES))],
+    auth: Annotated[AuthContext, Depends(require_access(ITEM_REDO))],
     order_service: Annotated[OrderService, Depends(get_order_service)],
     payload: RedoItemRequest | None = None,
 ) -> OrderResponse:

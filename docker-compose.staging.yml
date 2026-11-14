@@ -67,12 +67,14 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER}:${POSTGRES_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-ordenes_staging}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/${RABBITMQ_VHOST:-staging}
-      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-restaurant.topic}
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-ordenes.topic}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-staging}
       SAGA_TIMEOUT_SECONDS: ${SAGA_TIMEOUT_SECONDS:-60}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "${STAGING_API_PORT:-8000}:8000"
+      - "${STAGING_ORDERS_PORT:-8082}:8000"
+      - "${STAGING_KITCHEN_PORT:-8086}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -94,7 +96,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER}:${POSTGRES_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-ordenes_staging}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/${RABBITMQ_VHOST:-staging}
-      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-restaurant.topic}
+      RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-ordenes.topic}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-staging}
       SAGA_TIMEOUT_SECONDS: ${SAGA_TIMEOUT_SECONDS:-60}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}

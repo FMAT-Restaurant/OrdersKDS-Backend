@@ -65,6 +65,7 @@ async def handle_stock_insufficient(
             return False
 
         details: dict[str, object] = {
+            "reason": message.reason,
             "missingIngredients": message.missing_ingredients,
             "rejectedItems": [
                 i.model_dump(mode="json", by_alias=True) for i in message.rejected_items

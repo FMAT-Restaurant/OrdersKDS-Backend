@@ -10,7 +10,7 @@ import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
@@ -70,6 +70,9 @@ def _build_mock_uow(
     processed_repo.add = Mock()
 
     # Pre-wire repos
+    outbox_repo = Mock()
+    outbox_repo.add = Mock()
+    uow.outbox = outbox_repo
     uow.orders = order_repo
     uow.processed_events = processed_repo
 
@@ -107,8 +110,8 @@ async def test_stock_reserved_moves_order_to_reserved_and_notifies() -> None:
     notifier = FakeOrderNotifier()
 
     event = StockReservedMessage(
-        eventId=uuid4(),
-        orderId=order_id,
+        event_id=uuid4(),
+        order_id=order_id,
         reservas=[{"plateId": "PLT-1", "quantity": 1}],
     )
 
@@ -143,7 +146,7 @@ async def test_stock_reserved_does_not_overwrite_existing_stock_reserved_at() ->
     uow, _, _ = _build_mock_uow(order, is_duplicate=False)
     notifier = FakeOrderNotifier()
 
-    event = StockReservedMessage(eventId=uuid4(), orderId=order_id)
+    event = StockReservedMessage(event_id=uuid4(), order_id=order_id)
     await handle_stock_reserved(event, uow, notifier=notifier)
 
     assert order.status is OrderStatus.RESERVED
@@ -164,8 +167,8 @@ async def test_stock_insufficient_moves_order_to_rejected() -> None:
     notifier = FakeOrderNotifier()
 
     event = StockInsufficientMessage(
-        eventId=uuid4(),
-        orderId=order_id,
+        event_id=uuid4(),
+        order_id=order_id,
         faltantes=["carne_res", "pan_artesanal"],
     )
 
@@ -266,11 +269,11 @@ async def test_payment_completed_on_invalid_status_is_ignored_with_warning(
 
 
 def _build_stock_reserved_msg(eid: UUID, oid: UUID) -> StockReservedMessage:
-    return StockReservedMessage(eventId=eid, orderId=oid)
+    return StockReservedMessage(event_id=eid, order_id=oid)
 
 
 def _build_stock_insufficient_msg(eid: UUID, oid: UUID) -> StockInsufficientMessage:
-    return StockInsufficientMessage(eventId=eid, orderId=oid, faltantes=["ing-1"])
+    return StockInsufficientMessage(event_id=eid, order_id=oid, faltantes=["ing-1"])
 
 
 def _build_payment_completed_msg(eid: UUID, oid: UUID) -> PaymentCompletedMessage:
@@ -338,7 +341,7 @@ async def test_late_stock_reserved_on_expired_or_cancelled_order_is_ignored(
     uow, _, processed_repo = _build_mock_uow(order, is_duplicate=False)
     notifier = FakeOrderNotifier()
 
-    event = StockReservedMessage(eventId=uuid4(), orderId=order_id)
+    event = StockReservedMessage(event_id=uuid4(), order_id=order_id)
 
     with caplog.at_level(logging.WARNING):
         applied = await handle_stock_reserved(event, uow, notifier=notifier)
@@ -420,8 +423,8 @@ async def test_stock_insufficient_with_option_a_partial_reservation() -> None:
     notifier = FakeOrderNotifier()
 
     event = StockInsufficientMessage(
-        eventId=uuid4(),
-        orderId=order_id,
+        event_id=uuid4(),
+        order_id=order_id,
         faltantes=["carne_res"],
         rejectedItems=[{"offerId": "PLT-BURGER", "requestedQuantity": 3, "availableQuantity": 1}],
         reservedItems=[{"offerId": "PLT-FRIES", "quantity": 2}],
@@ -432,11 +435,119 @@ async def test_stock_insufficient_with_option_a_partial_reservation() -> None:
     assert applied is True
     assert order.status is OrderStatus.REJECTED
     assert order.rejection_details is not None
-    assert order.rejection_details["missingIngredients"] == ["carne_res"]
-    assert len(order.rejection_details["rejectedItems"]) == 1
-    assert order.rejection_details["rejectedItems"][0]["offerId"] == "PLT-BURGER"
-    assert order.rejection_details["rejectedItems"][0]["requestedQuantity"] == 3
-    assert order.rejection_details["rejectedItems"][0]["availableQuantity"] == 1
-    assert len(order.rejection_details["reservedItems"]) == 1
-    assert order.rejection_details["reservedItems"][0]["offerId"] == "PLT-FRIES"
-    assert order.rejection_details["reservedItems"][0]["quantity"] == 2
+    details = order.rejection_details
+    assert isinstance(details, dict)
+    assert details["missingIngredients"] == ["carne_res"]
+    rejected_items = details["rejectedItems"]
+    assert isinstance(rejected_items, list)
+    assert len(rejected_items) == 1
+    rejected_0 = rejected_items[0]
+    assert isinstance(rejected_0, dict)
+    assert rejected_0["offerId"] == "PLT-BURGER"
+    assert rejected_0["requestedQuantity"] == 3
+    assert rejected_0["availableQuantity"] == 1
+    reserved_items = details["reservedItems"]
+    assert isinstance(reserved_items, list)
+    assert len(reserved_items) == 1
+    reserved_0 = reserved_items[0]
+    assert isinstance(reserved_0, dict)
+    assert reserved_0["offerId"] == "PLT-FRIES"
+    assert reserved_0["quantity"] == 2
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_inventory_reservation_confirmed_english_format() -> None:
+    order_id = uuid4()
+    order = _build_order(status=OrderStatus.CREATED, order_id=order_id)
+    uow, _, _ = _build_mock_uow(order, is_duplicate=False)
+    notifier = FakeOrderNotifier()
+
+    dlq = InMemoryDLQRouter()
+    dispatcher = EventConsumerDispatcher(
+        session_factory=lambda: AsyncMock(),
+        dlq_router=dlq,
+        notifier=notifier,
+        uow_factory=lambda _: uow,
+    )
+
+    # Inbound message as emitted by Hector's inventory-backend (no eventId, English routing key)
+    payload = {
+        "orderId": str(order_id),
+        "status": "confirmed",
+        "items": [{"itemId": "dish-123", "requestedQuantity": 2}],
+        "timestamp": "2026-11-12T12:00:00.000Z",
+    }
+
+    applied = await dispatcher.dispatch_raw(
+        raw_message=payload,
+        queue_name="orders.inventory.inbound",
+        event_type="inventory.reservation.confirmed",
+    )
+
+    assert applied is True
+    assert order.status is OrderStatus.RESERVED
+    assert len(notifier.notified_orders) == 1
+    assert uow.outbox is not None
+    outbox_add = cast(Mock, uow.outbox.add)
+    assert outbox_add.called
+    staged_event = outbox_add.call_args[0][0]
+    assert staged_event.event_name == EventName.ORDER_CONFIRMED
+    assert staged_event.order_id == order_id
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_inventory_reservation_rejected_english_format() -> None:
+    order_id = uuid4()
+    order = _build_order(status=OrderStatus.CREATED, order_id=order_id)
+    uow, _, _ = _build_mock_uow(order, is_duplicate=False)
+    notifier = FakeOrderNotifier()
+
+    dlq = InMemoryDLQRouter()
+    dispatcher = EventConsumerDispatcher(
+        session_factory=lambda: AsyncMock(),
+        dlq_router=dlq,
+        notifier=notifier,
+        uow_factory=lambda _: uow,
+    )
+
+    # Inbound message as emitted by Hector's inventory-backend
+    # (reason string + items with availableStock)
+    payload = {
+        "orderId": str(order_id),
+        "status": "rejected",
+        "reason": "Stock insuficiente de carne y queso",
+        "items": [
+            {
+                "itemId": "dish-burger",
+                "itemName": "Hamburguesa Doble",
+                "requestedQuantity": 4,
+                "availableStock": 1,
+            }
+        ],
+        "timestamp": "2026-11-12T12:00:00.000Z",
+    }
+
+    applied = await dispatcher.dispatch_raw(
+        raw_message=payload,
+        queue_name="orders.inventory.inbound",
+        event_type="inventory.reservation.rejected",
+    )
+
+    assert applied is True
+    assert order.status is OrderStatus.REJECTED
+    assert order.rejection_details is not None
+    details = order.rejection_details
+    assert isinstance(details, dict)
+    assert details["reason"] == "Stock insuficiente de carne y queso"
+    rejected_items = details["rejectedItems"]
+    assert isinstance(rejected_items, list)
+    assert len(rejected_items) == 1
+    first_item = rejected_items[0]
+    assert isinstance(first_item, dict)
+    assert first_item["offerId"] == "dish-burger"
+    assert first_item["itemName"] == "Hamburguesa Doble"
+    assert first_item["requestedQuantity"] == 4
+    assert first_item["availableQuantity"] == 1
+    assert len(notifier.notified_orders) == 1

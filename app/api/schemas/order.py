@@ -52,6 +52,13 @@ class KitchenRejectRequest(BaseModel):
         max_length=500,
         description="Reason why the kitchen cannot prepare this item.",
     )
+    available_quantity: int = Field(
+        default=0,
+        ge=0,
+        validation_alias=AliasChoices("availableQuantity", "available_quantity"),
+        serialization_alias="availableQuantity",
+        description="Physical units kitchen can still prepare out of requested quantity.",
+    )
 
 
 class CreateOrderRequest(BaseModel):
@@ -105,6 +112,18 @@ class OrderItemInput(BaseModel):
         alias="dishId",
         max_length=64,
         description="Unique catalog plate/item identifier.",
+    )
+    source_id: str | None = Field(
+        default=None,
+        alias="sourceId",
+        max_length=64,
+        description="Recipe/plate source identifier from Menu.",
+    )
+    offer_id: str | None = Field(
+        default=None,
+        alias="offerId",
+        max_length=64,
+        description="Commercial offer identifier from Menu.",
     )
     name: str = Field(
         min_length=1,
@@ -219,6 +238,8 @@ class OrderItemResponse(BaseModel):
     public_id: UUID = Field(alias="publicId")
     item_id: UUID = Field(alias="itemId")
     dish_id: str | None = Field(default=None, alias="dishId")
+    source_id: str | None = Field(default=None, alias="sourceId")
+    offer_id: str | None = Field(default=None, alias="offerId")
     name: str
     quantity: int
     unit_price: Decimal = Field(alias="unitPrice")
@@ -246,6 +267,8 @@ class OrderItemResponse(BaseModel):
             publicId=item_id,
             itemId=item_id,
             dishId=item.dish_id,
+            sourceId=item.dish_id,
+            offerId=getattr(item, "offer_id", None) or item.dish_id,
             name=item.name,
             quantity=item.quantity if item.quantity is not None else 1,
             unitPrice=item.unit_price if item.unit_price is not None else Decimal("0.00"),
@@ -258,6 +281,14 @@ class OrderItemResponse(BaseModel):
             createdAt=item.created_at or now,
             updatedAt=item.updated_at or now,
         )
+
+
+def _public_rejection_details(details: dict[str, object] | None) -> dict[str, object] | None:
+    """Strip internal redo bookkeeping keys from API-facing rejectionDetails payloads."""
+    if not isinstance(details, dict):
+        return details
+    filtered = {k: v for k, v in details.items() if k != "redoOriginalNotes"}
+    return filtered or None
 
 
 class OrderResponse(BaseModel):
@@ -314,7 +345,7 @@ class OrderResponse(BaseModel):
             confirmedBy=order.confirmed_by,
             stockReservedAt=order.stock_reserved_at,
             inPreparationAt=order.in_preparation_at,
-            rejectionDetails=order.rejection_details,
+            rejectionDetails=_public_rejection_details(order.rejection_details),
             diningSessionId=order.dining_session_id,
             responsibleWaiterId=order.responsible_waiter_id,
             awaitingStockConfirmation=order.awaiting_stock_confirmation,
