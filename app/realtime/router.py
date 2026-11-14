@@ -22,7 +22,7 @@ import contextlib
 import json
 import logging
 import time
-from collections.abc import Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any, Final
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -37,6 +37,7 @@ from app.api.dependencies.auth import (
 )
 from app.core.error_codes import ErrorCode
 from app.db.models import Order, OrderItem
+from app.domain.access import AccessPolicy
 from app.domain.roles import Role
 from app.realtime.schemas import (
     FORBIDDEN_CHANNEL_ERROR,
@@ -162,12 +163,33 @@ class RealtimeConnection:
     channels: set[str] = field(default_factory=set)
 
 
+ExternalRealtimePublisher = Callable[[set[str], dict[str, Any]], Awaitable[None]]
+
+
 class RealtimeChannelRouter:
     """Manages WebSocket connections and routes messages to subscribed channels."""
 
     def __init__(self) -> None:
         self._connections: dict[WebSocket, RealtimeConnection] = {}
         self._lock = asyncio.Lock()
+        self._external_publisher: ExternalRealtimePublisher | None = None
+
+    def set_external_publisher(self, publisher: ExternalRealtimePublisher | None) -> None:
+        """Register or clear an external fan-out publisher (e.g. Redis Pub/Sub)."""
+        self._external_publisher = publisher
+
+    async def _dispatch_external(
+        self,
+        target_channels: set[str],
+        envelope: dict[str, Any],
+    ) -> None:
+        """Forward a channel envelope to the optional cross-process publisher."""
+        if self._external_publisher is None:
+            return
+        try:
+            await self._external_publisher(target_channels, envelope)
+        except Exception as exc:
+            logger.warning("External realtime publisher failed: %s", exc)
 
     async def register(
         self, websocket: WebSocket, auth_context: AuthContext, path: str
@@ -213,6 +235,9 @@ class RealtimeChannelRouter:
             conn = self._connections.get(websocket)
             if conn is None:
                 return False
+
+            if channel in conn.channels:
+                return True
 
             if not can_subscribe(channel, conn.auth_context.role, conn.path):
                 logger.info(
@@ -283,6 +308,7 @@ class RealtimeChannelRouter:
         target_channels.update(_resolve_user_channels(order))
 
         await self.broadcast_to_channels(target_channels, envelope)
+        await self._dispatch_external(target_channels, envelope)
 
     async def publish_item_changed(self, order: Order, item: OrderItem) -> None:
         """Build item.status_changed envelope and broadcast to target channels."""
@@ -300,9 +326,29 @@ class RealtimeChannelRouter:
         target_channels.update(_resolve_user_channels(order))
 
         await self.broadcast_to_channels(target_channels, envelope)
+        await self._dispatch_external(target_channels, envelope)
 
 
 realtime_router = RealtimeChannelRouter()
+
+
+async def _handle_subscribe_action(websocket: WebSocket, data: dict[str, Any]) -> None:
+    channels = data.get("channels")
+    if isinstance(channels, list):
+        for ch in channels:
+            if isinstance(ch, str):
+                await realtime_router.handle_subscribe(websocket, ch)
+        return
+
+    channel = data.get("channel")
+    if not channel and data.get("station"):
+        channel = f"{CHANNEL_KDS_STATION_PREFIX}{data['station']}"
+
+    if not channel or not isinstance(channel, str):
+        await websocket.send_json(FORBIDDEN_CHANNEL_ERROR)
+        return
+
+    await realtime_router.handle_subscribe(websocket, channel)
 
 
 async def _handle_incoming_text(websocket: WebSocket, raw_text: str) -> None:
@@ -316,28 +362,20 @@ async def _handle_incoming_text(websocket: WebSocket, raw_text: str) -> None:
 
     action = data.get("action") or data.get("type")
     if action == "subscribe":
-        channel = data.get("channel")
-        if not channel and data.get("station"):
-            channel = f"{CHANNEL_KDS_STATION_PREFIX}{data['station']}"
-
-        if not channel or not isinstance(channel, str):
-            await websocket.send_json(FORBIDDEN_CHANNEL_ERROR)
-            return
-
-        await realtime_router.handle_subscribe(websocket, channel)
-    elif "channel" in data:
-        channel = data["channel"]
-        if isinstance(channel, str):
-            await realtime_router.handle_subscribe(websocket, channel)
+        await _handle_subscribe_action(websocket, data)
+    elif "channel" in data and isinstance(data["channel"], str):
+        await realtime_router.handle_subscribe(websocket, data["channel"])
 
 
 async def serve_websocket_connection(
     websocket: WebSocket,
     path: str,
     allowed_roles: frozenset[Role],
+    *,
+    policy: AccessPolicy | None = None,
 ) -> None:
     """Serve a WebSocket connection lifecycle including JWT auth, token expiry, and dispatch."""
-    context = await authorize_websocket(websocket, allowed_roles)
+    context = await authorize_websocket(websocket, allowed_roles, policy=policy)
     if context is None:
         return
 

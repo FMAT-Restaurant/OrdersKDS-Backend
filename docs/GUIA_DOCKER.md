@@ -136,25 +136,26 @@ En la pestaña **Containers** aparecen `ordenes-postgres`, `ordenes-redis` y `or
 
 ### 7.2 Imagen en la nube (CI/CD, TASK-01)
 
-El workflow `.github/workflows/ci.yml` incluye el job `build-and-push`, que construye la imagen de la API y la publica en **GitHub Container Registry** (`ghcr.io`) con las etiquetas `latest` y el SHA del commit. Se ejecuta **solo** cuando hay un *push* a `main`, es decir, al promover una versión `develop → main`. No se hace a mano.
+El workflow `.github/workflows/ci.yml` incluye el job `build-and-push`, que construye la imagen de la API y la publica en **GitHub Container Registry** (`ghcr.io`) con la etiqueta de rama y el SHA del commit. Un *push* a `develop` publica el candidato de staging; un *push* a `main` publica el release.
 
 ### 7.3 Ambiente compartido en la nube — TASK-38 (Sprint 5)
 
-Lo que no se puede resolver con contenedores locales (que todos usemos **la misma** base de datos, y que otros equipos alcancen nuestra API) está cubierto por la **TASK-38 — Ambiente compartido de integración y staging**, planificada en el **Sprint 5** (27 oct – 2 nov). Incluye:
+El ambiente compartido se hospeda en una VM Linux administrada por el equipo,
+con Docker Engine y firewall restringido. La configuración reproducible,
+los roles de PostgreSQL, el procedimiento de migraciones, el túnel de
+DBeaver/pgAdmin y el smoke están en [STAGING.md](STAGING.md).
 
-- Definir y documentar el **hospedaje** y cómo se despliega la imagen `ghcr.io/<org>/ordenes-kds-backend`.
-- **PostgreSQL compartido de staging** (`ordenes_staging`), con usuario de la app de permisos mínimos y usuario de solo lectura para clientes visuales, separado de la base de la versión final.
-- Conexión al **RabbitMQ y Redis** del ambiente con los parámetros acordados en OP-10, y un `docker-compose.staging.yml` (o equivalente) con variables por ambiente.
-- Secretos por ambiente en *GitHub Environments* (`staging`, `production`), nunca en el repositorio.
-- Prueba de conectividad (*smoke*): `/health`, un evento publicado y consumido, y conexión de un integrante con su cliente visual.
-
-Mientras esa tarea no esté lista, **trabaja siempre con tus contenedores locales**. Cuando exista, la guía se ampliará con los datos de conexión del ambiente compartido.
+La imagen de staging es `ghcr.io/fmat-restaurant/orderskds-backend:develop`.
+El archivo `docker-compose.staging.yml` usa únicamente variables del archivo
+privado `.env.staging`; nunca contiene credenciales. Mientras no se provisionen
+la VM y los GitHub Environments `staging`/`production`, se debe trabajar con
+los contenedores locales y no publicar una URL ficticia.
 
 | Ambiente | Dónde corre | Quién lo usa |
 |---|---|---|
 | Local | Tus contenedores (`docker compose`) | Solo tú |
 | Pruebas automáticas | Testcontainers efímeros / CI | El código de pruebas |
-| Staging compartido | Nube, definido en TASK-38 (S5) | Todo el equipo y otros microservicios |
+| Staging compartido | VM Linux con Docker, definida en [STAGING.md](STAGING.md) | Todo el equipo y otros microservicios |
 | Versión final | Imagen publicada desde `main` | El sistema liberado |
 
 ### 7.4 Usar contenedores de otros equipos

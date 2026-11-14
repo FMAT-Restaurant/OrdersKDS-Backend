@@ -9,6 +9,8 @@ from app.cache.catalog import CatalogRepository, normalize_station
 from app.messaging.consumers.catalog import CatalogConsumer
 from app.messaging.events import EventName
 
+EMPTY_CACHE: dict[str, str] = {}
+
 
 def test_station_is_normalized_and_empty_values_are_missing() -> None:
     assert normalize_station("  Estación Ártica  ") == "estacion artica"
@@ -24,7 +26,7 @@ def test_station_is_truncated_with_warning() -> None:
 @pytest.mark.asyncio
 async def test_catalog_event_maps_anticorruption_aliases() -> None:
     redis = AsyncMock()
-    redis.hgetall.return_value = {}
+    redis.hgetall.return_value = EMPTY_CACHE
     consumer = CatalogConsumer(CatalogRepository(redis))
 
     stored = await consumer.consume(
@@ -51,7 +53,7 @@ async def test_catalog_event_maps_anticorruption_aliases() -> None:
 @pytest.mark.asyncio
 async def test_catalog_event_projects_contract_items_batch_and_aliases() -> None:
     redis = AsyncMock()
-    redis.hgetall.return_value = {}
+    redis.hgetall.return_value = EMPTY_CACHE
 
     stored = await CatalogConsumer(CatalogRepository(redis)).consume(
         EventName.MENU_CATALOG_UPDATED,
@@ -88,7 +90,7 @@ async def test_catalog_event_projects_contract_items_batch_and_aliases() -> None
 @pytest.mark.asyncio
 async def test_price_event_and_updated_at_are_projected() -> None:
     redis = AsyncMock()
-    redis.hgetall.return_value = {}
+    redis.hgetall.return_value = EMPTY_CACHE
 
     stored = await CatalogConsumer(CatalogRepository(redis)).consume(
         EventName.MENU_DISH_PRICE_UPDATED,
@@ -135,7 +137,7 @@ async def test_availability_events_are_projected(
     expected: str,
 ) -> None:
     redis = AsyncMock()
-    redis.hgetall.return_value = {}
+    redis.hgetall.return_value = EMPTY_CACHE
 
     assert await CatalogConsumer(CatalogRepository(redis)).consume(event_type, payload) is True
     assert redis.hset.await_args.kwargs["mapping"]["available"] == expected
@@ -155,7 +157,7 @@ async def test_invalid_or_unknown_events_are_ignored() -> None:
 @pytest.mark.asyncio
 async def test_missing_station_is_stored_as_null_text() -> None:
     redis = AsyncMock()
-    redis.hgetall.return_value = {}
+    redis.hgetall.return_value = EMPTY_CACHE
     await CatalogConsumer(CatalogRepository(redis)).consume(
         EventName.MENU_CATALOG_UPDATED,
         {"platilloId": "dish-2", "precioActualizado": "5.00"},
@@ -168,7 +170,7 @@ async def test_missing_station_is_stored_as_null_text() -> None:
 @pytest.mark.asyncio
 async def test_preparation_time_is_truncated_with_warning() -> None:
     redis = AsyncMock()
-    redis.hgetall.return_value = {}
+    redis.hgetall.return_value = EMPTY_CACHE
 
     with patch("app.cache.catalog.logger.warning") as warning:
         stored = await CatalogRepository(redis).upsert(
@@ -203,6 +205,72 @@ async def test_older_updated_at_is_ignored() -> None:
 
 
 @pytest.mark.asyncio
+async def test_updated_at_comparison_handles_timezone_offsets() -> None:
+    redis = AsyncMock()
+    redis.hgetall.return_value = {"updated_at": "2026-10-25T12:00:00+02:00"}
+
+    stored = await CatalogRepository(redis).upsert(
+        "dish-offset",
+        station="Kitchen",
+        updated_at="2026-10-25T09:30:00Z",
+    )
+
+    assert stored is False
+    redis.hset.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_unparseable_updated_at_does_not_overwrite_cached_item() -> None:
+    redis = AsyncMock()
+    redis.hgetall.return_value = {"updated_at": "unknown-current-version"}
+
+    stored = await CatalogRepository(redis).upsert(
+        "dish-invalid-time",
+        station="Kitchen",
+        updated_at="2026-10-25T09:30:00Z",
+    )
+
+    assert stored is False
+    redis.hset.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_naive_timestamp_updated_at_parses_to_utc() -> None:
+    redis = AsyncMock()
+    # Cache has a timestamp without timezone suffix (naive ISO format)
+    redis.hgetall.return_value = {"updated_at": "2026-10-25T12:00:00"}
+
+    # Incoming timestamp is older
+    stored = await CatalogRepository(redis).upsert(
+        "dish-naive",
+        station="Kitchen",
+        updated_at="2026-10-25T11:00:00Z",
+    )
+
+    assert stored is False
+    redis.hset.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_redis_hash_adapter_methods() -> None:
+    from app.cache.catalog import RedisHashAdapter
+
+    mock_redis = AsyncMock()
+    mock_redis.hgetall.return_value = {"key": "val"}
+    mock_redis.hset.return_value = 1
+
+    adapter = RedisHashAdapter(mock_redis)
+
+    res_get = await adapter.hgetall("cat:1")
+    assert res_get == {"key": "val"}
+    mock_redis.hgetall.assert_awaited_once_with("cat:1")
+
+    res_set = await adapter.hset("cat:1", {"key": "val2"})
+    assert res_set == 1
+    mock_redis.hset.assert_awaited_once_with("cat:1", mapping={"key": "val2"})
+
+
+@pytest.mark.asyncio
 async def test_get_decodes_redis_bytes() -> None:
     redis = AsyncMock()
     redis.hgetall.return_value = {b"station": b"plancha", "available": b"true"}
@@ -215,7 +283,7 @@ async def test_get_decodes_redis_bytes() -> None:
 @pytest.mark.asyncio
 async def test_empty_update_is_not_written() -> None:
     redis = AsyncMock()
-    redis.hgetall.return_value = {}
+    redis.hgetall.return_value = EMPTY_CACHE
 
     stored = await CatalogRepository(redis).upsert("dish-empty")
 
@@ -226,7 +294,7 @@ async def test_empty_update_is_not_written() -> None:
 @pytest.mark.asyncio
 async def test_catalog_consumer_projects_menu_offer_payload() -> None:
     redis = AsyncMock()
-    redis.hgetall.return_value = {}
+    redis.hgetall.return_value = EMPTY_CACHE
     consumer = CatalogConsumer(CatalogRepository(redis))
 
     menu_offer_payload = {

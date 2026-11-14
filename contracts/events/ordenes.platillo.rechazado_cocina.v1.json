@@ -49,6 +49,18 @@
       "type": "string",
       "description": "Human-readable reason for the rejection.",
       "minLength": 1
+    },
+    "motivo": {
+      "type": "string",
+      "description": "Spanish alias for reason."
+    },
+    "plateId": {
+      "type": "string",
+      "description": "Inventory plate/recipe identifier corresponding to Menu sourceId."
+    },
+    "sourceId": {
+      "type": "string",
+      "description": "Menu recipe/plate source identifier."
     }
   },
   "additionalProperties": true

@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://restaurant.example.com/contracts/websocket/messages.v1.json",
+  "title": "OrdersKDSWebSocketMessages",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["type", "eventId", "occurredAt", "orderId", "status", "version"],
+      "properties": {
+        "type": {"const": "order.status_changed"},
+        "eventId": {"type": "string", "minLength": 1},
+        "occurredAt": {"type": "string", "format": "date-time"},
+        "orderId": {"type": "string", "minLength": 1},
+        "tableId": {"type": ["integer", "string", "null"]},
+        "status": {"type": "string", "minLength": 1},
+        "version": {"type": "integer", "minimum": 0},
+        "rejectionDetails": {"type": ["object", "null"]}
+      },
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "required": ["type", "eventId", "occurredAt", "orderId", "itemId", "status", "version"],
+      "properties": {
+        "type": {"const": "item.status_changed"},
+        "eventId": {"type": "string", "minLength": 1},
+        "occurredAt": {"type": "string", "format": "date-time"},
+        "orderId": {"type": "string", "minLength": 1},
+        "itemId": {"type": "string", "minLength": 1},
+        "status": {"type": "string", "minLength": 1},
+        "version": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": true
+    }
+  ]
+}

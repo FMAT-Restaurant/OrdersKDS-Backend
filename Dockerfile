@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir -r requirements/runtime.txt
 COPY app/ app/
 COPY alembic.ini .
 COPY contracts/events/ contracts/events/
+COPY ops/staging/staging-smoke.py /opt/staging-smoke.py
 
 EXPOSE 8000
 

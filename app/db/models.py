@@ -135,6 +135,16 @@ class Order(Base):
         ensure_transition_allowed(self.status, OrderStatus.EXPIRED)
         self.status = OrderStatus.EXPIRED
 
+    def mark_wasted(self) -> None:
+        """Transition order to WASTED (administrative void, RF-26)."""
+        ensure_transition_allowed(self.status, OrderStatus.WASTED)
+        self.status = OrderStatus.WASTED
+
+    def mark_voided(self) -> None:
+        """Transition order to VOIDED (kitchen error void, RF-28)."""
+        ensure_transition_allowed(self.status, OrderStatus.VOIDED)
+        self.status = OrderStatus.VOIDED
+
     def mark_paid(self) -> None:
         """Transition order to PAID."""
         ensure_transition_allowed(self.status, OrderStatus.PAID)
@@ -157,6 +167,7 @@ class OrderItem(Base):
         ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True
     )
     dish_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    offer_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     quantity: Mapped[int] = mapped_column(nullable=False, default=1)
     unit_price: Mapped[Decimal] = mapped_column(
@@ -190,6 +201,29 @@ class OrderItem(Base):
         """Transition item to DELIVERED (OP-08)."""
         ensure_item_transition_allowed(self.status, ItemStatus.DELIVERED)
         self.status = ItemStatus.DELIVERED
+
+    def mark_pending_for_redo(self, note: str) -> None:
+        """Return a delivered item to kitchen with the waiter's explanation (RF-22)."""
+        ensure_item_transition_allowed(self.status, ItemStatus.PENDING)
+        if not getattr(self, "_has_pre_redo_notes", False):
+            object.__setattr__(self, "_pre_redo_notes", self.notes)
+            object.__setattr__(self, "_has_pre_redo_notes", True)
+        self.status = ItemStatus.PENDING
+        self.notes = note
+
+    def restore_notes_after_redo(
+        self,
+        *,
+        fallback_original: str | None = None,
+        has_fallback: bool = False,
+    ) -> None:
+        """Restore pre-redo preparation notes after kitchen completes a redone item."""
+        if getattr(self, "_has_pre_redo_notes", False):
+            original = getattr(self, "_pre_redo_notes", None)
+            self.notes = original if isinstance(original, str) or original is None else None
+            object.__setattr__(self, "_has_pre_redo_notes", False)
+        elif has_fallback:
+            self.notes = fallback_original
 
     def mark_cancelled(self) -> None:
         """Transition item to CANCELLED."""

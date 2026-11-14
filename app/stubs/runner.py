@@ -17,6 +17,7 @@ import signal
 from collections.abc import Mapping
 
 import aio_pika
+from dotenv import load_dotenv
 
 from app.messaging.publisher import EventPublisher
 from app.stubs.billing_stub import BillingStub
@@ -25,6 +26,8 @@ from app.stubs.floor_stub import FloorStub
 from app.stubs.inventory_stub import InventoryStub
 from app.stubs.menu_stub import MenuStub
 from app.stubs.protocol import StubEventPublisherAdapter
+
+load_dotenv()
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -68,7 +71,7 @@ async def main() -> None:
     """Run the contract stubs daemon listening on RabbitMQ."""
     settings = StubSettings()
     rmq_url = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
-    exchange_name = os.getenv("RABBITMQ_EXCHANGE", "amq.topic")
+    exchange_name = os.getenv("RABBITMQ_EXCHANGE", "ordenes.topic")
     vhost = os.getenv("RABBITMQ_VHOST", "/")
 
     logger.info(

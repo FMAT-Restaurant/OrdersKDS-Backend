@@ -76,6 +76,9 @@ class FakeCatalogValidator:
     async def validate_dishes(self, dish_ids: list[str]) -> list[str]:
         return []
 
+    async def validate_dish_available(self, dish_id: str) -> None:
+        pass
+
 
 @pytest.fixture
 def fake_catalog() -> FakeCatalogValidator:
@@ -843,3 +846,193 @@ def test_cancel_item_already_ready_conflict(
 
     assert resp.status_code == 409
     assert resp.json()["error"]["code"] == ErrorCode.INVALID_STATE_TRANSITION
+
+
+def test_kitchen_reject_redo_item_on_delivered_order_success(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+    spy_notifier: SpyOrderNotifier,
+    fake_catalog: FakeCatalogValidator,
+) -> None:
+    """Kitchen rejects a redo item when out of supplies; item cancelled, total recalculated."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=3,
+        status=OrderStatus.DELIVERED,
+    )
+    delivered_item = OrderItem(
+        public_id=uuid4(),
+        dish_id="dish-burger",
+        name="Burger",
+        quantity=1,
+        unit_price=Decimal("120.00"),
+        status=ItemStatus.DELIVERED,
+    )
+    redo_item = OrderItem(
+        public_id=uuid4(),
+        dish_id="dish-fries",
+        name="Fries",
+        quantity=1,
+        unit_price=Decimal("40.00"),
+        status=ItemStatus.PENDING,
+    )
+    order.items.extend([delivered_item, redo_item])
+    order.recalculate_total()
+    assert order.total_amount == Decimal("160.00")
+    test_db[order.public_id] = order
+
+    resp = client.patch(
+        f"/orders/{order.public_id}/items/{redo_item.public_id}/kitchen-reject",
+        headers=auth_headers("chef"),
+        json={"reason": "Se agotaron las papas para la rehechura"},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "DELIVERED"
+    # Order total should be recalculated without redo_item
+    assert Decimal(str(data["totalAmount"])) == Decimal("120.00")
+    cancelled = next(i for i in data["items"] if i["itemId"] == str(redo_item.public_id))
+    assert cancelled["status"] == "CANCELLED"
+
+    # Catalog updated to False
+    assert fake_catalog.availabilities.get("dish-fries") is False
+
+    # Outbox contains KitchenDishRejectedEvent
+    assert any(
+        row.event_type == EventName.KITCHEN_DISH_REJECTED for row in fake_session.outbox_rows
+    )
+
+    # Realtime notifications dispatched
+    assert len(spy_notifier.notified_items) == 1
+    assert len(spy_notifier.notified_orders) == 1
+
+
+def test_kitchen_reject_delivered_item_on_delivered_order_raises_409(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Cannot kitchen reject an item that is already DELIVERED (409 Conflict)."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=3,
+        status=OrderStatus.DELIVERED,
+    )
+    delivered_item = OrderItem(
+        public_id=uuid4(),
+        dish_id="dish-burger",
+        name="Burger",
+        quantity=1,
+        unit_price=Decimal("120.00"),
+        status=ItemStatus.DELIVERED,
+    )
+    order.items.append(delivered_item)
+    test_db[order.public_id] = order
+
+    resp = client.patch(
+        f"/orders/{order.public_id}/items/{delivered_item.public_id}/kitchen-reject",
+        headers=auth_headers("chef"),
+        json={"reason": "Sin insumos"},
+    )
+
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == ErrorCode.INVALID_STATE_TRANSITION
+
+
+def test_cancel_redo_item_on_delivered_order_success(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    spy_notifier: SpyOrderNotifier,
+) -> None:
+    """Cancelling a PENDING redo item in a DELIVERED order succeeds and recalculates total."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=5,
+        status=OrderStatus.DELIVERED,
+    )
+    delivered_item = OrderItem(
+        public_id=uuid4(),
+        dish_id="dish-steak",
+        name="Steak",
+        quantity=1,
+        unit_price=Decimal("200.00"),
+        status=ItemStatus.DELIVERED,
+    )
+    redo_item = OrderItem(
+        public_id=uuid4(),
+        dish_id="dish-salad",
+        name="Salad",
+        quantity=1,
+        unit_price=Decimal("50.00"),
+        status=ItemStatus.PENDING,
+    )
+    order.items.extend([delivered_item, redo_item])
+    order.recalculate_total()
+    test_db[order.public_id] = order
+
+    resp = client.patch(
+        f"/orders/{order.public_id}/items/{redo_item.public_id}/cancel",
+        headers=auth_headers("kitchen"),
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert Decimal(str(data["totalAmount"])) == Decimal("200.00")
+    cancelled = next(i for i in data["items"] if i["itemId"] == str(redo_item.public_id))
+    assert cancelled["status"] == "CANCELLED"
+
+
+def test_kitchen_reject_item_with_partial_available_quantity(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_catalog: FakeCatalogValidator,
+) -> None:
+    """Rejecting 3 requested units with 2 available keeps 2 in availableQuantity & reserved."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=7,
+        status=OrderStatus.RESERVED,
+    )
+    rejected_target = OrderItem(
+        public_id=uuid4(),
+        dish_id="dish-tacos",
+        name="Tacos al Pastor",
+        quantity=3,
+        unit_price=Decimal("120.00"),
+        status=ItemStatus.PENDING,
+    )
+    other_item = OrderItem(
+        public_id=uuid4(),
+        dish_id="dish-agua",
+        name="Agua de Horchata",
+        quantity=1,
+        unit_price=Decimal("40.00"),
+        status=ItemStatus.PENDING,
+    )
+    order.items.extend([rejected_target, other_item])
+    order.recalculate_total()
+    test_db[order.public_id] = order
+
+    resp = client.patch(
+        f"/orders/{order.public_id}/items/{rejected_target.public_id}/kitchen-reject",
+        headers=auth_headers("chef"),
+        json={"reason": "Solo alcanza para 2 órdenes", "availableQuantity": 2},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "REJECTED"
+    details = data["rejectionDetails"]
+    assert details["rejectedItems"][0]["requestedQuantity"] == 3
+    assert details["rejectedItems"][0]["availableQuantity"] == 2
+    reserved_by_item = {
+        entry["itemId"]: entry["reservedQuantity"] for entry in details["reservedItems"]
+    }
+    assert reserved_by_item[str(rejected_target.public_id)] == 2
+    assert reserved_by_item[str(other_item.public_id)] == 1
+    assert fake_catalog.availabilities.get("dish-tacos") is None

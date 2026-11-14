@@ -12,15 +12,18 @@
    Por convención de arquitectura (`ADR-0006` y `DEVELOPMENT_GUIDELINES.md`), todos los eventos publicados por **Orders & KDS** utilizan llaves en **inglés (`camelCase`)** (por ejemplo: `eventId`, `orderId`, `offerId`, `correlationId`).
 2. **Tolerancia en Recepción (Lectura Híbrida / ACL):**  
    Al consumir mensajes de otros microservicios, **Orders & KDS** aplica el patrón **Anti-Corruption Layer (ACL)**: acepta tanto los nombres canónicos en inglés (`offerId`, `reservations`, `missingIngredients`, `waiterId`) como alias en español (`ofertaId`, `platilloId`, `reservas`, `faltantes`, `montoTotal`, `meseroId`) o estructuras anidadas dentro de `"data"`, traduciéndolos inmediatamente a nuestros modelos internos en Python (`snake_case`).
-3. **Aislamiento del Frontend y Base de Datos Propia:**  
-   - **En RabbitMQ (Menú ↔ OrdersKDS ↔ Inventario):** Los productos vendibles (platillos preparados, bebidas, postres, paquetes) se identifican de forma unificada mediante **`offerId`** (ID de la oferta emitida por Menú).
-   - **En la API REST / WebSockets hacia nuestro Frontend y en PostgreSQL/Redis:** Internamente nuestro microservicio conserva el nombre **`dishId`** (JSON hacia Frontend) y **`dish_id`** (columna en PostgreSQL y llave en Redis) para no romper la comunicación ni el contrato con el Frontend de Meseros y KDS. **El valor almacenado en `dish_id` es exactamente el UUID/identificador de la oferta (`offerId`) proveniente de Menú.**
+3. **Aislamiento de Identificadores Dual (`sourceId`/`plateId` vs `offerId`), API y Base de Datos:**  
+   - **En Frontend de Menú ↔ `OrderTicketWidget` / API REST:** Los ítems propagan ambos identificadores: **`sourceId`** (receta física/plato en Menú, que Inventario indexa como `plateId`) y **`offerId`** (oferta comercial de Menú). En `OrderItemResponse` se exponen `dishId`, `sourceId` y `offerId`.
+   - **En PostgreSQL (`order_items`):** `OrderItem.dish_id` almacena prioritariamente la receta física (`sourceId` cuando se envía, o `dishId` como fallback), mientras **`OrderItem.offer_id`** preserva la oferta comercial (`offerId`) sin perder trazabilidad con Menú y Pagos.
+   - **En RabbitMQ (`ordenes.topic` con `RABBITMQ_DUAL_ROUTING=true`):** Además de las routing keys canónicas en español, `EventPublisher` publica routing keys duales en inglés para `Inventory-Backend` (`ordenes.order.created`, `ordenes.order.cancelled`, `ordenes.order.expired`, `ordenes.order.served`, `ordenes.order.in_preparation`, `ordenes.dish.rejected`, `ordenes.order.wasted`, `ordenes.dish.prepared`), priorizando **`plateId` / `sourceId`** en los payloads hacia Inventario (`_enrich_payload_for_inventory`) mientras conserva `offerId` para Menú y Caja.
+   - **Inbound Catálogo e Inventario (`InboundConsumerWorker`):** Se escucha `inventory.topic` (`inventory.reservation.*`, `inventory.recipe.*`, `inventario.stock.*`), `menu.topic` (`menu.#` incluyendo `menu.source.created`, `menu.source.updated`, `menu.source.deleted`, `menu.offer.created`, `menu.offer.updated`) y `ordenes.topic` (`menu.*`).
 
 ### Tabla Maestra de Equivalencias de Conceptos
 
-| Concepto de Negocio | En Microservicio de Menú | En Mensajes RabbitMQ (OrdersKDS ↔ Inventario) | En API REST / WS de OrdersKDS (Frontend) | En Base de Datos / Código Interno de OrdersKDS |
+| Concepto de Negocio | En Microservicio de Menú | En Mensajes RabbitMQ (`OrdersKDS` ↔ `Inventario` / `Menú`) | En API REST / WS de OrdersKDS (Frontend) | En Base de Datos / Código Interno de OrdersKDS |
 | :--- | :--- | :--- | :--- | :--- |
-| **Identificador de Oferta / Platillo** | `data.id` / `offerId` | **`offerId`** | `dishId` | `OrderItem.dish_id` (PostgreSQL) / `catalog:platillo:{id}` (Redis) |
+| **Plato Físico / Receta** | `sourceId` (`menu.source.*`, `composition.slots[].options[].recipeId`) | **`plateId`** / **`sourceId`** (`inventory.recipe.*`, `ordenes.*`) | `dishId`, `sourceId` | `OrderItem.dish_id` (PostgreSQL) / `catalog:platillo:{sourceId}` (Redis) |
+| **Oferta Comercial de Menú** | `data.id` / `offerId` (`menu.offer.*`) | **`offerId`** | `offerId` | `OrderItem.offer_id` (PostgreSQL) / `catalog:platillo:{offerId}` (Redis) |
 | **Precio Base de la Oferta** | `data.basePrice` | *(No se envía a Inventario)* | `unitPrice` / `price` | `CatalogItemView.price` (Redis) |
 | **Estado / Disponibilidad** | `data.status` (`"ACTIVE"`, `"INACTIVE"`) | *(Solo en eventos de Menú)* | `available` (`true` / `false`) | `CatalogItemView.available` (Redis) |
 | **Categoría / Tiempo** | `data.composition.slots[0].course` o `presentationTag` | *(Solo en eventos de Menú)* | `category` | `CatalogItemView.category` (Redis) |
@@ -97,12 +100,14 @@ sequenceDiagram
 ### 3.1. Mensajes que RECIBE Orders & KDS desde Menú
 
 - **Routing Keys escuchadas:**
+  - `menu.source.created` / `menu.source.updated` / `menu.source.deleted` *(recetas / fuentes físicas con `sourceId` en `menu.topic`)*
   - `menu.oferta.creada` / `menu.offer.created`
   - `menu.oferta.actualizada` / `menu.offer.updated`
   - `menu.catalogo.actualizado` / `menu.catalog.updated`
   - `menu.platillo.precio_actualizado`
   - `menu.platillo.disponibilidad_actualizada`
   - `menu.platillo.estado_actualizado`
+  - *(Complementado desde `inventory.topic` con `inventory.recipe.availability-changed` e `inventory.recipe.not-available`)*
 
 #### Ejemplo A: Payload de Oferta Individual enviado por Menú
 ```json
@@ -165,7 +170,7 @@ sequenceDiagram
 
 | Campo en Mensaje de Menú | Alias Soportados por OrdersKDS | Campo Interno en OrdersKDS (`CatalogRepository`) | Transformación Aplicada |
 | :--- | :--- | :--- | :--- |
-| `data.id` | `offerId`, `ofertaId`, `platilloId`, `dishId`, `plateId`, `itemId`, `id` | `dish_id` (llave Redis `catalog:platillo:{dish_id}`) | Se almacena como string identificador de la oferta. |
+| `data.id` / `sourceId` | `sourceId`, `offerId`, `ofertaId`, `platilloId`, `dishId`, `plateId`, `itemId`, `id` | `dish_id` (llave Redis `catalog:platillo:{id}`) | Almacena disponibilidad, precio y metadatos tanto por `sourceId` (receta física) como por `offerId` (oferta comercial). |
 | `data.basePrice` | `basePrice`, `price`, `precioActualizado`, `precio_actualizado` | `price` | Se convierte a string decimal (ej. `"180"`). |
 | `data.status` | `available`, `disponibilidad`, `disponible`, `status`, `estado`, `state` | `available` | `"ACTIVE"`, `"activo"`, `"true"`, `"disponible"` → `True`. `"INACTIVE"`, `"inactivo"`, `"false"`, `"no_disponible"` → `False`. |
 | `data.composition.slots[0].course` | `category`, `categoria`, `presentationTag` | `category` | Si no viene `category` directo, toma `slots[0].course` (ej. `"plato fuerte"`) y como segundo fallback `presentationTag`. |
@@ -187,7 +192,7 @@ sequenceDiagram
 
 ### 4.1. Mensajes que ENVÍA Orders & KDS hacia Inventario
 
-#### A) `ordenes.orden.creada` (Solicitud de Reserva de Stock)
+#### A) `ordenes.orden.creada` / dual `ordenes.order.created` (Solicitud de Reserva de Stock)
 - **Cuándo se emite:** Cuando el mesero confirma la orden (`POST /orders/{orderId}/confirm`).
 - **Contrato JSON Schema:** `contracts/events/ordenes.orden.creada.v1.json`
 - **Modelo Interno Python:** `OrderCreatedEvent` / `OrderCreatedItem` (`app/messaging/events.py`)
@@ -212,7 +217,7 @@ sequenceDiagram
 
 > **Nota de Mapeo Interno (`OrdersKDS` → `Inventario`):**
 > - `orderId` corresponde internamente a `Order.public_id`.
-> - `items[].offerId` se obtiene internamente de `OrderItem.dish_id` (que a su vez llegó desde el Frontend del mesero en el campo `dishId` al agregar el producto del catálogo de Menú).
+> - `items[].plateId` y `items[].sourceId` transportan `OrderItem.dish_id` (receta física proveniente de `sourceId`/`dishId`), mientras `items[].offerId` conserva la oferta comercial (`OrderItem.offer_id` con fallback a `dish_id`). En la emisión dual hacia `Inventory-Backend`, `_enrich_payload_for_inventory` prioriza `plateId`/`sourceId`.
 > - `eventId` se genera de forma determinista con `uuid5(NAMESPACE_URL, f"ordenes.orden.creada:{order.public_id}")` para garantizar idempotencia si el mensaje se reintenta.
 
 ---
@@ -234,7 +239,7 @@ sequenceDiagram
 
 > **Nota de Mapeo Interno (`OrdersKDS` → `Inventario`):**
 > - `itemId` corresponde a `OrderItem.public_id` (el UUID único de ese renglón dentro de la comanda).
-> - `offerId` corresponde a `OrderItem.dish_id` (el ID de la oferta en el catálogo de Menú e Inventario).
+> - `plateId` y `sourceId` transportan `OrderItem.dish_id` (receta física para Inventario) y `offerId` transporta `OrderItem.offer_id` (oferta comercial para Menú, con fallback a `dish_id`). Routing key dual: `ordenes.dish.prepared`.
 
 ---
 
@@ -262,7 +267,7 @@ sequenceDiagram
 ```
 
 > **Nota de Mapeo Interno (`OrdersKDS` → `Inventario`):**
-> - `itemsCancelados[].offerId` se extrae de `OrderItem.dish_id` (el ID de la oferta proveniente de Menú).
+> - `itemsCancelados[].plateId` y `sourceId` transportan `OrderItem.dish_id` (receta física), mientras `offerId` conserva `OrderItem.offer_id` (fallback `dish_id`). Con `RABBITMQ_DUAL_ROUTING=true`, también se emite `ordenes.order.cancelled` priorizando `plateId`/`sourceId`.
 > - `itemsCancelados[].quantity` corresponde a `OrderItem.quantity` de los renglones asociados a la comanda.
 > - Al consumir este evento con `itemsCancelados`, el microservicio de **Inventario** libera de inmediato los insumos reservados si la orden estaba confirmada esperando stock, o descarta la solicitud si aún no se había reservado.
 > - `eventId` se genera de forma determinista con `uuid5(NAMESPACE_URL, "ordenes.orden.cancelada:{order.public_id}")`.
@@ -301,8 +306,8 @@ sequenceDiagram
 
 ### 4.2. Mensajes que RECIBE Orders & KDS desde Inventario
 
-#### A) `inventario.stock.reservado` (Confirmación de Reserva Exitosa)
-- **Efecto en Orders & KDS:** Transiciona la orden de `CREATED` a `IN_PREPARATION`, registra `in_preparation_at` y notifica por WebSocket al KDS (`order.created`) y a los meseros. Si la orden ya estaba `CANCELLED` o `EXPIRED`, el mensaje tardío se ignora de forma segura.
+#### A) `inventario.stock.reservado` / `inventory.reservation.confirmed` (Confirmación de Reserva Exitosa)
+- **Efecto en Orders & KDS:** Transiciona la orden de `CREATED` a `RESERVED`, registra `stock_reserved_at` y notifica por WebSocket al KDS (`order.created`) y a los meseros (`OrderConfirmedEvent`). Si la orden ya estaba `CANCELLED` o `EXPIRED`, el mensaje tardío se ignora de forma segura.
 - **Contrato JSON Schema:** `contracts/events/inventario.stock.reservado.v1.json`
 - **Consumidor Interno:** `handle_stock_reserved` (`app/messaging/consumers/stock_reserved.py`)
 
@@ -331,8 +336,8 @@ sequenceDiagram
 
 ---
 
-#### B) `inventario.stock.insuficiente` (Rechazo de Orden por Falta de Stock)
-- **Efecto en Orders & KDS:** Transiciona la orden de `CREATED` al estado terminal `REJECTED` y notifica al mesero vía WebSocket.
+#### B) `inventario.stock.insuficiente` / `inventory.reservation.rejected` (Rechazo de Orden por Falta de Stock)
+- **Efecto en Orders & KDS:** Transiciona la orden de `CREATED` a `REJECTED` (con detalle de `rejectedItems` / `missingIngredients` para permitir edición o descarte en `OrderTicketWidget`) y notifica al mesero vía WebSocket.
 - **Contrato JSON Schema:** `contracts/events/inventario.stock.insuficiente.v1.json`
 - **Consumidor Interno:** `handle_stock_insufficient` (`app/messaging/consumers/stock_insufficient.py`)
 

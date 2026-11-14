@@ -1,0 +1,72 @@
+{
+  "info": {
+    "_postman_id": "d6d4df67-51ef-4bb3-9cdb-ct-contracts",
+    "name": "OrdersKDS REST and contract checks",
+    "description": "CT-01..CT-27 executable API contract inventory. Payload schemas and WebSocket envelopes are validated by pytest.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {"key": "baseUrl", "value": "http://127.0.0.1:8000"}
+  ],
+  "item": [
+    {
+      "name": "CT-01..CT-22 REST/OpenAPI contract",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/openapi.json"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('API returns OpenAPI', function () { pm.response.to.have.status(200); });",
+              "const document = pm.response.json();",
+              "const expected = {",
+              "  'CT-01': ['/orders', 'get'],",
+              "  'CT-02': ['/orders', 'post'],",
+              "  'CT-03': ['/orders/{orderId}', 'get'],",
+              "  'CT-04': ['/orders/{orderId}/items', 'patch'],",
+              "  'CT-05': ['/orders/{orderId}/confirm', 'post'],",
+              "  'CT-06': ['/orders/{orderId}/cancel', 'patch'],",
+              "  'CT-07': ['/orders/{orderId}/items/{itemId}/redo', 'patch'],",
+              "  'CT-08': ['/orders/{orderId}/transfer', 'patch'],",
+              "  'CT-09': ['/orders/{orderId}/request-bill', 'post'],",
+              "  'CT-10': ['/orders/{orderId}/void', 'patch'],",
+              "  'CT-11': ['/orders/{orderId}/void-kitchen-error', 'patch'],",
+              "  'CT-12': ['/kds/queue', 'get'],",
+              "  'CT-13': ['/orders/{orderId}/start-preparation', 'patch'],",
+              "  'CT-14': ['/orders/{orderId}/items/{itemId}/ready', 'patch'],",
+              "  'CT-15': ['/orders/{orderId}/items/{itemId}/cancel', 'patch'],",
+              "  'CT-16': ['/orders/{orderId}/items/{itemId}/kitchen-reject', 'patch'],",
+              "  'CT-17': ['/orders/{orderId}/ready', 'patch'],",
+              "  'CT-18': ['/health', 'get'],",
+              "  'CT-19': ['/orders/{orderId}', 'get'],",
+              "  'CT-20': ['/orders/{orderId}/items/{itemId}/redo', 'patch'],",
+              "  'CT-21': ['/orders/{orderId}/request-bill', 'post'],",
+              "  'CT-22': ['/orders/{orderId}/void-kitchen-error', 'patch']",
+              "};",
+              "Object.keys(expected).forEach(function (id) {",
+              "  const path = expected[id][0];",
+              "  const method = expected[id][1];",
+              "  pm.test(id + ' ' + method.toUpperCase() + ' ' + path, function () {",
+              "    pm.expect(document.paths[path], 'path').to.exist;",
+              "    pm.expect(document.paths[path][method], 'method').to.exist;",
+              "    pm.expect(document.paths[path][method].responses, 'responses').to.be.an('object');",
+              "  });",
+              "});",
+              "pm.test('CT-21 standard error schema', function () {",
+              "  const schemas = document.components.schemas;",
+              "  pm.expect(schemas.ErrorResponse).to.exist;",
+              "  pm.expect(schemas.ErrorBody).to.exist;",
+              "  pm.expect(schemas.ErrorBody.required).to.include.members(['code', 'message']);",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

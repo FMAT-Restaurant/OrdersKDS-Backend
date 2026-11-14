@@ -16,6 +16,7 @@ own group when it is built. Services must re-check the role-dependent domain rul
 
 from __future__ import annotations
 
+from collections.abc import Collection, Iterable, Mapping
 from enum import StrEnum
 from typing import Final
 
@@ -27,6 +28,43 @@ class Role(StrEnum):
     KITCHEN = "kitchen"
     CHEF = "chef"
     ADMIN = "admin"
+
+
+# Labels emitted by ``Auth-Backend`` (``MESERO``, ``COCINERO``, ``CHEF_MASTER``,
+# ``ADMINISTRADOR``) and the lowercase development roles, both mapped to the internal enum.
+# Keys are compared lowercased, so the casing of the claim is irrelevant.
+_ROLE_ALIASES: Final[Mapping[str, Role]] = {
+    "waiter": Role.WAITER,
+    "mesero": Role.WAITER,
+    "kitchen": Role.KITCHEN,
+    "cocinero": Role.KITCHEN,
+    "chef": Role.CHEF,
+    "chef_master": Role.CHEF,
+    "admin": Role.ADMIN,
+    "administrador": Role.ADMIN,
+}
+
+# Highest privilege first. A user may carry several roles (``ADMINISTRADOR,CHEF``); this
+# order picks the single "primary" role used for audit logs and channel routing, while
+# the guards evaluate *all* of the caller's roles.
+ROLE_PRIORITY: Final[tuple[Role, ...]] = (Role.ADMIN, Role.CHEF, Role.KITCHEN, Role.WAITER)
+
+
+def normalize_role(raw: object) -> Role | None:
+    """Map a raw role label to a :class:`Role`, or ``None`` when it is not recognised."""
+    if not isinstance(raw, str):
+        return None
+    return _ROLE_ALIASES.get(raw.strip().lower())
+
+
+def resolve_roles(raw_roles: Iterable[object]) -> frozenset[Role]:
+    """Normalise raw role labels, silently dropping the ones this service does not know."""
+    return frozenset(role for role in map(normalize_role, raw_roles) if role is not None)
+
+
+def primary_role(roles: Collection[Role]) -> Role | None:
+    """Return the highest-privilege role of ``roles``, or ``None`` when it is empty."""
+    return next((role for role in ROLE_PRIORITY if role in roles), None)
 
 
 # Create / edit / cancel / confirm / transfer / request bill / redo.

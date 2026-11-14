@@ -5,9 +5,12 @@ from __future__ import annotations
 import logging
 import unicodedata
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Protocol
+from typing import Any, Protocol, cast
 from uuid import UUID
+
+from redis.asyncio import Redis
 
 from app.domain.errors import DishUnavailableError
 
@@ -21,6 +24,20 @@ class RedisHash(Protocol):
     async def hgetall(self, name: str) -> Mapping[object, object]: ...
 
     async def hset(self, name: str, mapping: Mapping[str, str]) -> int: ...
+
+
+class RedisHashAdapter:
+    """Adapt redis-py's command signatures to the catalog hash port."""
+
+    def __init__(self, redis: Redis) -> None:
+        self._redis = redis
+
+    async def hgetall(self, name: str) -> dict[object, object]:
+        values = await self._redis.hgetall(name)
+        return dict(values.items())
+
+    async def hset(self, name: str, mapping: Mapping[str, str]) -> int:
+        return await self._redis.hset(name, mapping=cast(Mapping[Any, Any], mapping))
 
 
 def normalize_station(value: str | None) -> str | None:
@@ -58,14 +75,31 @@ def _decode(value: object) -> str:
     return value.decode() if isinstance(value, bytes) else str(value)
 
 
+def _parse_updated_at(value: str) -> datetime | None:
+    try:
+        timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if timestamp.tzinfo is None:
+        return timestamp.replace(tzinfo=UTC)
+    return timestamp.astimezone(UTC)
+
+
 def _is_stale(
     current: Mapping[str, str],
     *,
     updated_at: str | None,
     menu_version: int | str | None,
 ) -> bool:
-    if updated_at is not None and current.get("updated_at", "") > updated_at:
-        return True
+    current_updated_at = current.get("updated_at")
+    if updated_at is not None and current_updated_at and current_updated_at != updated_at:
+        current_timestamp = _parse_updated_at(current_updated_at)
+        incoming_timestamp = _parse_updated_at(updated_at)
+        if current_timestamp is None or incoming_timestamp is None:
+            logger.warning("Unable to compare catalog updated_at values; preserving cached item")
+            return True
+        if current_timestamp > incoming_timestamp:
+            return True
     return (
         menu_version is not None
         and current.get("menu_version") is not None

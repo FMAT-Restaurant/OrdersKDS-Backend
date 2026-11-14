@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 
 from app.domain.order_status import OrderStatus
-from app.messaging.events import EventName, StockReservedMessage
+from app.messaging.events import EventName, OrderConfirmedEvent, StockReservedMessage
 from app.messaging.notifications import OrderNotifier, notify_order_changed
 from app.repositories.unit_of_work import UnitOfWork
 
@@ -80,6 +80,12 @@ async def handle_stock_reserved(
             order_id=message.order_id,
             event_type=EventName.STOCK_RESERVED,
         )
+        if uow.outbox is not None:
+            confirmed_event = OrderConfirmedEvent.for_order(
+                order.public_id,
+                correlation_id=message.correlation_id,
+            )
+            uow.outbox.add(confirmed_event)
         await uow.commit()
 
     await notify_order_changed(order, notifier=notifier)

@@ -9,16 +9,30 @@ import logging
 from collections.abc import Callable
 
 import pytest
+from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from app.api.dependencies.auth import (
     AuthContext,
+    ensure_authorized,
     ensure_role_allowed,
+    get_auth_context,
+    require_access,
+    require_permissions,
     require_roles,
     resolve_auth_context,
 )
 from app.core.error_codes import ErrorCode
+from app.domain.access import AccessPolicy
 from app.domain.errors import ForbiddenRoleError, UnauthenticatedError
-from app.domain.roles import KITCHEN_ROLES, WAITER_ROLES, Role
+from app.domain.roles import (
+    KITCHEN_ROLES,
+    WAITER_ROLES,
+    Role,
+    normalize_role,
+    primary_role,
+    resolve_roles,
+)
 
 pytestmark = [pytest.mark.unit, pytest.mark.requirement("RNF-03", "RF-15")]
 
@@ -177,3 +191,216 @@ def test_auth_errors_carry_stable_codes_and_http_status() -> None:
         ErrorCode.FORBIDDEN_ROLE,
         403,
     )
+
+
+def test_role_normalization_and_aliases() -> None:
+    assert normalize_role("waiter") == Role.WAITER
+    assert normalize_role("MESERO") == Role.WAITER
+    assert normalize_role("kitchen") == Role.KITCHEN
+    assert normalize_role("COCINERO") == Role.KITCHEN
+    assert normalize_role("chef") == Role.CHEF
+    assert normalize_role("CHEF_MASTER") == Role.CHEF
+    assert normalize_role("admin") == Role.ADMIN
+    assert normalize_role("ADMINISTRADOR") == Role.ADMIN
+    assert normalize_role("unknown") is None
+    assert normalize_role(123) is None
+
+
+def test_resolve_roles_and_primary_priority() -> None:
+    resolved = resolve_roles(["MESERO", "CHEF_MASTER", "UNKNOWN_ROLE"])
+    assert resolved == frozenset({Role.WAITER, Role.CHEF})
+    assert primary_role(resolved) == Role.CHEF
+
+    admin_and_chef = resolve_roles(["ADMINISTRADOR", "CHEF_MASTER"])
+    assert primary_role(admin_and_chef) == Role.ADMIN
+    assert primary_role(frozenset()) is None
+
+
+def test_auth_context_from_claims_with_roles_array_and_permissions(
+    make_token: TokenFactory,
+) -> None:
+    token = make_token(
+        roles=["MESERO", "COCINERO"],
+        role=None,
+        permissions=["orders:orders:view", "orders:orders:create"],
+        staffId="M001",
+    )
+    context = resolve_auth_context(_bearer(token))
+    assert context.user_id == "user-1"
+    assert context.role == Role.KITCHEN
+    assert context.effective_roles == frozenset({Role.KITCHEN, Role.WAITER})
+    assert context.staff_id == "M001"
+    assert context.has_permission("orders:orders:view") is True
+    assert context.has_permission("orders:orders:cancel") is False
+
+
+def test_auth_context_admin_has_all_permissions() -> None:
+    context = AuthContext(
+        user_id="admin-1",
+        role=Role.ADMIN,
+        roles=frozenset({Role.ADMIN}),
+        permissions=frozenset(),
+    )
+    assert context.has_permission("any:arbitrary:permission") is True
+
+
+def test_auth_context_wildcard_permission() -> None:
+    context = AuthContext(
+        user_id="user-1",
+        role=Role.WAITER,
+        roles=frozenset({Role.WAITER}),
+        permissions=frozenset(["*"]),
+    )
+    assert context.has_permission("any:permission") is True
+
+
+def test_access_policy_evaluation() -> None:
+    policy = AccessPolicy(
+        permissions=frozenset(["orders:orders:create"]),
+        fallback_roles=frozenset({Role.WAITER}),
+    )
+
+    allowed_by_pbac = AuthContext(
+        user_id="u1",
+        role=Role.WAITER,
+        roles=frozenset({Role.WAITER}),
+        permissions=frozenset(["orders:orders:create"]),
+    )
+    assert allowed_by_pbac.is_authorized(policy) is True
+
+    denied_by_pbac = AuthContext(
+        user_id="u2",
+        role=Role.WAITER,
+        roles=frozenset({Role.WAITER}),
+        permissions=frozenset(["orders:orders:view"]),
+    )
+    assert denied_by_pbac.is_authorized(policy) is False
+
+    allowed_by_role_fallback = AuthContext(
+        user_id="u3",
+        role=Role.WAITER,
+        roles=frozenset({Role.WAITER}),
+        permissions=None,
+    )
+    assert allowed_by_role_fallback.is_authorized(policy) is True
+
+    denied_by_role_fallback = AuthContext(
+        user_id="u4",
+        role=Role.KITCHEN,
+        roles=frozenset({Role.KITCHEN}),
+        permissions=None,
+    )
+    assert denied_by_role_fallback.is_authorized(policy) is False
+
+
+def test_get_auth_context_from_gateway_headers() -> None:
+    scope = {
+        "type": "http",
+        "headers": [
+            (b"x-user-id", b"kong-user-99"),
+            (b"x-user-roles", b"MESERO,ADMINISTRADOR"),
+            (b"x-user-permissions", b"orders:orders:create,orders:orders:confirm"),
+            (b"x-staff-id", b"EMP-42"),
+        ],
+    }
+    request = Request(scope)
+    context = get_auth_context(request)
+    assert context.user_id == "kong-user-99"
+    assert context.role == Role.ADMIN
+    assert context.effective_roles == frozenset({Role.ADMIN, Role.WAITER})
+    assert context.staff_id == "EMP-42"
+    assert context.permissions == frozenset(["orders:orders:create", "orders:orders:confirm"])
+
+
+def test_get_auth_context_falls_back_to_bearer_when_gateway_headers_absent(
+    make_token: TokenFactory,
+) -> None:
+    token = make_token(user_id="bearer-user", role="chef")
+    scope = {
+        "type": "http",
+        "headers": [
+            (b"authorization", f"Bearer {token}".encode()),
+        ],
+    }
+    request = Request(scope)
+    context = get_auth_context(request)
+    assert context.user_id == "bearer-user"
+    assert context.role == Role.CHEF
+
+
+def test_ensure_authorized_and_require_access() -> None:
+    policy = AccessPolicy(
+        permissions=frozenset(["kitchen:queues:view"]),
+        fallback_roles=frozenset({Role.KITCHEN}),
+    )
+    allowed_ctx = AuthContext(
+        user_id="chef-1",
+        role=Role.KITCHEN,
+        roles=frozenset({Role.KITCHEN}),
+        permissions=frozenset(["kitchen:queues:view"]),
+    )
+    ensure_authorized(allowed_ctx, policy)
+    assert require_access(policy)(allowed_ctx) is allowed_ctx
+
+    denied_ctx = AuthContext(
+        user_id="waiter-1",
+        role=Role.WAITER,
+        roles=frozenset({Role.WAITER}),
+        permissions=frozenset(["orders:orders:view"]),
+    )
+    with pytest.raises(ForbiddenRoleError):
+        ensure_authorized(denied_ctx, policy)
+
+
+def test_require_permissions_helper() -> None:
+    guard = require_permissions(
+        "kitchen:orders:start_preparation", fallback_roles=frozenset({Role.CHEF})
+    )
+    ctx = AuthContext(
+        user_id="u1",
+        role=Role.CHEF,
+        roles=frozenset({Role.CHEF}),
+        permissions=frozenset(["kitchen:orders:start_preparation"]),
+    )
+    assert guard(ctx) is ctx
+
+
+def test_api_v1_and_orders_prefix_routes_mounted(client: TestClient) -> None:
+    res = client.get("/health")
+    assert res.status_code == 200
+
+    assert client.get("/orders").status_code == 401
+    assert client.get("/api/v1/orders").status_code == 401
+    assert client.get("/api/v1/orders/orders").status_code == 401
+    assert client.get("/kds/queue").status_code == 401
+    assert client.get("/api/v1/kds/queue").status_code == 401
+    assert client.get("/api/v1/orders/kds/queue").status_code == 401
+
+
+def test_get_auth_context_from_query_params(make_token: TokenFactory) -> None:
+    token = make_token(role="waiter", user_id="query-user")
+    req_token = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/ws/waiter",
+            "headers": [],
+            "query_string": f"token={token}".encode(),
+        }
+    )
+    ctx = get_auth_context(req_token)
+    assert ctx.user_id == "query-user"
+    assert ctx.role == Role.WAITER
+
+    req_access_token = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/ws/waiter",
+            "headers": [],
+            "query_string": f"access_token={token}".encode(),
+        }
+    )
+    ctx2 = get_auth_context(req_access_token)
+    assert ctx2.user_id == "query-user"
+    assert ctx2.role == Role.WAITER

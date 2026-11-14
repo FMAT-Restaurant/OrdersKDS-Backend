@@ -37,6 +37,14 @@ class OutboxWorkerSettings:
     batch_size: int = 100
 
 
+@dataclass(frozen=True)
+class CatalogReconciliationSettings:
+    """Optional Menu catalog bootstrap and reconciliation settings."""
+
+    sync_url: str | None
+    interval_seconds: int | None
+
+
 DEFAULT_SAGA_WATCHER_INTERVAL_SECONDS = 5.0
 
 
@@ -57,6 +65,40 @@ class SagaTimeoutSettings:
 def get_redis_url() -> str:
     """Return the Redis URL used by the catalog projection."""
     return os.getenv("REDIS_URL", "redis://localhost:6379/0").strip()
+
+
+def get_catalog_reconciliation_settings() -> CatalogReconciliationSettings:
+    """Load optional catalog synchronization settings without a frequency default.
+
+    A configured URL always enables one startup bootstrap. Periodic
+    reconciliation is enabled only when its explicit interval is provided.
+    """
+    raw_url = os.getenv("CATALOG_SYNC_URL", "").strip()
+    sync_url = raw_url or None
+    raw_interval = os.getenv("CATALOG_RECONCILIATION_INTERVAL_SECONDS", "").strip()
+    interval: int | None = None
+    if raw_interval:
+        try:
+            interval = int(raw_interval)
+        except ValueError as exc:
+            raise RuntimeError(
+                "Invalid CATALOG_RECONCILIATION_INTERVAL_SECONDS: "
+                f"expected a positive integer, got {raw_interval!r}"
+            ) from exc
+        if interval <= 0:
+            raise RuntimeError(
+                "Invalid CATALOG_RECONCILIATION_INTERVAL_SECONDS: "
+                f"expected a positive integer, got {interval}"
+            )
+        if sync_url is None:
+            raise RuntimeError(
+                "CATALOG_SYNC_URL is required when "
+                "CATALOG_RECONCILIATION_INTERVAL_SECONDS is configured"
+            )
+    return CatalogReconciliationSettings(
+        sync_url=sync_url,
+        interval_seconds=interval,
+    )
 
 
 def _get_required_env(key: str) -> str:

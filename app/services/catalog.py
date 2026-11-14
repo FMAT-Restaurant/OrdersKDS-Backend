@@ -7,14 +7,16 @@ from __future__ import annotations
 
 import asyncio
 import unicodedata
-from collections.abc import Mapping
-from typing import Any, Protocol, cast
+from typing import Protocol
 
 from redis.asyncio import Redis
 
-from app.cache.catalog import CatalogRepository
+from app.cache.catalog import CatalogRepository, RedisHashAdapter
 from app.core.config import get_redis_url
 from app.domain.errors import DishUnavailableError
+
+# Backwards compatibility alias
+_RedisHashAdapter = RedisHashAdapter
 
 
 def normalize_station_name(name: str | None) -> str | None:
@@ -29,7 +31,14 @@ def normalize_station_name(name: str | None) -> str | None:
     return "".join(c for c in normalized if unicodedata.category(c) != "Mn")
 
 
-_CATALOG_MOCK_REGISTRY: dict[str, dict[str, str | None]] = {}
+_CATALOG_MOCK_REGISTRY: dict[str, dict[str, str | None]] = {
+    "dish-tacos": {"station": "Parrilla", "preparation_time_text": "12 min"},
+    "dish-horchata": {"station": "Barra", "preparation_time_text": "3 min"},
+    "dish-arrachera": {"station": "Parrilla", "preparation_time_text": "18 min"},
+    "dish-guacamole": {"station": "Fría", "preparation_time_text": "5 min"},
+    "dish-hamburguesa": {"station": "Parrilla", "preparation_time_text": "15 min"},
+    "dish-ensalada": {"station": "Fría", "preparation_time_text": "8 min"},
+}
 
 
 def register_catalog_mock(
@@ -126,26 +135,12 @@ _default_catalog_validator = DefaultCatalogValidator()
 _redis_validator: CatalogRepositoryValidator | None = None
 
 
-class _RedisHashAdapter:
-    """Adapt redis-py's broad command signatures to the catalog port."""
-
-    def __init__(self, redis: Redis) -> None:
-        self._redis = redis
-
-    async def hgetall(self, name: str) -> dict[object, object]:
-        values = await self._redis.hgetall(name)
-        return dict(values.items())
-
-    async def hset(self, name: str, mapping: Mapping[str, str]) -> int:
-        return await self._redis.hset(name, mapping=cast(Mapping[Any, Any], mapping))
-
-
 def _get_redis_validator() -> CatalogRepositoryValidator:
     global _redis_validator
     if _redis_validator is None:
         _redis_validator = CatalogRepositoryValidator(
             CatalogRepository(
-                _RedisHashAdapter(Redis.from_url(get_redis_url(), decode_responses=True))
+                RedisHashAdapter(Redis.from_url(get_redis_url(), decode_responses=True))
             )
         )
     return _redis_validator

@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.order_status import ItemStatus, OrderStatus
 
@@ -29,6 +29,18 @@ class MarkReadyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class RedoItemRequest(BaseModel):
+    """Payload for returning a delivered item to kitchen (RF-22, OP-12)."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    note: str | None = Field(
+        default=None,
+        max_length=500,
+        description="Mandatory explanation for redoing the delivered dish.",
+    )
+
+
 class KitchenRejectRequest(BaseModel):
     """Payload for kitchen rejecting an item due to physical lack of stock."""
 
@@ -39,6 +51,13 @@ class KitchenRejectRequest(BaseModel):
         min_length=1,
         max_length=500,
         description="Reason why the kitchen cannot prepare this item.",
+    )
+    available_quantity: int = Field(
+        default=0,
+        ge=0,
+        validation_alias=AliasChoices("availableQuantity", "available_quantity"),
+        serialization_alias="availableQuantity",
+        description="Physical units kitchen can still prepare out of requested quantity.",
     )
 
 
@@ -79,11 +98,32 @@ class OrderItemInput(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
-    dish_id: str = Field(
+    id: str | None = Field(
+        default=None,
+        description="Optional client-side item identifier.",
+    )
+    item_id: str | None = Field(
+        default=None,
+        alias="itemId",
+        description="Optional legacy/client item identifier.",
+    )
+    dish_id: str | None = Field(
+        default=None,
         alias="dishId",
-        min_length=1,
         max_length=64,
         description="Unique catalog plate/item identifier.",
+    )
+    source_id: str | None = Field(
+        default=None,
+        alias="sourceId",
+        max_length=64,
+        description="Recipe/plate source identifier from Menu.",
+    )
+    offer_id: str | None = Field(
+        default=None,
+        alias="offerId",
+        max_length=64,
+        description="Commercial offer identifier from Menu.",
     )
     name: str = Field(
         min_length=1,
@@ -96,6 +136,7 @@ class OrderItemInput(BaseModel):
         description="Quantity of dishes requested.",
     )
     unit_price: Decimal = Field(
+        default=Decimal("0.00"),
         alias="unitPrice",
         ge=Decimal("0.00"),
         description="Unit price frozen at ordering time.",
@@ -109,6 +150,13 @@ class OrderItemInput(BaseModel):
         max_length=500,
         description="Special preparation instructions for kitchen.",
     )
+
+    @model_validator(mode="after")
+    def validate_identifier_and_dish_id(self) -> Self:
+        """Ensure dish_id is not empty string when provided."""
+        if self.dish_id is not None and not self.dish_id.strip():
+            raise ValueError("dish_id cannot be an empty string")
+        return self
 
 
 class UpdateOrderItemsRequest(BaseModel):
@@ -147,6 +195,40 @@ class CancelOrderRequest(BaseModel):
     reason: str | None = Field(default=None, description="Optional cancellation reason.")
 
 
+class VoidOrderRequest(BaseModel):
+    """Optional payload for administratively voiding an in-preparation order (RF-26, RF-27)."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    reason: str | None = Field(
+        default=None,
+        max_length=500,
+        description="Optional administrative reason for voiding the order.",
+    )
+    charge_customer: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("chargeCustomer", "charge_customer"),
+        description="Whether to request a charge to the customer for the wasted order.",
+    )
+
+
+class VoidKitchenErrorRequest(BaseModel):
+    """Payload for kitchen error void endpoint (RF-28, RF-29).
+
+    Requires a non-empty explanation note (`note` or alias `reason`).
+    Extra fields are strictly forbidden.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    note: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("note", "reason", "motivo"),
+        max_length=500,
+        description="Mandatory explanation note describing the kitchen error.",
+    )
+
+
 class OrderItemResponse(BaseModel):
     """Public representation of an order item."""
 
@@ -156,6 +238,8 @@ class OrderItemResponse(BaseModel):
     public_id: UUID = Field(alias="publicId")
     item_id: UUID = Field(alias="itemId")
     dish_id: str | None = Field(default=None, alias="dishId")
+    source_id: str | None = Field(default=None, alias="sourceId")
+    offer_id: str | None = Field(default=None, alias="offerId")
     name: str
     quantity: int
     unit_price: Decimal = Field(alias="unitPrice")
@@ -179,10 +263,12 @@ class OrderItemResponse(BaseModel):
         now = datetime.now(UTC)
         item_id = item.public_id or uuid4()
         return cls(
-            id=str(item.id) if item.id is not None else str(item_id),
+            id=str(item_id),
             publicId=item_id,
             itemId=item_id,
             dishId=item.dish_id,
+            sourceId=item.dish_id,
+            offerId=getattr(item, "offer_id", None) or item.dish_id,
             name=item.name,
             quantity=item.quantity if item.quantity is not None else 1,
             unitPrice=item.unit_price if item.unit_price is not None else Decimal("0.00"),
@@ -195,6 +281,14 @@ class OrderItemResponse(BaseModel):
             createdAt=item.created_at or now,
             updatedAt=item.updated_at or now,
         )
+
+
+def _public_rejection_details(details: dict[str, object] | None) -> dict[str, object] | None:
+    """Strip internal redo bookkeeping keys from API-facing rejectionDetails payloads."""
+    if not isinstance(details, dict):
+        return details
+    filtered = {k: v for k, v in details.items() if k != "redoOriginalNotes"}
+    return filtered or None
 
 
 class OrderResponse(BaseModel):
@@ -210,6 +304,7 @@ class OrderResponse(BaseModel):
     status: OrderStatus
     version: int
     total_amount: Decimal = Field(alias="totalAmount")
+    order_number: int | None = Field(default=None, alias="orderNumber")
     items: list[OrderItemResponse] = Field(default_factory=list)
     confirmed_at: datetime | None = Field(default=None, alias="confirmedAt")
     confirmed_by: UUID | None = Field(default=None, alias="confirmedBy")
@@ -232,7 +327,7 @@ class OrderResponse(BaseModel):
         now = datetime.now(UTC)
         order_public_id = order.public_id or uuid4()
         return cls(
-            id=str(order.id) if order.id is not None else str(order_public_id),
+            id=str(order_public_id),
             publicId=order_public_id,
             orderId=order_public_id,
             tableNumber=order.table_number,
@@ -240,6 +335,7 @@ class OrderResponse(BaseModel):
             status=order.status or OrderStatus.CREATED,
             version=order.version if order.version is not None else 1,
             totalAmount=order.total_amount if order.total_amount is not None else Decimal("0.00"),
+            orderNumber=order.id if order.id is not None else None,
             items=(
                 items
                 if items is not None
@@ -249,7 +345,7 @@ class OrderResponse(BaseModel):
             confirmedBy=order.confirmed_by,
             stockReservedAt=order.stock_reserved_at,
             inPreparationAt=order.in_preparation_at,
-            rejectionDetails=order.rejection_details,
+            rejectionDetails=_public_rejection_details(order.rejection_details),
             diningSessionId=order.dining_session_id,
             responsibleWaiterId=order.responsible_waiter_id,
             awaitingStockConfirmation=order.awaiting_stock_confirmation,

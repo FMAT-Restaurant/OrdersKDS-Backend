@@ -442,7 +442,7 @@ Reglas: las claves están en inglés y en `UPPER_SNAKE_CASE`; ningún secreto va
 | `LOG_LEVEL` | No | Nivel de log estructurado. *(Propuesta)* | `INFO` |
 | `OUTBOX_POLL_INTERVAL_SECONDS` | No | Frecuencia con que el Outbox Worker busca filas pendientes. *(Propuesta)* | `1` |
 | `CATALOG_SYNC_URL` | No | Endpoint `GET /menu/catalogo/completo` para bootstrap/reconciliación, pendiente de aprobar por Catálogo y Menú. *(Propuesta)* | *(vacío hasta aprobarse)* |
-| `CATALOG_RECONCILIATION_INTERVAL_SECONDS` | No | Frecuencia del job de reconciliación; sin definir con el equipo. *(Propuesta)* | *(vacío hasta acordarse)* |
+| `CATALOG_RECONCILIATION_INTERVAL_SECONDS` | No | Frecuencia positiva en segundos para reconciliación periódica. Sin valor por defecto; si solo se configura `CATALOG_SYNC_URL`, se hace únicamente la carga inicial. | *(vacío hasta acordarse)* |
 
 > **JWT:** el API Gateway valida la firma; el backend solo lee `user_id` y `role` de las claims del encabezado `Authorization: Bearer <jwt>` **sin verificar la firma** (PyJWT con `verify_signature=False`, validando `exp` y rechazando `alg: none`; ver [ADR-0011](adr/0011-jwt-claims-without-local-signature-verification.md)). Por eso **no** existe (ni debe crearse) una variable tipo `JWT_SECRET`. Para desarrollo local usa `scripts/dev_token.py`; la clave con que firma ese script es irrelevante para el backend.
 

@@ -18,12 +18,15 @@ from sqlalchemy.ext.asyncio import (
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 
+_DEFAULT_DATABASE_URL = "postgresql+asyncpg://localhost:5432/orders"
+
 
 def get_database_url() -> str:
     """Retrieve DATABASE_URL from environment or default to local Postgres."""
-    return os.getenv(
-        "DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/orders"
-    )
+    url = os.getenv("DATABASE_URL")
+    if url and url.strip():
+        return url.strip()
+    return _DEFAULT_DATABASE_URL
 
 
 def get_engine() -> AsyncEngine:

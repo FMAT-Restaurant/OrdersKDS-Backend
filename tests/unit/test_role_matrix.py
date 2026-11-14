@@ -30,7 +30,12 @@ pytestmark = [pytest.mark.unit, pytest.mark.requirement("RNF-03", "RF-15", "RNF-
 ORDER_ID = UUID("00000000-0000-4000-8000-000000000001")
 ITEM_ID = UUID("00000000-0000-4000-8000-000000000002")
 
-PUBLIC_PATHS = {"/health"}
+PUBLIC_PATHS = {
+    "/health",
+    "/api/v1/health",
+    "/api/v1/orders/health",
+    "/api/v1/kitchen/health",
+}
 PATH_PARAMETER = re.compile(r"\{[^}]+\}")
 
 # Kitchen routes (§5.7: kitchen, chef, admin). Waiter is rejected with 403 FORBIDDEN_ROLE.
@@ -125,7 +130,7 @@ def test_kitchen_routes_role_matrix(
         assert response.json() == {
             "error": {
                 "code": ErrorCode.FORBIDDEN_ROLE,
-                "message": "Role not allowed for this action.",
+                "message": "Role or permission not allowed for this action.",
             }
         }
 
@@ -274,3 +279,67 @@ def test_websocket_subscribe_to_forbidden_channel_returns_error(
         websocket.send_json({"action": "subscribe", "channel": channel})
         response = websocket.receive_json()
         assert response == {"error": "FORBIDDEN_CHANNEL"}
+
+
+def test_pbac_permissions_override_fallback_roles_on_http_and_websocket(
+    client: TestClient,
+    make_token: Callable[..., str],
+) -> None:
+    """PBAC permissions allow cross-role access and empty lists revoke fallback roles."""
+    from app.domain.access import KDS_WS, ORDER_CREATE, ORDER_READY, WAITER_WS
+
+    # 1. Waiter granted kitchen:orders:ready can hit KDS route (passes PBAC -> 404 not found)
+    waiter_kds_token = make_token(role="waiter", permissions=sorted(ORDER_READY.permissions))
+    waiter_with_kds_perm = {"Authorization": f"Bearer {waiter_kds_token}"}
+    assert (
+        client.patch(f"/orders/{ORDER_ID}/ready", headers=waiter_with_kds_perm).status_code == 404
+    )
+
+    # 2. Chef with explicit empty permissions=[] is denied KDS route (403 FORBIDDEN_ROLE)
+    chef_revoked = {"Authorization": f"Bearer {make_token(role='chef', permissions=[])}"}
+    revoked_kds = client.patch(f"/orders/{ORDER_ID}/ready", headers=chef_revoked)
+    assert revoked_kds.status_code == 403
+    assert _error_code(revoked_kds.json()) == ErrorCode.FORBIDDEN_ROLE
+
+    # 3. Waiter with explicit empty permissions=[] is denied POST /orders (403)
+    waiter_revoked = {"Authorization": f"Bearer {make_token(role='waiter', permissions=[])}"}
+    revoked_create = client.post(
+        "/orders", headers=waiter_revoked, json={"tableNumber": 1, "items": []}
+    )
+    assert revoked_create.status_code == 403
+    assert _error_code(revoked_create.json()) == ErrorCode.FORBIDDEN_ROLE
+
+    # 4. Kitchen granted ORDER_CREATE passes PBAC on POST /orders (422 payload, not 403)
+    kitchen_create_token = make_token(role="kitchen", permissions=sorted(ORDER_CREATE.permissions))
+    kitchen_with_create = {"Authorization": f"Bearer {kitchen_create_token}"}
+    assert client.post("/orders", headers=kitchen_with_create, json={}).status_code == 422
+
+    # 5. WebSockets: waiter with KDS_WS permission connects; chef with [] closes 4403
+    kds_ws_token = make_token(role="waiter", permissions=sorted(KDS_WS.permissions))
+    with client.websocket_connect(
+        KDS_WS_PATH,
+        headers={"Authorization": f"Bearer {kds_ws_token}"},
+    ) as ws:
+        ws.send_text("ping")
+
+    with (
+        client.websocket_connect(KDS_WS_PATH, headers=chef_revoked) as ws,
+        pytest.raises(WebSocketDisconnect) as closed_kds,
+    ):
+        ws.receive_text()
+    assert closed_kds.value.code == 4403
+
+    # 6. Waiter WS: chef with WAITER_WS permission connects; waiter with [] closes 4403
+    waiter_ws_token = make_token(role="chef", permissions=sorted(WAITER_WS.permissions))
+    with client.websocket_connect(
+        WAITER_WS_PATH,
+        headers={"Authorization": f"Bearer {waiter_ws_token}"},
+    ) as ws:
+        ws.send_text("ping")
+
+    with (
+        client.websocket_connect(WAITER_WS_PATH, headers=waiter_revoked) as ws,
+        pytest.raises(WebSocketDisconnect) as closed_waiter,
+    ):
+        ws.receive_text()
+    assert closed_waiter.value.code == 4403
