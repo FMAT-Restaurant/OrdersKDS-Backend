@@ -149,4 +149,3 @@ async def test_inbound_consumer_reraises_cancelled_error_and_closes_connection()
         await worker.run(stop_event)
 
     mock_conn.close.assert_awaited_once()
-

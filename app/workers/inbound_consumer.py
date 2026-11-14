@@ -159,4 +159,3 @@ class InboundConsumerWorker:
                 if self._connection and not self._connection.is_closed:
                     await self._connection.close()
                 await self._sleeper(3.0)
-

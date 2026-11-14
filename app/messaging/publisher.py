@@ -103,10 +103,9 @@ class EventPublisher:
         self._url = url.strip()
         self._exchange_name = exchange_name.strip()
         self._vhost = vhost.strip()
-        self._dual_routing = (
-            dual_routing
-            or os.getenv("RABBITMQ_DUAL_ROUTING", "").strip().lower() in ("true", "1", "yes")
-        )
+        self._dual_routing = dual_routing or os.getenv(
+            "RABBITMQ_DUAL_ROUTING", ""
+        ).strip().lower() in ("true", "1", "yes")
         self._connection: AbstractRobustConnection | None = None
         self._channel: AbstractRobustChannel | None = None
         self._exchange: AbstractRobustExchange | None = None

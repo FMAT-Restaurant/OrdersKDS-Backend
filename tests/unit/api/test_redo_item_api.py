@@ -187,4 +187,3 @@ def test_redo_restores_original_notes_after_kitchen_completes_redo(
     assert ready_resp.json()["items"][0]["notes"] == original_note
     assert item.notes == original_note
     assert order.rejection_details is None
-

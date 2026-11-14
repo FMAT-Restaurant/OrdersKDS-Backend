@@ -1036,4 +1036,3 @@ def test_kitchen_reject_item_with_partial_available_quantity(
     assert reserved_by_item[str(rejected_target.public_id)] == 2
     assert reserved_by_item[str(other_item.public_id)] == 1
     assert fake_catalog.availabilities.get("dish-tacos") is None
-

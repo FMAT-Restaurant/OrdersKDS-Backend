@@ -289,13 +289,10 @@ def test_pbac_permissions_override_fallback_roles_on_http_and_websocket(
     from app.domain.access import KDS_WS, ORDER_CREATE, ORDER_READY, WAITER_WS
 
     # 1. Waiter granted kitchen:orders:ready can hit KDS route (passes PBAC -> 404 not found)
-    waiter_kds_token = make_token(
-        role="waiter", permissions=sorted(ORDER_READY.permissions)
-    )
+    waiter_kds_token = make_token(role="waiter", permissions=sorted(ORDER_READY.permissions))
     waiter_with_kds_perm = {"Authorization": f"Bearer {waiter_kds_token}"}
     assert (
-        client.patch(f"/orders/{ORDER_ID}/ready", headers=waiter_with_kds_perm).status_code
-        == 404
+        client.patch(f"/orders/{ORDER_ID}/ready", headers=waiter_with_kds_perm).status_code == 404
     )
 
     # 2. Chef with explicit empty permissions=[] is denied KDS route (403 FORBIDDEN_ROLE)
@@ -313,9 +310,7 @@ def test_pbac_permissions_override_fallback_roles_on_http_and_websocket(
     assert _error_code(revoked_create.json()) == ErrorCode.FORBIDDEN_ROLE
 
     # 4. Kitchen granted ORDER_CREATE passes PBAC on POST /orders (422 payload, not 403)
-    kitchen_create_token = make_token(
-        role="kitchen", permissions=sorted(ORDER_CREATE.permissions)
-    )
+    kitchen_create_token = make_token(role="kitchen", permissions=sorted(ORDER_CREATE.permissions))
     kitchen_with_create = {"Authorization": f"Bearer {kitchen_create_token}"}
     assert client.post("/orders", headers=kitchen_with_create, json={}).status_code == 422
 
