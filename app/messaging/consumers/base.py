@@ -171,7 +171,7 @@ async def _execute_typed_handler(
     catalog_events = tuple(
         event.value
         for event in EventName
-        if event.value.startswith("menu.") or event.value.startswith("inventory.recipe.")
+        if event.value.startswith(("menu.", "inventory.recipe."))
     )
     if target_event in catalog_events:
         if catalog_consumer is None:
