@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.workers.inbound_consumer import InboundConsumerWorker
+from app.workers.inbound_consumer import INBOUND_BINDINGS, InboundConsumerWorker
 
 
 @pytest.mark.unit
@@ -61,9 +61,9 @@ async def test_inbound_consumer_setup_and_dispatch() -> None:
         await worker.run(stop_event)
 
     mock_channel.set_qos.assert_awaited_once_with(prefetch_count=10)
-    assert mock_channel.declare_exchange.await_count == 3
+    assert mock_channel.declare_exchange.await_count == 4
     mock_channel.declare_queue.assert_awaited_once_with("orders.inventory.inbound", durable=True)
-    assert mock_queue.bind.await_count == 5
+    assert mock_queue.bind.await_count == len(INBOUND_BINDINGS)
     mock_queue.cancel.assert_awaited_once_with("ctag-123")
     mock_channel.close.assert_awaited_once()
     mock_conn.close.assert_awaited_once()

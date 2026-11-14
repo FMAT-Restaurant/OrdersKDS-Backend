@@ -12,6 +12,7 @@ from app.core.config import (
     RabbitMQSettings,
     SagaTimeoutSettings,
 )
+from app.realtime.router import realtime_router
 from app.workers import run_all
 
 
@@ -40,7 +41,15 @@ async def test_run_all_main_spawns_catalog_worker_when_configured() -> None:
     mock_redis = MagicMock()
     mock_redis.aclose = AsyncMock()
 
+    captured_publishers: list[object] = []
+    original_set_external = realtime_router.set_external_publisher
+
+    def _spy_set_external(pub: object) -> None:
+        captured_publishers.append(pub)
+        original_set_external(pub)  # type: ignore[arg-type]
+
     with (
+        patch.object(realtime_router, "set_external_publisher", side_effect=_spy_set_external),
         patch(
             "app.workers.run_all._get_database_url",
             return_value="postgresql+asyncpg://user:pass@localhost/db",
@@ -80,6 +89,9 @@ async def test_run_all_main_spawns_catalog_worker_when_configured() -> None:
     mock_saga_watcher.run.assert_called_once()
     mock_inbound_worker.run.assert_called_once()
     mock_catalog_worker.run.assert_called_once()
+    assert len(captured_publishers) == 2
+    assert captured_publishers[0] is not None
+    assert captured_publishers[1] is None
     mock_redis.aclose.assert_awaited_once()
     mock_publisher.close.assert_awaited_once()
     mock_engine.dispose.assert_awaited_once()

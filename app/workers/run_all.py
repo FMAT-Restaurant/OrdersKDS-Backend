@@ -29,6 +29,8 @@ from app.core.config import (
 from app.messaging.consumers.base import EventConsumerDispatcher
 from app.messaging.consumers.catalog import CatalogConsumer
 from app.messaging.publisher import EventPublisher
+from app.realtime.redis_bridge import RedisRealtimeBridge
+from app.realtime.router import realtime_router
 from app.services.notifications import default_notifier
 from app.workers.catalog_reconciliation import CatalogReconciliationWorker
 from app.workers.inbound_consumer import InboundConsumerWorker
@@ -101,6 +103,8 @@ async def main() -> None:
             settings=saga_settings,
         )
         catalog_redis = Redis.from_url(get_redis_url(), decode_responses=True)
+        realtime_bridge = RedisRealtimeBridge(catalog_redis, router=realtime_router)
+        realtime_router.set_external_publisher(realtime_bridge.publish)
         catalog_repository = CatalogRepository(RedisHashAdapter(catalog_redis))
         catalog_consumer = CatalogConsumer(catalog_repository)
         dispatcher = EventConsumerDispatcher(
@@ -130,6 +134,7 @@ async def main() -> None:
         await asyncio.gather(*workers)
     finally:
         logger.info("Cleaning up worker resources...")
+        realtime_router.set_external_publisher(None)
         if catalog_redis is not None:
             await catalog_redis.aclose()
         await publisher.close()

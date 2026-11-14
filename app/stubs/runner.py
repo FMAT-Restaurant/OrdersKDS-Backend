@@ -71,7 +71,7 @@ async def main() -> None:
     """Run the contract stubs daemon listening on RabbitMQ."""
     settings = StubSettings()
     rmq_url = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
-    exchange_name = os.getenv("RABBITMQ_EXCHANGE", "amq.topic")
+    exchange_name = os.getenv("RABBITMQ_EXCHANGE", "ordenes.topic")
     vhost = os.getenv("RABBITMQ_VHOST", "/")
 
     logger.info(

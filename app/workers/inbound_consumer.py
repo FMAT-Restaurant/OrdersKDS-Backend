@@ -22,12 +22,22 @@ Sleeper = Callable[[float], Awaitable[None]]
 DEFAULT_INBOUND_QUEUE = "orders.inventory.inbound"
 DEFAULT_INVENTORY_EXCHANGE = "inventory.topic"
 DEFAULT_MENU_EXCHANGE = "menu.topic"
+DEFAULT_FLOOR_EXCHANGE = "sala.events"
 DEFAULT_ORDERS_EXCHANGE = "ordenes.topic"
 INBOUND_BINDINGS: tuple[tuple[str, str], ...] = (
     (DEFAULT_INVENTORY_EXCHANGE, "inventory.reservation.*"),
     (DEFAULT_INVENTORY_EXCHANGE, "inventory.recipe.*"),
     (DEFAULT_INVENTORY_EXCHANGE, "inventario.stock.*"),
     (DEFAULT_MENU_EXCHANGE, "menu.#"),
+    (DEFAULT_FLOOR_EXCHANGE, "sala.#"),
+    (DEFAULT_FLOOR_EXCHANGE, "dining.#"),
+    (DEFAULT_ORDERS_EXCHANGE, "inventory.reservation.*"),
+    (DEFAULT_ORDERS_EXCHANGE, "inventario.stock.*"),
+    (DEFAULT_ORDERS_EXCHANGE, "pagos.#"),
+    (DEFAULT_ORDERS_EXCHANGE, "payments.#"),
+    (DEFAULT_ORDERS_EXCHANGE, "pago.#"),
+    (DEFAULT_ORDERS_EXCHANGE, "sala.#"),
+    (DEFAULT_ORDERS_EXCHANGE, "dining.#"),
     (DEFAULT_ORDERS_EXCHANGE, "menu.*"),
 )
 
@@ -44,6 +54,7 @@ class InboundConsumerWorker:
         queue_name: str | None = None,
         inventory_exchange: str | None = None,
         menu_exchange: str | None = None,
+        floor_exchange: str | None = None,
         orders_exchange: str | None = None,
         sleeper: Sleeper = asyncio.sleep,
     ) -> None:
@@ -61,6 +72,9 @@ class InboundConsumerWorker:
         self._menu_exchange: str = (
             menu_exchange or os.getenv("RABBITMQ_MENU_EXCHANGE") or DEFAULT_MENU_EXCHANGE
         )
+        self._floor_exchange: str = (
+            floor_exchange or os.getenv("RABBITMQ_FLOOR_EXCHANGE") or DEFAULT_FLOOR_EXCHANGE
+        )
         self._orders_exchange: str = (
             orders_exchange or os.getenv("RABBITMQ_EXCHANGE") or DEFAULT_ORDERS_EXCHANGE
         )
@@ -74,6 +88,7 @@ class InboundConsumerWorker:
         exchange_names = {
             DEFAULT_INVENTORY_EXCHANGE: self._inventory_exchange,
             DEFAULT_MENU_EXCHANGE: self._menu_exchange,
+            DEFAULT_FLOOR_EXCHANGE: self._floor_exchange,
             DEFAULT_ORDERS_EXCHANGE: self._orders_exchange,
         }
         declared_exchanges: dict[str, aio_pika.abc.AbstractRobustExchange] = {}

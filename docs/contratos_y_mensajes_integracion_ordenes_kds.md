@@ -30,11 +30,14 @@ Tras la reunión sostenida entre los líderes de equipo de **Menú (Tony)**, **I
      - En **Mesero (`OrderTicketWidget`)**: Se notifica al mesero que cocina no confirmó a tiempo, permitiéndole: (a) reintentar confirmación, (b) modificar platillos en el borrador local (pudiendo vaciar/sustituir los platillos en la UI antes de reemplazar la lista vía `PATCH /orders/{orderId}/items`), o (c) cancelar y crear una nueva orden limpiamente.
 4. **Nomenclatura Microfrontend:**
    - La vista del mesero integrada en Menú utiliza el término **"Orden"** (`entityLabel="orden"`), mientras KDS mantiene **"Comanda"**, soportando eventos DOM bilingües (`fmat:orden:*` y `fmat:comanda:*`) y propagando `sourceId`, `offerId` y `unitPrice` de extremo a extremo.
-5. **Estrategia de Exchanges y Routing Keys Duales:**
+5. **Estrategia de Exchanges y Routing Keys Duales (Alineado a CloudAMQP `tsaxufiv`):**
    - **Órdenes (`ordenes.topic`)** publica con routing keys primarias en español y routing keys duales en inglés para `Inventory-Backend` (`ordenes.order.created`, `ordenes.order.cancelled`, `ordenes.order.expired`, `ordenes.order.served`, `ordenes.order.in_preparation`, `ordenes.dish.rejected`, `ordenes.order.wasted`, `ordenes.dish.prepared`).
-   - El worker `InboundConsumerWorker` (`orders.inventory.inbound`) escucha `inventory.topic` (`inventory.reservation.*`, `inventory.recipe.*`, `inventario.stock.*`), `menu.topic` (`menu.#`) y `ordenes.topic` (`menu.*`).
-6. **Seguridad PBAC (`AccessPolicy` con fallback RBAC):**
-   - Todos los endpoints REST de `/orders`, `/kds` y los canales WebSocket `/ws/kds` y `/ws/waiter` evalúan políticas PBAC (`orders:*` / `kitchen:*`) mediante `require_access` y `authorize_websocket(..., policy=...)`, conservando fallback por rol para tokens de desarrollo sin lista de `permissions`.
+   - El worker `InboundConsumerWorker` (`orders.inventory.inbound`) declara y escucha los cuatro topic exchanges reales del broker (`tsaxufiv`): `inventory.topic` (`inventory.reservation.*`, `inventory.recipe.*`, `inventario.stock.*`), `menu.topic` (`menu.#`), `sala.events` (`sala.#`, `dining.#`, configurable vía `RABBITMQ_FLOOR_EXCHANGE`) y `ordenes.topic` (`inventory.reservation.*`, `inventario.stock.*`, `pagos.#`, `payments.#`, `pago.#`, `sala.#`, `dining.#`, `menu.*`).
+6. **Seguridad PBAC (`AccessPolicy` con fallback RBAC) y Enrutamiento Kong Dual (6 Módulos Auth):**
+   - Todos los endpoints REST de `/orders`, `/kds` y los canales WebSocket `/ws/kds` y `/ws/waiter` están expuestos bajo `/api/v1/orders` (puerto `8082`, consumido por `ordenesApp:5177`) y `/api/v1/kitchen` (puerto `8086`, consumido por `cocinaApp:5179`), manteniendo también `/api/v1` y rutas raíz para compatibilidad interna.
+   - `require_access` y `authorize_websocket(..., policy=...)` evalúan políticas PBAC (`orders:*` / `kitchen:*`) leyendo headers inyectados por Kong (`x-user-id`, `x-staff-id`, `x-user-roles`, `x-user-role`, `x-user-permissions`, `x-user-type`) y claims JWT (`user_id`/`sub`, `roles`/`role`, `permissions`, `staffId`, `userType`), incluyendo `CHEF_MASTER` → `chef`, acceso administrativo cuando `userType`/`x-user-type` es `ADMINISTRADOR`/`ADMIN` y fallback por rol para tokens de desarrollo sin lista de `permissions`.
+7. **Sincronización WebSocket Cross-Process (Redis Pub/Sub Bridge):**
+   - Los eventos asíncronos procesados en el worker (`app/workers/run_all.py`) —como confirmaciones/rechazos de inventario o expiraciones— publican mensajes en el canal Redis Pub/Sub `orders:realtime:events` (`RedisRealtimeBridge`), y el proceso API (`app/main.py`) los reenvía en tiempo real mediante `RealtimeChannelRouter` hacia los clientes WebSocket `/ws/kds` y `/ws/waiter`.
 
 ---
 
@@ -518,9 +521,11 @@ Todos los eventos outbound se publican en el Topic Exchange de Órdenes: **`orde
     - `menu.source.created` / `menu.source.updated` / `menu.source.deleted` *(recetas / fuentes físicas identificadas por `sourceId`)*
     - `menu.offer.created` / `menu.offer.updated` / `menu.oferta.creada` / `menu.oferta.actualizada` *(ofertas comerciales identificadas por `offerId` / `data.id`)*
     - `menu.catalog.updated` / `menu.catalogo.actualizado` / `menu.platillo.disponibilidad_actualizada` / `menu.platillo.precio_actualizado` / `menu.platillo.estado_actualizado`
-  - **Inventario (`inventory.topic`, patrón `inventory.recipe.*`):**
+  - **Inventario (`inventory.topic` y `ordenes.topic`, patrones `inventory.reservation.*`, `inventory.recipe.*`, `inventario.stock.*`):**
     - `inventory.recipe.availability-changed` *(con `plateId`/`sourceId` e `isAvailable`)*
     - `inventory.recipe.not-available` *(marca disponibilidad `false` para el `plateId`/`sourceId` afectado)*
+  - **Sala (`sala.events` vía `RABBITMQ_FLOOR_EXCHANGE` y `ordenes.topic`, patrones `sala.#`, `dining.#`) y Pagos (`ordenes.topic`, patrones `pagos.#`, `payments.#`, `pago.#`):**
+    - Sincronización de sesiones de mesa (`dining.*`, `sala.*`) y confirmación/cierre de pagos (`pagos.*`, `payments.*`).
 - **Efecto en Órdenes:**
   - `CatalogConsumer` actualiza en Redis (`catalog:platillo:{id}`) tanto la receta física (`sourceId` / `plateId`) como la oferta comercial (`offerId`) para validar disponibilidad en tiempo real en `POST /orders` y `PATCH /orders/{orderId}/items`.
 
@@ -647,9 +652,9 @@ stateDiagram-v2
 
 ### 7.1. Matriz de Políticas PBAC Aplicadas en REST y WebSockets
 
-Todos los endpoints HTTP (`/orders`, `/kds`) y WebSockets (`/ws/kds`, `/ws/waiter`) utilizan `require_access(policy)` / `authorize_websocket(..., policy=...)` y defensa en profundidad en `OrderService._verify_policy`:
-- Si el token/gateway incluye el claim o header `permissions` / `x-user-permissions`, se exige coincidencia con al menos uno de los permisos de la política (o rol `admin`). Un arreglo vacío `[]` revoca acceso incluso si el rol fallback coincidiera.
-- Si `permissions` está ausente (`None`), se aplica `fallback_roles` para compatibilidad con entornos de desarrollo locales.
+Todos los endpoints HTTP (`/orders`, `/kds`) y WebSockets (`/ws/kds`, `/ws/waiter`) se montan bajo los prefijos `/api/v1/orders` (`ordenesApp:5177`, puerto `8082`), `/api/v1/kitchen` (`cocinaApp:5179`, puerto `8086`), `/api/v1` y raíz, y utilizan `require_access(policy)` / `authorize_websocket(..., policy=...)` más defensa en profundidad en `OrderService._verify_policy`:
+- Si el token/gateway incluye el claim `permissions` o el header `x-user-permissions`, se exige coincidencia con al menos uno de los permisos de la política (o rol `admin` / permiso `*` / `userType` = `ADMINISTRADOR`/`ADMIN` vía claim `userType` o header `x-user-type`). Un arreglo vacío `[]` revoca acceso a usuarios no administradores incluso si el rol fallback coincidiera.
+- Si `permissions` está ausente (`None`), se aplica `fallback_roles` (y se infieren roles desde `permissions` si el rol no viene explícito en desarrollo/tokens mixtos), mapeando `MESERO` → `waiter`, `COCINERO` → `kitchen`, `CHEF` / `CHEF_MASTER` → `chef` y `ADMINISTRADOR` / `ADMIN` → `admin`.
 
 | Acción / Ruta | Política (`app.domain.access`) | Permisos PBAC Aceptados | Fallback Roles |
 | :--- | :--- | :--- | :--- |
@@ -667,4 +672,5 @@ Todos los endpoints HTTP (`/orders`, `/kds`) y WebSockets (`/ws/kds`, `/ws/waite
 
 - **Tolerancia a Fallos:** Idempotencia garantizada vía `eventId` determinístico en cada transición de estado; mensajes duplicados son descartados sin efectos colaterales.
 - **Edición sin Fricción y Validación de Límites:** En UI (`OrderTicketWidget`) el mesero puede vaciar temporalmente todos los platillos (bajar a 0) en modo modificación para sustituir o cancelar antes de confirmar; la API REST (`PATCH /orders/{orderId}/items`, `UpdateOrderItemsRequest`) requiere `min_length=1` al guardar cambios no vacíos.
+- **Tiempo Real Cross-Process:** Los workers (`app/workers/run_all.py`) publican notificaciones vía Redis Pub/Sub (`orders:realtime:events`, `RedisRealtimeBridge`) para que el proceso API (`app/main.py` + `RealtimeChannelRouter`) emita eventos WebSocket inmediatos a `/ws/kds` y `/ws/waiter` sin perder actualizaciones originadas en colas RabbitMQ.
 - **Trazabilidad Total:** Todo mensaje conserva `orderId` y `correlationId` para correlación en logs distribuidos (Jaeger / OpenTelemetry / Kibana).

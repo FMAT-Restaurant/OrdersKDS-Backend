@@ -36,7 +36,7 @@ _COMPOSE_DEFAULTS: dict[str, str] = {
     "DATABASE_URL": "postgresql+asyncpg://ordenes:ordenes@localhost:5432/ordenes",
     "REDIS_URL": "redis://localhost:6379/0",
     "RABBITMQ_URL": "amqp://ordenes:ordenes@localhost:5672/",
-    "RABBITMQ_EXCHANGE": "restaurant.topic",
+    "RABBITMQ_EXCHANGE": "ordenes.topic",
     "RABBITMQ_VHOST": "/",
     "OUTBOX_POLL_INTERVAL_SECONDS": "1",
     "LOG_LEVEL": "INFO",

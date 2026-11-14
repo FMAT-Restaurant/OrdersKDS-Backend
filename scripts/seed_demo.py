@@ -3,10 +3,11 @@
 Populates:
 1. Redis local catalog projection (``catalog:platillo:<dish_id>``) with available
    dishes and one unavailable dish (``dish-agotado``) to test RF-17 validation.
-2. PostgreSQL ``orders`` and ``order_items`` tables with 4 deterministic orders
-   covering the main lifecycle states (``RESERVED``, ``IN_PREPARATION``,
-   ``DELIVERED``, and ``CREATED``) so that both Swagger (``/docs``) and the KDS
-   frontend can be tested immediately without running external microservices.
+2. PostgreSQL ``orders`` and ``order_items`` tables with deterministic orders
+   covering the main lifecycle states (``RESERVED``, ``RESERVED`` expired TTL,
+   ``IN_PREPARATION``, ``DELIVERED``, ``REJECTED``, and ``CREATED``) so that both
+   Swagger (``/docs``) and the Orders / KDS frontends can be tested immediately
+   without running external microservices.
 
 Usage:
     python scripts/seed_demo.py
@@ -83,6 +84,8 @@ DEMO_ORDER_IDS: tuple[UUID, ...] = (
     UUID("44444444-4444-4444-4444-444444444444"),
     UUID("55555555-5555-5555-5555-555555555555"),
     UUID("66666666-6666-6666-6666-666666666666"),
+    UUID("77777777-7777-7777-7777-777777777777"),
+    UUID("88888888-8888-8888-8888-888888888888"),
     *EXTRA_DEMO_ORDER_UUIDS,
 )
 
@@ -147,7 +150,7 @@ DEMO_CATALOG: tuple[dict[str, Any], ...] = (
 
 
 def _build_demo_orders(now: datetime) -> list[Order]:
-    """Create the four demo Order aggregates covering key lifecycle states."""
+    """Create deterministic demo Order aggregates covering all lifecycle states."""
     order_reserved = Order(
         public_id=UUID("11111111-1111-1111-1111-111111111111"),
         table_number=5,
@@ -435,6 +438,88 @@ def _build_demo_orders(now: datetime) -> list[Order]:
     )
     order_huge_reserved.recalculate_total()
 
+    order_rejected = Order(
+        public_id=UUID("77777777-7777-7777-7777-777777777777"),
+        table_number=9,
+        is_takeaway=False,
+        dining_session_id=DEFAULT_DINING_SESSION_ID,
+        status=OrderStatus.REJECTED,
+        confirmed_at=now - timedelta(minutes=3),
+        confirmed_by=DEFAULT_WAITER_ID,
+        rejection_details={
+            "source": "inventory",
+            "reason": "Inventario insuficiente para preparar la arrachera solicitada.",
+            "missingIngredients": ["Aguacate Hass", "Arrachera marinada"],
+            "rejectedItems": [
+                {
+                    "dishId": DISH_ARRACHERA_ID,
+                    "name": DISH_ARRACHERA_NAME,
+                    "requestedQuantity": 2,
+                    "availableQuantity": 0,
+                    "reason": "Sin existencia en cámara fría",
+                }
+            ],
+            "reservedItems": [
+                {
+                    "dishId": DISH_TACOS_ID,
+                    "name": DISH_TACOS_NAME,
+                    "quantity": 2,
+                }
+            ],
+        },
+        created_by=DEFAULT_WAITER_ID,
+        responsible_waiter_id=DEFAULT_WAITER_ID,
+        items=[
+            OrderItem(
+                public_id=UUID("77777777-0000-0000-0000-000000000101"),
+                dish_id=DISH_ARRACHERA_ID,
+                name=DISH_ARRACHERA_NAME,
+                quantity=2,
+                unit_price=PRICE_ARRACHERA,
+                modifiers=[MODIFIER_TERMINO_MEDIO],
+                notes=None,
+                status=ItemStatus.PENDING,
+            ),
+            OrderItem(
+                public_id=UUID("77777777-0000-0000-0000-000000000102"),
+                dish_id=DISH_TACOS_ID,
+                name=DISH_TACOS_NAME,
+                quantity=2,
+                unit_price=PRICE_TACOS,
+                modifiers=["Con cilantro y cebolla"],
+                notes=None,
+                status=ItemStatus.PENDING,
+            ),
+        ],
+    )
+    order_rejected.recalculate_total()
+
+    order_expired_ttl = Order(
+        public_id=UUID("88888888-8888-8888-8888-888888888888"),
+        table_number=11,
+        is_takeaway=False,
+        dining_session_id=DEFAULT_DINING_SESSION_ID,
+        status=OrderStatus.RESERVED,
+        confirmed_at=now - timedelta(minutes=18),
+        confirmed_by=DEFAULT_WAITER_ID,
+        stock_reserved_at=now - timedelta(minutes=18),
+        created_by=DEFAULT_WAITER_ID,
+        responsible_waiter_id=DEFAULT_WAITER_ID,
+        items=[
+            OrderItem(
+                public_id=UUID("88888888-0000-0000-0000-000000000001"),
+                dish_id=DISH_GUACAMOLE_ID,
+                name=DISH_GUACAMOLE_NAME,
+                quantity=1,
+                unit_price=PRICE_GUACAMOLE,
+                modifiers=["Totopos extra"],
+                notes="Cliente esperando respuesta de cocina",
+                status=ItemStatus.PENDING,
+            ),
+        ],
+    )
+    order_expired_ttl.recalculate_total()
+
     return [
         order_reserved,
         order_in_prep,
@@ -442,6 +527,8 @@ def _build_demo_orders(now: datetime) -> list[Order]:
         order_huge_reserved,
         order_delivered,
         order_created,
+        order_rejected,
+        order_expired_ttl,
         *_build_extra_demo_orders(now),
     ]
 
@@ -864,6 +951,14 @@ async def seed_demo_data(*, reset: bool = False) -> None:
         "  4. CREATED        | OrderId: 44444444-4444-4444-4444-444444444444 | "
         "Mesa 8  | Draft (update items / transfer / confirm / cancel)"
     )
+    print(
+        "  5. REJECTED       | OrderId: 77777777-7777-7777-7777-777777777777 | "
+        "Mesa 9  | Rejected (edit items / reopen draft / cancel)"
+    )
+    print(
+        "  6. RESERVED (>15m)| OrderId: 88888888-8888-8888-8888-888888888888 | "
+        "Mesa 11 | KDS Expired TTL Tab (10m grace / waiter retry-modify-cancel)"
+    )
 
 
 def _parse_args() -> argparse.Namespace:
@@ -873,7 +968,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--reset",
         action="store_true",
-        help="Delete and recreate the 4 demo orders in their initial statuses.",
+        help="Delete and recreate the demo orders in their initial statuses.",
     )
     return parser.parse_args()
 

@@ -22,7 +22,7 @@ import contextlib
 import json
 import logging
 import time
-from collections.abc import Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any, Final
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -163,12 +163,33 @@ class RealtimeConnection:
     channels: set[str] = field(default_factory=set)
 
 
+ExternalRealtimePublisher = Callable[[set[str], dict[str, Any]], Awaitable[None]]
+
+
 class RealtimeChannelRouter:
     """Manages WebSocket connections and routes messages to subscribed channels."""
 
     def __init__(self) -> None:
         self._connections: dict[WebSocket, RealtimeConnection] = {}
         self._lock = asyncio.Lock()
+        self._external_publisher: ExternalRealtimePublisher | None = None
+
+    def set_external_publisher(self, publisher: ExternalRealtimePublisher | None) -> None:
+        """Register or clear an external fan-out publisher (e.g. Redis Pub/Sub)."""
+        self._external_publisher = publisher
+
+    async def _dispatch_external(
+        self,
+        target_channels: set[str],
+        envelope: dict[str, Any],
+    ) -> None:
+        """Forward a channel envelope to the optional cross-process publisher."""
+        if self._external_publisher is None:
+            return
+        try:
+            await self._external_publisher(target_channels, envelope)
+        except Exception as exc:
+            logger.warning("External realtime publisher failed: %s", exc)
 
     async def register(
         self, websocket: WebSocket, auth_context: AuthContext, path: str
@@ -287,6 +308,7 @@ class RealtimeChannelRouter:
         target_channels.update(_resolve_user_channels(order))
 
         await self.broadcast_to_channels(target_channels, envelope)
+        await self._dispatch_external(target_channels, envelope)
 
     async def publish_item_changed(self, order: Order, item: OrderItem) -> None:
         """Build item.status_changed envelope and broadcast to target channels."""
@@ -304,6 +326,7 @@ class RealtimeChannelRouter:
         target_channels.update(_resolve_user_channels(order))
 
         await self.broadcast_to_channels(target_channels, envelope)
+        await self._dispatch_external(target_channels, envelope)
 
 
 realtime_router = RealtimeChannelRouter()
