@@ -154,3 +154,37 @@ def test_redo_item_ready_emits_quantity_and_redo_flag(
     payload = fake_session.outbox_rows[0].payload
     assert payload["quantity"] == 2
     assert payload["isRedo"] is True
+
+
+@pytest.mark.parametrize("original_note", ["BIEN COCIDO", None])
+def test_redo_restores_original_notes_after_kitchen_completes_redo(
+    original_note: str | None,
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Redo displays waiter complaint while PENDING and restores original note upon completion."""
+    order = _delivered_order()
+    item = order.items[0]
+    item.notes = original_note
+    test_db[order.public_id] = order
+
+    redo_resp = client.patch(
+        f"/orders/{order.public_id}/items/{item.public_id}/redo",
+        headers=auth_headers("waiter"),
+        json={"note": "HUBO UN ERROR, REHAGANLO"},
+    )
+    assert redo_resp.status_code == 200
+    assert redo_resp.json()["items"][0]["notes"] == "HUBO UN ERROR, REHAGANLO"
+    assert redo_resp.json()["rejectionDetails"] is None
+
+    ready_resp = client.patch(
+        f"/orders/{order.public_id}/items/{item.public_id}/ready",
+        headers=auth_headers("kitchen"),
+    )
+    assert ready_resp.status_code == 200
+    assert ready_resp.json()["items"][0]["status"] == "DELIVERED"
+    assert ready_resp.json()["items"][0]["notes"] == original_note
+    assert item.notes == original_note
+    assert order.rejection_details is None
+

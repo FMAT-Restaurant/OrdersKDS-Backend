@@ -52,6 +52,13 @@ class KitchenRejectRequest(BaseModel):
         max_length=500,
         description="Reason why the kitchen cannot prepare this item.",
     )
+    available_quantity: int = Field(
+        default=0,
+        ge=0,
+        validation_alias=AliasChoices("availableQuantity", "available_quantity"),
+        serialization_alias="availableQuantity",
+        description="Physical units kitchen can still prepare out of requested quantity.",
+    )
 
 
 class CreateOrderRequest(BaseModel):
@@ -276,6 +283,14 @@ class OrderItemResponse(BaseModel):
         )
 
 
+def _public_rejection_details(details: dict[str, object] | None) -> dict[str, object] | None:
+    """Strip internal redo bookkeeping keys from API-facing rejectionDetails payloads."""
+    if not isinstance(details, dict):
+        return details
+    filtered = {k: v for k, v in details.items() if k != "redoOriginalNotes"}
+    return filtered or None
+
+
 class OrderResponse(BaseModel):
     """Public representation of an order matching frontend boundary contract."""
 
@@ -330,7 +345,7 @@ class OrderResponse(BaseModel):
             confirmedBy=order.confirmed_by,
             stockReservedAt=order.stock_reserved_at,
             inPreparationAt=order.in_preparation_at,
-            rejectionDetails=order.rejection_details,
+            rejectionDetails=_public_rejection_details(order.rejection_details),
             diningSessionId=order.dining_session_id,
             responsibleWaiterId=order.responsible_waiter_id,
             awaitingStockConfirmation=order.awaiting_stock_confirmation,

@@ -191,7 +191,14 @@ async def kitchen_reject_item(
 ) -> OrderResponse:
     """Kitchen rejects an individual dish item because of insufficient physical stock."""
     reason = body.reason if body and body.reason else "Insumo físico insuficiente en cocina"
-    order = await order_service.kitchen_reject_item(order_id, item_id, auth, reason=reason)
+    available_quantity = body.available_quantity if body is not None else 0
+    order = await order_service.kitchen_reject_item(
+        order_id,
+        item_id,
+        auth,
+        reason=reason,
+        available_quantity=available_quantity,
+    )
     return OrderResponse.from_model(order)
 
 
