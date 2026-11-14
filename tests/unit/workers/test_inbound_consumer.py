@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -44,9 +46,9 @@ async def test_inbound_consumer_setup_and_dispatch() -> None:
     stop_event = asyncio.Event()
 
     # Capture the message handler passed to queue.consume
-    captured_handler = None
+    captured_handler: Callable[[Any], Awaitable[None]] | None = None
 
-    async def fake_consume(handler: object) -> str:
+    async def fake_consume(handler: Callable[[Any], Awaitable[None]]) -> str:
         nonlocal captured_handler
         captured_handler = handler
         # Trigger stop event after consumer is registered
@@ -59,9 +61,9 @@ async def test_inbound_consumer_setup_and_dispatch() -> None:
         await worker.run(stop_event)
 
     mock_channel.set_qos.assert_awaited_once_with(prefetch_count=10)
-    mock_channel.declare_exchange.assert_awaited_once()
+    assert mock_channel.declare_exchange.await_count == 3
     mock_channel.declare_queue.assert_awaited_once_with("orders.inventory.inbound", durable=True)
-    assert mock_queue.bind.await_count == 2
+    assert mock_queue.bind.await_count == 5
     mock_queue.cancel.assert_awaited_once_with("ctag-123")
     mock_channel.close.assert_awaited_once()
     mock_conn.close.assert_awaited_once()
@@ -112,4 +114,39 @@ async def test_inbound_consumer_reconnect_on_error() -> None:
 
     assert attempts >= 1
     fake_sleeper.assert_awaited_with(3.0)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_inbound_consumer_reraises_cancelled_error_and_closes_connection() -> None:
+    dispatcher = MagicMock()
+    worker = InboundConsumerWorker(
+        dispatcher=dispatcher,
+        url="amqp://localhost",
+        vhost="/",
+    )
+
+    mock_channel = MagicMock()
+    mock_exchange = MagicMock()
+    mock_channel.declare_exchange = AsyncMock(return_value=mock_exchange)
+    mock_queue = MagicMock()
+    mock_queue.bind = AsyncMock()
+    mock_queue.consume = AsyncMock(side_effect=asyncio.CancelledError())
+    mock_channel.declare_queue = AsyncMock(return_value=mock_queue)
+    mock_channel.set_qos = AsyncMock()
+
+    mock_conn = MagicMock()
+    mock_conn.channel = AsyncMock(return_value=mock_channel)
+    mock_conn.close = AsyncMock()
+    mock_conn.is_closed = False
+
+    stop_event = asyncio.Event()
+
+    with (
+        patch("aio_pika.connect_robust", AsyncMock(return_value=mock_conn)),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await worker.run(stop_event)
+
+    mock_conn.close.assert_awaited_once()
 

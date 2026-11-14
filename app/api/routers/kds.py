@@ -14,7 +14,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies.auth import AuthContext, get_auth_context, require_roles
+from app.api.dependencies.auth import AuthContext, require_access
 from app.api.schemas.errors import ErrorResponse
 from app.api.schemas.order import (
     KitchenRejectRequest,
@@ -24,7 +24,14 @@ from app.api.schemas.order import (
 )
 from app.db.models import Order, OrderItem
 from app.db.session import get_session
-from app.domain.roles import KITCHEN_ROLES
+from app.domain.access import (
+    ITEM_CANCEL,
+    ITEM_READY,
+    ITEM_REJECT,
+    KDS_QUEUE_VIEW,
+    ORDER_READY,
+    START_PREPARATION,
+)
 from app.repositories.orders import OrderRepository
 from app.services.catalog import get_catalog_info_mock, normalize_station_name
 from app.services.orders import OrderService, get_order_service
@@ -33,7 +40,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(
     tags=["kds"],
-    dependencies=[Depends(require_roles(*KITCHEN_ROLES))],
     responses={
         status.HTTP_401_UNAUTHORIZED: {
             "model": ErrorResponse,
@@ -109,6 +115,7 @@ def _filter_order_items(
     description="Returns orders ordered by kitchen elapsed time, filtered by station and view.",
 )
 async def get_kds_queue(
+    auth: Annotated[AuthContext, Depends(require_access(KDS_QUEUE_VIEW))],
     station: Annotated[str | None, Query(description="Optional station to filter items.")] = None,
     view: Annotated[
         str,
@@ -157,7 +164,7 @@ async def get_kds_queue(
 )
 async def start_order_preparation(
     order_id: OrderIdPath,
-    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    auth: Annotated[AuthContext, Depends(require_access(START_PREPARATION))],
     order_service: Annotated[OrderService, Depends(get_order_service)],
     body: MarkReadyRequest | None = None,
 ) -> OrderResponse:
@@ -178,7 +185,7 @@ async def start_order_preparation(
 async def kitchen_reject_item(
     order_id: OrderIdPath,
     item_id: ItemIdPath,
-    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    auth: Annotated[AuthContext, Depends(require_access(ITEM_REJECT))],
     order_service: Annotated[OrderService, Depends(get_order_service)],
     body: KitchenRejectRequest | None = None,
 ) -> OrderResponse:
@@ -197,7 +204,7 @@ async def kitchen_reject_item(
 async def cancel_order_item(
     order_id: OrderIdPath,
     item_id: ItemIdPath,
-    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    auth: Annotated[AuthContext, Depends(require_access(ITEM_CANCEL))],
     order_service: Annotated[OrderService, Depends(get_order_service)],
     body: MarkReadyRequest | None = None,
 ) -> OrderResponse:
@@ -215,7 +222,7 @@ async def cancel_order_item(
 async def mark_item_ready(
     order_id: OrderIdPath,
     item_id: ItemIdPath,
-    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    auth: Annotated[AuthContext, Depends(require_access(ITEM_READY))],
     order_service: Annotated[OrderService, Depends(get_order_service)],
     body: MarkReadyRequest | None = None,
 ) -> OrderResponse:
@@ -243,7 +250,7 @@ async def mark_item_ready(
 )
 async def mark_order_ready(
     order_id: OrderIdPath,
-    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    auth: Annotated[AuthContext, Depends(require_access(ORDER_READY))],
     order_service: Annotated[OrderService, Depends(get_order_service)],
     body: MarkReadyRequest | None = None,
 ) -> OrderResponse:

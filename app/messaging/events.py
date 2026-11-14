@@ -19,6 +19,7 @@ from pydantic import (
     ConfigDict,
     Field,
     field_serializer,
+    model_serializer,
     model_validator,
 )
 
@@ -55,12 +56,17 @@ class EventName(StrEnum):
     MENU_OFFER_UPDATED = "menu.oferta.actualizada"
     MENU_OFFER_CREATED_EN = "menu.offer.created"
     MENU_OFFER_UPDATED_EN = "menu.offer.updated"
+    MENU_SOURCE_CREATED = "menu.source.created"
+    MENU_SOURCE_UPDATED = "menu.source.updated"
+    MENU_SOURCE_DELETED = "menu.source.deleted"
 
     # Consumed events
     STOCK_RESERVED = "inventario.stock.reservado"
     STOCK_INSUFFICIENT = "inventario.stock.insuficiente"
     STOCK_RESERVED_EN = "inventory.reservation.confirmed"
     STOCK_INSUFFICIENT_EN = "inventory.reservation.rejected"
+    INVENTORY_RECIPE_AVAILABILITY_CHANGED = "inventory.recipe.availability-changed"
+    INVENTORY_RECIPE_NOT_AVAILABLE = "inventory.recipe.not-available"
     PAYMENT_COMPLETED = "pagos.pago.completado"
     DINING_SESSION_STARTED = "sala.dining_session.iniciada"
 
@@ -111,22 +117,35 @@ class OrderCreatedItem(BaseModel):
         serialization_alias="offerId",
         min_length=1,
     )
+    recipe_plate_id: str | None = Field(default=None, alias="plateId")
+    recipe_source_id: str | None = Field(default=None, alias="sourceId")
     quantity: int = Field(gt=0)
 
     @property
     def plate_id(self) -> str:
-        """Universal property alias for offer_id matching inventory plate conventions."""
-        return self.offer_id
+        """Universal property alias preferring physical recipe plateId over commercial offerId."""
+        return self.recipe_plate_id or self.offer_id
 
     @property
     def source_id(self) -> str:
-        """Universal property alias for offer_id matching inventory source conventions."""
-        return self.offer_id
+        """Universal property alias preferring Menu sourceId over commercial offerId."""
+        return self.recipe_source_id or self.recipe_plate_id or self.offer_id
 
     @property
     def item_id(self) -> str:
-        """Universal property alias for offer_id matching inventory item conventions."""
-        return self.offer_id
+        """Universal property alias for item conventions."""
+        return self.recipe_plate_id or self.offer_id
+
+    @model_serializer(mode="wrap")
+    def _serialize_item(self, handler: Any) -> dict[str, Any]:
+        data = cast(dict[str, Any], handler(self))
+        if self.recipe_plate_id is None:
+            data.pop("plateId", None)
+            data.pop("recipe_plate_id", None)
+        if self.recipe_source_id is None:
+            data.pop("sourceId", None)
+            data.pop("recipe_source_id", None)
+        return data
 
 
 class OrderCreatedEvent(OrderEvent):
@@ -275,8 +294,21 @@ class DishPreparedEvent(OrderEvent):
 
     item_id: UUID | None = Field(default=None, alias="itemId")
     offer_id: str | None = Field(default=None, alias="offerId")
+    plate_id: str | None = Field(default=None, alias="plateId")
+    source_id: str | None = Field(default=None, alias="sourceId")
     quantity: int = Field(default=1, gt=0, alias="quantity")
     is_redo: bool = Field(default=False, alias="isRedo")
+
+    @model_serializer(mode="wrap")
+    def _serialize_prepared(self, handler: Any) -> dict[str, Any]:
+        data = cast(dict[str, Any], handler(self))
+        if self.plate_id is None:
+            data.pop("plateId", None)
+            data.pop("plate_id", None)
+        if self.source_id is None:
+            data.pop("sourceId", None)
+            data.pop("source_id", None)
+        return data
 
     @classmethod
     def for_item(
@@ -285,6 +317,8 @@ class DishPreparedEvent(OrderEvent):
         item_id: UUID,
         *,
         offer_id: str | None = None,
+        plate_id: str | None = None,
+        source_id: str | None = None,
         quantity: int = 1,
         is_redo: bool = False,
         correlation_id: UUID | None = None,
@@ -295,6 +329,8 @@ class DishPreparedEvent(OrderEvent):
             orderId=order_id,
             itemId=item_id,
             offerId=offer_id,
+            plateId=plate_id,
+            sourceId=source_id,
             quantity=quantity,
             isRedo=is_redo,
             correlationId=correlation_id,

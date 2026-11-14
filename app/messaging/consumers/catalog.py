@@ -37,7 +37,7 @@ def _as_bool(value: Any) -> bool | None:
 
 
 def _extract_available(item: Mapping[str, Any]) -> bool | None:
-    explicit = _first(item, "disponibilidad", "available", "disponible")
+    explicit = _first(item, "disponibilidad", "available", "isAvailable", "disponible")
     if explicit is not None:
         return _as_bool(explicit)
     state_val = _first(item, "status", "estado", "state")
@@ -90,6 +90,7 @@ class CatalogConsumer:
     ) -> bool:
         dish_id = _first(
             item,
+            "sourceId",
             "oferta",
             "ofertaId",
             "offerId",
@@ -120,6 +121,8 @@ class CatalogConsumer:
             EventName.MENU_CATALOG_UPDATED,
             EventName.MENU_OFFER_CREATED,
             EventName.MENU_OFFER_UPDATED,
+            EventName.MENU_OFFER_CREATED_EN,
+            EventName.MENU_OFFER_UPDATED_EN,
         ):
             return await self._repository.upsert(
                 dish_id,
@@ -137,9 +140,29 @@ class CatalogConsumer:
                 ),
                 **common,
             )
+        if event_name == EventName.MENU_SOURCE_CREATED:
+            available = _extract_available(item)
+            return await self._repository.upsert(
+                dish_id,
+                available=True if available is None else available,
+                **common,
+            )
+        if event_name == EventName.MENU_SOURCE_UPDATED:
+            available = _extract_available(item)
+            return await self._repository.upsert(
+                dish_id,
+                available=available,
+                **common,
+            )
+        if event_name in (
+            EventName.MENU_SOURCE_DELETED,
+            EventName.INVENTORY_RECIPE_NOT_AVAILABLE,
+        ):
+            return await self._repository.upsert(dish_id, available=False, **common)
         if event_name in (
             EventName.MENU_DISH_AVAILABILITY_UPDATED,
             EventName.MENU_DISH_STATE_UPDATED,
+            EventName.INVENTORY_RECIPE_AVAILABILITY_CHANGED,
         ):
             available = _extract_available(item)
             return await self._repository.upsert(dish_id, available=available, **common)

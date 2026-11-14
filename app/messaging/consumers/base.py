@@ -168,10 +168,14 @@ async def _execute_typed_handler(
         msg_dining_session = DiningSessionCreatedMessage.model_validate(parsed_data)
         return await handle_dining_session_created(msg_dining_session, uow)
 
-    menu_events = tuple(event.value for event in EventName if event.value.startswith("menu."))
-    if target_event in menu_events:
+    catalog_events = tuple(
+        event.value
+        for event in EventName
+        if event.value.startswith("menu.") or event.value.startswith("inventory.recipe.")
+    )
+    if target_event in catalog_events:
         if catalog_consumer is None:
-            raise RuntimeError("Catalog consumer is required for menu events")
+            raise RuntimeError("Catalog consumer is required for menu and catalog events")
         return await catalog_consumer.consume(target_event, parsed_data)
 
     raise ValueError(f"Unknown or unmapped event type: {target_event}")

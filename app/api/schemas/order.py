@@ -231,6 +231,8 @@ class OrderItemResponse(BaseModel):
     public_id: UUID = Field(alias="publicId")
     item_id: UUID = Field(alias="itemId")
     dish_id: str | None = Field(default=None, alias="dishId")
+    source_id: str | None = Field(default=None, alias="sourceId")
+    offer_id: str | None = Field(default=None, alias="offerId")
     name: str
     quantity: int
     unit_price: Decimal = Field(alias="unitPrice")
@@ -258,6 +260,8 @@ class OrderItemResponse(BaseModel):
             publicId=item_id,
             itemId=item_id,
             dishId=item.dish_id,
+            sourceId=item.dish_id,
+            offerId=getattr(item, "offer_id", None) or item.dish_id,
             name=item.name,
             quantity=item.quantity if item.quantity is not None else 1,
             unitPrice=item.unit_price if item.unit_price is not None else Decimal("0.00"),

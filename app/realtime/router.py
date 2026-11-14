@@ -37,6 +37,7 @@ from app.api.dependencies.auth import (
 )
 from app.core.error_codes import ErrorCode
 from app.db.models import Order, OrderItem
+from app.domain.access import AccessPolicy
 from app.domain.roles import Role
 from app.realtime.schemas import (
     FORBIDDEN_CHANNEL_ERROR,
@@ -347,9 +348,11 @@ async def serve_websocket_connection(
     websocket: WebSocket,
     path: str,
     allowed_roles: frozenset[Role],
+    *,
+    policy: AccessPolicy | None = None,
 ) -> None:
     """Serve a WebSocket connection lifecycle including JWT auth, token expiry, and dispatch."""
-    context = await authorize_websocket(websocket, allowed_roles)
+    context = await authorize_websocket(websocket, allowed_roles, policy=policy)
     if context is None:
         return
 

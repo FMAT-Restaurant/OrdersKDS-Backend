@@ -21,9 +21,14 @@ Sleeper = Callable[[float], Awaitable[None]]
 
 DEFAULT_INBOUND_QUEUE = "orders.inventory.inbound"
 DEFAULT_INVENTORY_EXCHANGE = "inventory.topic"
+DEFAULT_MENU_EXCHANGE = "menu.topic"
+DEFAULT_ORDERS_EXCHANGE = "ordenes.topic"
 INBOUND_BINDINGS: tuple[tuple[str, str], ...] = (
     (DEFAULT_INVENTORY_EXCHANGE, "inventory.reservation.*"),
+    (DEFAULT_INVENTORY_EXCHANGE, "inventory.recipe.*"),
     (DEFAULT_INVENTORY_EXCHANGE, "inventario.stock.*"),
+    (DEFAULT_MENU_EXCHANGE, "menu.#"),
+    (DEFAULT_ORDERS_EXCHANGE, "menu.*"),
 )
 
 
@@ -38,14 +43,26 @@ class InboundConsumerWorker:
         vhost: str = "/",
         queue_name: str | None = None,
         inventory_exchange: str | None = None,
+        menu_exchange: str | None = None,
+        orders_exchange: str | None = None,
         sleeper: Sleeper = asyncio.sleep,
     ) -> None:
         self._dispatcher = dispatcher
         self._url = url
         self._vhost = vhost
-        self._queue_name = queue_name or os.getenv("RABBITMQ_INBOUND_QUEUE", DEFAULT_INBOUND_QUEUE)
-        self._inventory_exchange = inventory_exchange or os.getenv(
-            "RABBITMQ_INVENTORY_EXCHANGE", DEFAULT_INVENTORY_EXCHANGE
+        self._queue_name: str = (
+            queue_name or os.getenv("RABBITMQ_INBOUND_QUEUE") or DEFAULT_INBOUND_QUEUE
+        )
+        self._inventory_exchange: str = (
+            inventory_exchange
+            or os.getenv("RABBITMQ_INVENTORY_EXCHANGE")
+            or DEFAULT_INVENTORY_EXCHANGE
+        )
+        self._menu_exchange: str = (
+            menu_exchange or os.getenv("RABBITMQ_MENU_EXCHANGE") or DEFAULT_MENU_EXCHANGE
+        )
+        self._orders_exchange: str = (
+            orders_exchange or os.getenv("RABBITMQ_EXCHANGE") or DEFAULT_ORDERS_EXCHANGE
         )
         self._sleeper = sleeper
         self._connection: AbstractRobustConnection | None = None
@@ -54,18 +71,24 @@ class InboundConsumerWorker:
         self, channel: aio_pika.abc.AbstractRobustChannel
     ) -> aio_pika.abc.AbstractRobustQueue:
         """Declare durable exchanges, queue, and bindings."""
-        inv_exchange = await channel.declare_exchange(
-            name=self._inventory_exchange,
-            type=aio_pika.ExchangeType.TOPIC,
-            durable=True,
-        )
+        exchange_names = {
+            DEFAULT_INVENTORY_EXCHANGE: self._inventory_exchange,
+            DEFAULT_MENU_EXCHANGE: self._menu_exchange,
+            DEFAULT_ORDERS_EXCHANGE: self._orders_exchange,
+        }
+        declared_exchanges: dict[str, aio_pika.abc.AbstractRobustExchange] = {}
+        for resolved_name in exchange_names.values():
+            if resolved_name not in declared_exchanges:
+                declared_exchanges[resolved_name] = await channel.declare_exchange(
+                    name=resolved_name,
+                    type=aio_pika.ExchangeType.TOPIC,
+                    durable=True,
+                )
         queue = await channel.declare_queue(self._queue_name, durable=True)
 
         for exchange_name, binding_key in INBOUND_BINDINGS:
-            effective_ex = (
-                inv_exchange if exchange_name == DEFAULT_INVENTORY_EXCHANGE else inv_exchange
-            )
-            await queue.bind(effective_ex, routing_key=binding_key)
+            resolved_name = exchange_names.get(exchange_name, exchange_name)
+            await queue.bind(declared_exchanges[resolved_name], routing_key=binding_key)
 
         return queue
 
@@ -110,7 +133,9 @@ class InboundConsumerWorker:
                 await self._connection.close()
                 break
             except asyncio.CancelledError:
-                break
+                if self._connection and not self._connection.is_closed:
+                    await self._connection.close()
+                raise
             except Exception as exc:
                 logger.warning(
                     "Inbound consumer connection error: %s. Reconnecting in 3s...",

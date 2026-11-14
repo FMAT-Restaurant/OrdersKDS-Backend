@@ -13,6 +13,7 @@ from typing import Final
 
 from fastapi import APIRouter, WebSocket
 
+from app.domain.access import WAITER_WS
 from app.domain.roles import WAITER_ROLES, Role
 from app.realtime.router import WAITER_WS_PATH, serve_websocket_connection
 
@@ -26,7 +27,12 @@ router = APIRouter()
 @router.websocket(WAITER_WS_PATH)
 async def waiter_websocket(websocket: WebSocket) -> None:
     """Waiter channel endpoint. Roles: waiter, admin."""
-    await serve_websocket_connection(websocket, WAITER_WS_PATH, WAITER_ALLOWED_ROLES)
+    await serve_websocket_connection(
+        websocket,
+        WAITER_WS_PATH,
+        WAITER_ALLOWED_ROLES,
+        policy=WAITER_WS,
+    )
 
 
 __all__ = [

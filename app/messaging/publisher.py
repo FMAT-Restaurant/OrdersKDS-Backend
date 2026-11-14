@@ -26,34 +26,45 @@ logger = logging.getLogger(__name__)
 _DUAL_ROUTING_KEY_MAP: dict[str, tuple[str, ...]] = {
     "ordenes.orden.creada": ("ordenes.order.created",),
     "ordenes.orden.cancelada": ("ordenes.order.cancelled",),
-    "ordenes.orden.expirada": ("ordenes.order.cancelled",),
+    "ordenes.orden.expirada": ("ordenes.order.cancelled", "ordenes.order.expired"),
     "ordenes.orden.en_preparacion": ("ordenes.order.served", "ordenes.order.in_preparation"),
+    "ordenes.platillo.rechazado_cocina": ("ordenes.dish.rejected",),
+    "ordenes.comanda.mermada": ("ordenes.order.wasted",),
+    "ordenes.platillo.preparado": ("ordenes.dish.prepared",),
 }
+
+
+def _enrich_item_list(raw_items: object) -> object:
+    if not isinstance(raw_items, list):
+        return raw_items
+    enriched_items: list[object] = []
+    for item in raw_items:
+        if isinstance(item, dict):
+            item_copy = dict(item)
+            plate_id = str(
+                item_copy.get("plateId")
+                or item_copy.get("sourceId")
+                or item_copy.get("offerId")
+                or item_copy.get("itemId")
+                or ""
+            )
+            if plate_id:
+                item_copy.setdefault("plateId", plate_id)
+                item_copy.setdefault("itemId", plate_id)
+                item_copy.setdefault("sourceId", plate_id)
+            enriched_items.append(item_copy)
+        else:
+            enriched_items.append(item)
+    return enriched_items
 
 
 def _enrich_payload_for_inventory(payload: Mapping[str, object]) -> dict[str, object]:
     """Ensure items in payload contain plateId and itemId for inventory compatibility."""
     enriched = dict(payload)
-    items = enriched.get("items")
-    if isinstance(items, list):
-        enriched_items: list[dict[str, object]] = []
-        for item in items:
-            if isinstance(item, dict):
-                item_copy = dict(item)
-                oid = str(
-                    item_copy.get("offerId")
-                    or item_copy.get("plateId")
-                    or item_copy.get("itemId")
-                    or ""
-                )
-                if oid:
-                    item_copy.setdefault("plateId", oid)
-                    item_copy.setdefault("itemId", oid)
-                    item_copy.setdefault("sourceId", oid)
-                enriched_items.append(item_copy)
-            else:
-                enriched_items.append(item)
-        enriched["items"] = enriched_items
+    if "items" in enriched:
+        enriched["items"] = _enrich_item_list(enriched.get("items"))
+    if "itemsAfectados" in enriched:
+        enriched["itemsAfectados"] = _enrich_item_list(enriched.get("itemsAfectados"))
     return enriched
 
 
