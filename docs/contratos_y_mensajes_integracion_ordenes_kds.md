@@ -1,7 +1,7 @@
 # Contratos y Mensajes de Integración: Órdenes & KDS con Inventario y Menú
 
-> **Versión:** 1.1.0  
-> **Fecha:** 14 de Noviembre de 2026  
+> **Versión:** 1.1.1  
+> **Fecha:** 16 de Noviembre de 2026  
 > **Estado:** Actualizado y Contrastado contra Implementación Real (`Inventory-Backend`, `Menu-Backend`, `orders-backend`, `orders-frontend`)  
 > **Microservicios involucrados:**
 > - **Órdenes & KDS** (`orders-backend`, `orders-frontend`)
@@ -14,12 +14,15 @@
 
 Tras la reunión sostenida entre los líderes de equipo de **Menú (Tony)**, **Inventario (Hector)** y **Órdenes & KDS**, se formalizaron las siguientes directrices arquitectónicas obligatorias:
 
-1. **Resolución y Persistencia de Identificadores (`sourceId` / `plateId` vs `offerId`):**
-   - **Menú** emite y administra dos identificadores clave:
-     - `offerId`: Identificador comercial de la oferta/platillo en el catálogo de menú (precio, presentación).
-     - `sourceId`: Identificador de la receta base o plato físico (`plateId`), emitido por Menú en `menu.source.created` / `menu.source.updated`.
-   - **Inventario** indexa sus recetas internamente en MongoDB bajo `recipeModel.findOne({ plateId })`, donde `plateId` corresponde exactamente al `sourceId` recibido desde Menú en `menu.source.created` / `menu.source.updated`.
-   - **Órdenes & KDS** recibe ambos (`sourceId` y `offerId`) desde el frontend de Menú y la API (`OrderItemInput` en `PATCH /orders/{orderId}/items`), persiste físicamente **`dish_id = sourceId`** (receta física para Inventario) y **`offer_id = offerId`** (oferta comercial de Menú/Caja) en PostgreSQL (`order_items`), expone ambos (`dishId`, `sourceId`, `offerId`) en `OrderItemResponse`, y garantiza que Inventario reciba `plateId = sourceId` mientras Menú/Pagos reciben `offerId`.
+1. **Resolución, Cardinalidad (`1 offerId : N sourceId`) y Persistencia de Identificadores:**
+   - **Menú** emite y administra dos niveles de identificadores:
+     - `offerId`: Identificador comercial de la oferta/combo en el catálogo de menú (precio `basePrice`, presentación y composición en `composition.slots[]`).
+     - `sourceId`: Identificador de cada receta base (`sourceType = "RECIPE"` → `recipeId`) o artículo directo de inventario (`sourceType = "INVENTORY_ITEM"` → `optionId`), emitido por Menú en `menu.source.created` / `menu.source.updated` / `menu.source.deleted`. **Una sola oferta (`offerId`, ej. un combo *"Hamburguesa con Papas"*) puede agrupar múltiples `sourceId`.**
+   - **Inventario** indexa sus recetas internamente en MongoDB bajo `recipeModel.findOne({ plateId })`, donde `plateId` corresponde exactamente a cada **`sourceId` individual** recibido desde Menú en `menu.source.created` / `menu.source.updated` (Inventario no almacena `offerId`).
+   - **Órdenes & KDS** separa explícitamente la creación de la orden del envío a Inventario:
+     - `POST /orders` (`CreateOrderRequest`) crea únicamente la cabecera de la orden (`tableNumber`, `isTakeaway`, `diningSessionId`) en estado `CREATED` **sin ítems ni eventos RabbitMQ**.
+     - `PATCH /orders/{orderId}/items` (`OrderItemInput`) recibe las líneas planas desde `Menu-Frontend` (`OrderTicketWidget`). Si una oferta compuesta incluye `N` recetas/componentes, **`Menu-Frontend` envía una línea por cada `sourceId` seleccionado** compartiendo el mismo `offerId` (asignando `unitPrice` en una sola línea o prorrateado, y `0.00` en las demás para no duplicar `totalAmount`).
+     - `orders-backend` persiste en PostgreSQL (`order_items`) **`dish_id = sourceId`** y **`offer_id = offerId`**, valida ambos en Redis, consolida por la tupla **`(dish_id, offer_id)`** al confirmar (`POST /orders/{orderId}/confirm`) y emite en `ordenes.order.created` **un ítem por cada componente `(sourceId/plateId, offerId)`** para que Inventario reserve cada receta sin colisiones.
 2. **Merma Granular por Platillo (`KitchenDishRejectedEvent`):**
    - El rechazo por falta de insumos físicos en cocina o merma de producción se reporta a nivel de platillo individual.
    - Incluye `itemId` (línea afectada), `plateId` / `sourceId` (receta física a mermar), `offerId` (oferta comercial a deshabilitar en Menú), `quantity` y `reason` / `motivo`.
@@ -56,16 +59,22 @@ Tras la reunión sostenida entre los líderes de equipo de **Menú (Tony)**, **I
 
 Todos los eventos outbound se publican en el Topic Exchange de Órdenes: **`ordenes.topic`** (configurable vía `RABBITMQ_EXCHANGE`, `durable: true`, compartido/consumido por `Inventory-Backend` mediante la cola `cola_orders_events`). Cuando `RABBITMQ_DUAL_ROUTING` / `dual_routing=True` está activo (`python -m app.workers.run_all`), `EventPublisher` emite la routing key primaria y sus routing keys duales con enriquecimiento de `plateId` / `sourceId` para Inventario.
 
-### 3.1. `OrderCreatedEvent` (Orden Creada para Reserva de Stock)
+### 3.1. `OrderCreatedEvent` (Confirmación de Orden para Reserva de Stock)
 
-- **Acción desencadenante en UI:** El mesero presiona el botón **"Confirmar orden"** (o *"Enviar a cocina"*) en `OrderTicketWidget` tras agregar platillos desde el menú.
+- **Flujo REST previo y acción desencadenante:**
+  1. `POST /orders` (`CreateOrderRequest`) **solo crea la cabecera de la orden** en PostgreSQL (`CREATED`) sin ítems y **no** emite este evento.
+  2. `PATCH /orders/{orderId}/items` (`UpdateOrderItemsRequest`) registra los renglones con `sourceId`/`dishId` y `offerId`.
+  3. Al presionar **"Confirmar orden"** (o *"Enviar a cocina"*) en `OrderTicketWidget`, se llama `POST /orders/{orderId}/confirm`, lo cual consolida por **`(dish_id, offer_id)`** y encola `OrderCreatedEvent` en Outbox.
 - **Routing Keys emitidas:**
-  - `ordenes.orden.creada`
-  - `ordenes.order.created`
+  - `ordenes.orden.creada` *(payload base: incluye `plateId` y `sourceId` cuando `offer_id != dish_id`)*
+  - `ordenes.order.created` *(emisión dual con `RABBITMQ_DUAL_ROUTING=true`: `_enrich_payload_for_inventory` garantiza siempre `plateId`, `sourceId` e `itemId` igual al identificador físico para `Inventory-Backend`)*
 - **Destinatarios principales:** **Inventario** (`Inventory-Backend`).
-- **Propósito:** Solicitar el bloqueo/reserva atómica de los ingredientes necesarios para cada platillo de la orden antes de permitir la cocción.
+- **Propósito:** Solicitar el bloqueo/reserva atómica de los ingredientes necesarios para todas las recetas de la orden antes de permitir la cocción.
+- **Regla de cardinalidad para combos/ofertas compuestas (`1 offerId : N sourceId`):**
+  - Si una misma oferta (`offerId`, ej. *"Combo Hamburguesa con Papas"*) se compone de varias recetas (`sourceId`) en Menú, **`items[]` enviará varios objetos compartiendo el mismo `offerId`, cada uno con su propio `plateId` / `sourceId` / `itemId`**.
+  - En `Inventory-Backend`, `OrdersEvents.parseItem` **ignora `offerId`** y lee únicamente `plateId` (o `itemId` como fallback); luego `ReservationService.resolveLinesToItems` expande cada receta desde `recipeModel` (`findOne({ plateId })`) y acumula todos los ingredientes en un solo mapa agregado para reservar atómicamente por `orderId`. *(Nota: si una línea llegara sin `sourceId`, el fallback interno usa `offerId`, por lo que `Menu-Frontend` debe enviar siempre el `sourceId` real de cada receta).*
 
-#### Schema JSON del Payload:
+#### Schema JSON del Payload (`ordenes.orden.creada` / `ordenes.order.created`):
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -82,10 +91,10 @@ Todos los eventos outbound se publican en el Topic Exchange de Órdenes: **`orde
         "type": "object",
         "required": ["offerId", "quantity"],
         "properties": {
-          "offerId": { "type": "string", "description": "ID comercial o identificador del platillo" },
-          "plateId": { "type": "string", "description": "ID de receta de inventario (sourceId)" },
-          "sourceId": { "type": "string", "description": "ID de receta de menú" },
-          "itemId": { "type": "string", "description": "ID único de línea de orden" },
+          "offerId": { "type": "string", "description": "ID comercial de la oferta en Menú (puede repetirse entre componentes de un mismo combo)" },
+          "plateId": { "type": "string", "description": "ID de receta en Inventario (= sourceId); garantizado en ordenes.order.created" },
+          "sourceId": { "type": "string", "description": "ID de receta/fuente en Menú; garantizado en ordenes.order.created" },
+          "itemId": { "type": "string", "description": "Inyectado por _enrich_payload_for_inventory en ordenes.order.created (= plateId)" },
           "quantity": { "type": "integer", "minimum": 1 }
         }
       }
@@ -94,7 +103,7 @@ Todos los eventos outbound se publican en el Topic Exchange de Órdenes: **`orde
 }
 ```
 
-#### Ejemplo de Mensaje Real:
+#### Ejemplo de Mensaje Real (`ordenes.order.created` con oferta simple + combo `1 offerId : 2 sourceId`):
 ```json
 {
   "eventId": "a1b2c3d4-0001-5000-8000-111122223333",
@@ -102,16 +111,25 @@ Todos los eventos outbound se publican en el Topic Exchange de Órdenes: **`orde
   "correlationId": "f0e9d8c7-b6a5-4321-fedc-ba9876543210",
   "items": [
     {
-      "offerId": "offer-hamburguesa-doble-01",
+      "offerId": "offer-combo-hamburguesa-papas-01",
       "plateId": "source-hamburguesa-receta-01",
       "sourceId": "source-hamburguesa-receta-01",
-      "quantity": 2
+      "itemId": "source-hamburguesa-receta-01",
+      "quantity": 1
     },
     {
-      "offerId": "offer-papas-francesas-01",
+      "offerId": "offer-combo-hamburguesa-papas-01",
       "plateId": "source-papas-receta-01",
       "sourceId": "source-papas-receta-01",
+      "itemId": "source-papas-receta-01",
       "quantity": 1
+    },
+    {
+      "offerId": "offer-limonada-01",
+      "plateId": "source-limonada-receta-01",
+      "sourceId": "source-limonada-receta-01",
+      "itemId": "source-limonada-receta-01",
+      "quantity": 2
     }
   ]
 }
@@ -487,7 +505,7 @@ Todos los eventos outbound se publican en el Topic Exchange de Órdenes: **`orde
 }
 ```
 
-#### Ejemplo Real:
+#### Ejemplo Real (formato completo con desglose de platillos y formato actual de `Inventory-Backend` por insumo):
 ```json
 {
   "eventId": "inv-rej-uuid-11223344-5566",
@@ -512,6 +530,8 @@ Todos los eventos outbound se publican en el Topic Exchange de Órdenes: **`orde
 }
 ```
 
+> **Nota sobre la implementación actual de `Inventory-Backend`:** Cuando falta stock, `ReservationService` emite en `items[]` los **insumos crudos faltantes** en MongoDB (`itemId` de materia prima, `itemName`, `requestedQuantity`, `availableStock`) y no el `offerId` del platillo. `StockInsufficientMessage` en `orders-backend` acepta ambos formatos mediante alias ACL (`items` → `rejectedItems`, `availableStock` → `availableQuantity`, `itemId` → `offerId`) y muestra `itemName` al mesero en `OrderTicketWidget`.
+
 ---
 
 ### 4.3. Sincronización de Catálogo y Disponibilidad (`Menu` e `Inventory`)
@@ -527,7 +547,8 @@ Todos los eventos outbound se publican en el Topic Exchange de Órdenes: **`orde
   - **Sala (`sala.events` vía `RABBITMQ_FLOOR_EXCHANGE` y `ordenes.topic`, patrones `sala.#`, `dining.#`) y Pagos (`ordenes.topic`, patrones `pagos.#`, `payments.#`, `pago.#`):**
     - Sincronización de sesiones de mesa (`dining.*`, `sala.*`) y confirmación/cierre de pagos (`pagos.*`, `payments.*`).
 - **Efecto en Órdenes:**
-  - `CatalogConsumer` actualiza en Redis (`catalog:platillo:{id}`) tanto la receta física (`sourceId` / `plateId`) como la oferta comercial (`offerId`) para validar disponibilidad en tiempo real en `POST /orders` y `PATCH /orders/{orderId}/items`.
+  - `CatalogConsumer` actualiza en Redis (`catalog:platillo:{id}`) tanto la receta física (`sourceId` / `plateId`) como la oferta comercial (`offerId`) para validar disponibilidad en tiempo real al guardar ítems en `PATCH /orders/{orderId}/items`.
+  - **Nota operativa sobre opciones `INVENTORY_ITEM` en Menú ↔ Inventario:** `Inventory-Backend` (`RecipeEvents`) exige `name` no vacío al consumir `menu.source.created|updated`; en combos que usen opciones directas de inventario (`sourceType = "INVENTORY_ITEM"`), Menú debe poblar `name` para que Inventario registre esa fuente (`optionId`) antes de recibir órdenes.
 
 #### Ejemplos de Mensajes Soportados:
 ```json
@@ -590,6 +611,7 @@ interface AddItemEventDetail {
 
 #### Ejemplo de Despacho desde el Frontend de Menú:
 ```javascript
+// Caso 1: Oferta simple (1 offerId -> 1 sourceId)
 window.dispatchEvent(
   new CustomEvent('fmat:orden:add-item', {
     detail: {
@@ -603,7 +625,34 @@ window.dispatchEvent(
     }
   })
 );
+
+// Caso 2: Combo u oferta compuesta (1 offerId -> N sourceId)
+// Se despacha 1 evento por cada componente seleccionado (conservando el mismo offerId).
+// El precio base de la oferta ($180) se asigna en una sola línea (o prorrateado) y 0 en las demás
+// para evitar duplicar totalAmount al calcular el cobro.
+[
+  {
+    offerId: 'offer-combo-hamburguesa-papas-01',
+    sourceId: 'source-hamburguesa-receta-01',
+    name: 'Combo Hamburguesa + Papas — Hamburguesa',
+    quantity: 1,
+    unitPrice: 180.00,
+    station: 'plancha'
+  },
+  {
+    offerId: 'offer-combo-hamburguesa-papas-01',
+    sourceId: 'source-papas-receta-01',
+    name: 'Combo Hamburguesa + Papas — Papas',
+    quantity: 1,
+    unitPrice: 0.00,
+    station: 'freidora'
+  }
+].forEach((detail) => {
+  window.dispatchEvent(new CustomEvent('fmat:orden:add-item', { detail }));
+});
 ```
+
+> **Comportamiento en `OrderTicketWidget`:** `mergeDraftItem` distingue líneas tanto por `offerId` como por `sourceId`, por lo que los componentes del mismo combo con distinto `sourceId` se mantienen como renglones separados y se envían íntegros en `PATCH /orders/{orderId}/items` y luego hacia Inventario al confirmar.
 
 ### 5.2. Apertura del Diálogo de Selección de Platillo
 - **Nombres soportados:**
