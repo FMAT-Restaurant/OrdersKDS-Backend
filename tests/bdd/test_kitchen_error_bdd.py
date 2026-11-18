@@ -27,6 +27,11 @@ from app.repositories.orders import OrderRepository
 from app.repositories.processed_events import ProcessedEventsRepository
 from app.repositories.unit_of_work import SessionFactory, UnitOfWork
 
+pytestmark = [
+    pytest.mark.bdd,
+    pytest.mark.requirement("RF-28", "RF-29", "RF-30", "RF-31"),
+]
+
 scenarios("kitchen_error_void.feature")
 
 
