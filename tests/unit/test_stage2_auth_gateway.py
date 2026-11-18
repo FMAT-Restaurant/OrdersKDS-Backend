@@ -59,13 +59,14 @@ def test_kitchen_prefix_mounts_kds_queue_and_enforces_pbac(client: TestClient) -
         app.dependency_overrides.clear()
 
 
-def test_gateway_headers_resolve_admin_from_user_type_without_roles() -> None:
+@pytest.mark.parametrize("user_type", [b"ADMIN", b"ADMINISTRADOR"])
+def test_gateway_headers_resolve_admin_from_user_type_without_roles(user_type: bytes) -> None:
     request = Request(
         {
             "type": "http",
             "headers": [
                 (b"x-user-id", b"admin-gw-1"),
-                (b"x-user-type", b"ADMIN"),
+                (b"x-user-type", user_type),
             ],
         }
     )
