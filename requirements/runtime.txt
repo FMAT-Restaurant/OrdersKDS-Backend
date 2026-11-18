@@ -1,5 +1,6 @@
 fastapi==0.142.2
 uvicorn==0.54.0
+websockets==15.0.1  # uvicorn needs a WebSocket implementation to serve /ws/kds and /ws/waiter
 python-dotenv==1.1.1
 pydantic==2.13.5
 sqlalchemy[asyncio]==2.1.3  # [asyncio] installs 'greenlet', which is required for async migrations with Alembic
