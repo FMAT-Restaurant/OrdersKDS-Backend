@@ -1,7 +1,7 @@
 # Contratos y Mensajes de Integración: Órdenes & KDS con Inventario y Menú
 
-> **Versión:** 1.1.1  
-> **Fecha:** 16 de Noviembre de 2026  
+> **Versión:** 1.2.0  
+> **Fecha:** 19 de Noviembre de 2026  
 > **Estado:** Actualizado y Contrastado contra Implementación Real (`Inventory-Backend`, `Menu-Backend`, `orders-backend`, `orders-frontend`)  
 > **Microservicios involucrados:**
 > - **Órdenes & KDS** (`orders-backend`, `orders-frontend`)
@@ -12,34 +12,38 @@
 
 ## 1. Resumen Ejecutivo y Resoluciones de la Reunión
 
-Tras la reunión sostenida entre los líderes de equipo de **Menú (Tony)**, **Inventario (Hector)** y **Órdenes & KDS**, se formalizaron las siguientes directrices arquitectónicas obligatorias:
+Tras la reunión sostenida entre los líderes de equipo de **Menú (Tony)**, **Inventario (Hector)** y **Órdenes & KDS** (y su posterior verificación contra `Menu-Backend` `6ce537b` e `Inventory-Backend` `4c61072`), se formalizaron las siguientes directrices arquitectónicas obligatorias:
 
-1. **Resolución, Cardinalidad (`1 offerId : N sourceId`) y Persistencia de Identificadores:**
+1. **Resolución, Cardinalidad (`1 offerId : N sourceId`), Longitud y Persistencia de Identificadores:**
    - **Menú** emite y administra dos niveles de identificadores:
-     - `offerId`: Identificador comercial de la oferta/combo en el catálogo de menú (precio `basePrice`, presentación y composición en `composition.slots[]`).
-     - `sourceId`: Identificador de cada receta base (`sourceType = "RECIPE"` → `recipeId`) o artículo directo de inventario (`sourceType = "INVENTORY_ITEM"` → `optionId`), emitido por Menú en `menu.source.created` / `menu.source.updated` / `menu.source.deleted`. **Una sola oferta (`offerId`, ej. un combo *"Hamburguesa con Papas"*) puede agrupar múltiples `sourceId`.**
-   - **Inventario** indexa sus recetas internamente en MongoDB bajo `recipeModel.findOne({ plateId })`, donde `plateId` corresponde exactamente a cada **`sourceId` individual** recibido desde Menú en `menu.source.created` / `menu.source.updated` (Inventario no almacena `offerId`).
-   - **Órdenes & KDS** separa explícitamente la creación de la orden del envío a Inventario:
+     - `offerId`: Identificador comercial de la oferta/combo (`CatalogOffer.id` UUID) en el catálogo de menú (precio `basePrice`, presentación y composición en `composition.slots[].options[]`).
+     - `sourceId`: Identificador de cada receta base (`sourceType = "RECIPE"` → `recipeId`) o artículo directo de inventario (`sourceType = "INVENTORY_ITEM"` → `optionId`), emitido por Menú en `menu.source.created` / `menu.source.updated` / `menu.source.deleted` sobre `menu.topic`. **Una sola oferta (`offerId`, ej. un combo *"Hamburguesa con Papas"*) contiene uno o múltiples `sourceId`.**
+   - **Inventario** indexa sus recetas internamente en MongoDB bajo `recipeModel.findOne({ plateId })`, donde `plateId` (`@MaxLength(100)`, cadena no vacía sin obligación estricta de UUID) corresponde exactamente a cada **`sourceId` individual** recibido desde Menú en `menu.source.created` / `menu.source.updated` (Inventario no almacena `offerId`; reserva exclusivamente con `raw.plateId ?? raw.sourceId` y usa `itemId` como `ObjectId` de materia prima).
+   - **Órdenes & KDS** separa explícitamente la creación de la orden del envío a Inventario y garantiza paridad en ambos sentidos:
      - `POST /orders` (`CreateOrderRequest`) crea únicamente la cabecera de la orden (`tableNumber`, `isTakeaway`, `diningSessionId`) en estado `CREATED` **sin ítems ni eventos RabbitMQ**.
-     - `PATCH /orders/{orderId}/items` (`OrderItemInput`) recibe las líneas planas desde `Menu-Frontend` (`OrderTicketWidget`). Si una oferta compuesta incluye `N` recetas/componentes, **`Menu-Frontend` envía una línea por cada `sourceId` seleccionado** compartiendo el mismo `offerId` (asignando `unitPrice` en una sola línea o prorrateado, y `0.00` en las demás para no duplicar `totalAmount`).
-     - `orders-backend` persiste en PostgreSQL (`order_items`) **`dish_id = sourceId`** y **`offer_id = offerId`**, valida ambos en Redis, consolida por la tupla **`(dish_id, offer_id)`** al confirmar (`POST /orders/{orderId}/confirm`) y emite en `ordenes.order.created` **un ítem por cada componente `(sourceId/plateId, offerId)`** para que Inventario reserve cada receta sin colisiones.
-2. **Merma Granular por Platillo (`KitchenDishRejectedEvent`):**
+     - `PATCH /orders/{orderId}/items` (`OrderItemInput`) recibe las líneas planas desde `Menu-Frontend` (`OrderTicketWidget`). Si una oferta compuesta incluye `N` recetas/componentes, **`Menu-Frontend` envía una línea por cada `sourceId` seleccionado** compartiendo el mismo `offerId` (asignando `unitPrice` en una sola línea o prorrateado, y `0.00` en las demás para no duplicar `totalAmount`). Los campos `dishId`, `sourceId` y `offerId` aceptan **hasta `100` caracteres** (`MAX_CATALOG_ID_LENGTH = 100`, alineado con `Inventory-Backend`) y rechazan cadenas en blanco (`422`).
+     - `orders-backend` persiste en PostgreSQL (`order_items`) **`dish_id = sourceId`** (`VARCHAR(100)`, migración `20261119_widen_dish_id_100`) y **`offer_id = offerId`** (`VARCHAR(120)`), valida ambos en Redis, consolida por la tupla **`(dish_id, offer_id)`** al confirmar (`POST /orders/{orderId}/confirm`) y **emite siempre `plateId`, `sourceId` y `offerId`** tanto en la routing key primaria (`ordenes.orden.creada`, `ordenes.orden.cancelada`, `ordenes.orden.en_preparacion`, `ordenes.orden.expirada`, `ordenes.comanda.mermada`, `ordenes.platillo.preparado`) como en las routing keys duales en inglés (`ordenes.order.*`, `ordenes.dish.*`), incluso cuando `offerId == sourceId`. Adicionalmente, **`EventPublisher` ya no inyecta `itemId = plateId` artificial** en los ítems consolidados para evitar colisión semántica con el `ObjectId` de insumos de Inventario.
+2. **Impacto de Compatibilidad para Otros Equipos (Sin Cambios Rupturistas):**
+   - **Para Inventario (`Inventory-Backend`):** Cambio **retrocompatible y correctivo**. Inventario ahora recibe `plateId` y `sourceId` en todas las routing keys (`ordenes.orden.creada` y `ordenes.order.created`, además de cancelación `itemsCancelados`, preparación, merma y expiración), evitando descartes silenciosos cuando `offerId == sourceId`.
+   - **Para Menú (`Menu-Backend` / `Menu-Frontend`):** **Sin cambios requeridos.** Se mantiene el contrato v1 existente (`offerId` + `sourceId`) y además Órdenes escucha `inventory.source.availability.updated` en `inventory.topic` (`inventory.source.*`).
+   - **Para Pagos (`Payments-BE`):** **Sin cambios requeridos.** Continúa recibiendo `offerId` / `plateId` y precios congelados en `ordenes.cuenta.solicitada` y `ordenes.cobro.solicitado`.
+3. **Merma Granular por Platillo (`KitchenDishRejectedEvent`):**
    - El rechazo por falta de insumos físicos en cocina o merma de producción se reporta a nivel de platillo individual.
    - Incluye `itemId` (línea afectada), `plateId` / `sourceId` (receta física a mermar), `offerId` (oferta comercial a deshabilitar en Menú), `quantity` y `reason` / `motivo`.
    - La comanda (`orderId`) se envía como metadato de referencia para trazabilidad.
-3. **Manejo de TTL de Comanda y Expiración:**
+4. **Manejo de TTL de Comanda y Expiración:**
    - Si una orden en estado `RESERVED` no es iniciada por cocina dentro del tiempo límite (**TTL = 15 minutos**, `ORDER_RESERVATION_TTL_SECONDS = 900`):
      - En **KDS**: La tarjeta pasa a la pestaña **"Caducados"** con el mensaje `"Comanda caducada por tiempo agotado para Inicio de Preparación"`, cuenta regresiva visible y el botón *"Iniciar preparación"* bloqueado durante una ventana de gracia de **10 minutos (`KDS_EXPIRED_GRACE_MS = 600_000`)**, tras lo cual se retira automáticamente de la pantalla.
      - En **Mesero (`OrderTicketWidget`)**: Se notifica al mesero que cocina no confirmó a tiempo, permitiéndole: (a) reintentar confirmación, (b) modificar platillos en el borrador local (pudiendo vaciar/sustituir los platillos en la UI antes de reemplazar la lista vía `PATCH /orders/{orderId}/items`), o (c) cancelar y crear una nueva orden limpiamente.
-4. **Nomenclatura Microfrontend:**
+5. **Nomenclatura Microfrontend:**
    - La vista del mesero integrada en Menú utiliza el término **"Orden"** (`entityLabel="orden"`), mientras KDS mantiene **"Comanda"**, soportando eventos DOM bilingües (`fmat:orden:*` y `fmat:comanda:*`) y propagando `sourceId`, `offerId` y `unitPrice` de extremo a extremo.
-5. **Estrategia de Exchanges y Routing Keys Duales (Alineado a CloudAMQP `tsaxufiv`):**
+6. **Estrategia de Exchanges y Routing Keys Duales (Alineado a CloudAMQP `tsaxufiv`):**
    - **Órdenes (`ordenes.topic`)** publica con routing keys primarias en español y routing keys duales en inglés para `Inventory-Backend` (`ordenes.order.created`, `ordenes.order.cancelled`, `ordenes.order.expired`, `ordenes.order.served`, `ordenes.order.in_preparation`, `ordenes.dish.rejected`, `ordenes.order.wasted`, `ordenes.dish.prepared`).
-   - El worker `InboundConsumerWorker` (`orders.inventory.inbound`) declara y escucha los cuatro topic exchanges reales del broker (`tsaxufiv`): `inventory.topic` (`inventory.reservation.*`, `inventory.recipe.*`, `inventario.stock.*`), `menu.topic` (`menu.#`), `sala.events` (`sala.#`, `dining.#`, configurable vía `RABBITMQ_FLOOR_EXCHANGE`) y `ordenes.topic` (`inventory.reservation.*`, `inventario.stock.*`, `pagos.#`, `payments.#`, `pago.#`, `sala.#`, `dining.#`, `menu.*`).
-6. **Seguridad PBAC (`AccessPolicy` con fallback RBAC) y Enrutamiento Kong Dual (6 Módulos Auth):**
+   - El worker `InboundConsumerWorker` (`orders.inventory.inbound`) declara y escucha los cuatro topic exchanges reales del broker (`tsaxufiv`): `inventory.topic` (`inventory.reservation.*`, `inventory.recipe.*`, `inventory.source.*`, `inventario.stock.*`), `menu.topic` (`menu.#`), `sala.events` (`sala.#`, `dining.#`, configurable vía `RABBITMQ_FLOOR_EXCHANGE`) y `ordenes.topic` (`inventory.reservation.*`, `inventario.stock.*`, `pagos.#`, `payments.#`, `pago.#`, `sala.#`, `dining.#`, `menu.*`).
+7. **Seguridad PBAC (`AccessPolicy` con fallback RBAC) y Enrutamiento Kong Dual (6 Módulos Auth):**
    - Todos los endpoints REST de `/orders`, `/kds` y los canales WebSocket `/ws/kds` y `/ws/waiter` están expuestos bajo `/api/v1/orders` (puerto `8082`, consumido por `ordenesApp:5177`) y `/api/v1/kitchen` (puerto `8086`, consumido por `cocinaApp:5179`), manteniendo también `/api/v1` y rutas raíz para compatibilidad interna.
    - `require_access` y `authorize_websocket(..., policy=...)` evalúan políticas PBAC (`orders:*` / `kitchen:*`) leyendo headers inyectados por Kong (`x-user-id`, `x-staff-id`, `x-user-roles`, `x-user-role`, `x-user-permissions`, `x-user-type`) y claims JWT (`user_id`/`sub`, `roles`/`role`, `permissions`, `staffId`, `userType`), incluyendo `CHEF_MASTER` → `chef`, acceso administrativo cuando `userType`/`x-user-type` es `ADMINISTRADOR`/`ADMIN` y fallback por rol para tokens de desarrollo sin lista de `permissions`.
-7. **Sincronización WebSocket Cross-Process (Redis Pub/Sub Bridge):**
+8. **Sincronización WebSocket Cross-Process (Redis Pub/Sub Bridge):**
    - Los eventos asíncronos procesados en el worker (`app/workers/run_all.py`) —como confirmaciones/rechazos de inventario o expiraciones— publican mensajes en el canal Redis Pub/Sub `orders:realtime:events` (`RedisRealtimeBridge`), y el proceso API (`app/main.py`) los reenvía en tiempo real mediante `RealtimeChannelRouter` hacia los clientes WebSocket `/ws/kds` y `/ws/waiter`.
 
 ---
@@ -66,13 +70,13 @@ Todos los eventos outbound se publican en el Topic Exchange de Órdenes: **`orde
   2. `PATCH /orders/{orderId}/items` (`UpdateOrderItemsRequest`) registra los renglones con `sourceId`/`dishId` y `offerId`.
   3. Al presionar **"Confirmar orden"** (o *"Enviar a cocina"*) en `OrderTicketWidget`, se llama `POST /orders/{orderId}/confirm`, lo cual consolida por **`(dish_id, offer_id)`** y encola `OrderCreatedEvent` en Outbox.
 - **Routing Keys emitidas:**
-  - `ordenes.orden.creada` *(payload base: incluye `plateId` y `sourceId` cuando `offer_id != dish_id`)*
-  - `ordenes.order.created` *(emisión dual con `RABBITMQ_DUAL_ROUTING=true`: `_enrich_payload_for_inventory` garantiza siempre `plateId`, `sourceId` e `itemId` igual al identificador físico para `Inventory-Backend`)*
+  - `ordenes.orden.creada` *(payload base: incluye siempre `offerId`, `plateId` y `sourceId`, incluso cuando `offerId == sourceId`)*
+  - `ordenes.order.created` *(emisión dual con `RABBITMQ_DUAL_ROUTING=true`: `_enrich_payload_for_inventory` preserva `plateId`, `sourceId` y `offerId` sin inyectar `itemId` artificial de receta)*
 - **Destinatarios principales:** **Inventario** (`Inventory-Backend`).
 - **Propósito:** Solicitar el bloqueo/reserva atómica de los ingredientes necesarios para todas las recetas de la orden antes de permitir la cocción.
 - **Regla de cardinalidad para combos/ofertas compuestas (`1 offerId : N sourceId`):**
-  - Si una misma oferta (`offerId`, ej. *"Combo Hamburguesa con Papas"*) se compone de varias recetas (`sourceId`) en Menú, **`items[]` enviará varios objetos compartiendo el mismo `offerId`, cada uno con su propio `plateId` / `sourceId` / `itemId`**.
-  - En `Inventory-Backend`, `OrdersEvents.parseItem` **ignora `offerId`** y lee únicamente `plateId` (o `itemId` como fallback); luego `ReservationService.resolveLinesToItems` expande cada receta desde `recipeModel` (`findOne({ plateId })`) y acumula todos los ingredientes en un solo mapa agregado para reservar atómicamente por `orderId`. *(Nota: si una línea llegara sin `sourceId`, el fallback interno usa `offerId`, por lo que `Menu-Frontend` debe enviar siempre el `sourceId` real de cada receta).*
+  - Si una misma oferta (`offerId`, ej. *"Combo Hamburguesa con Papas"*) se compone de varias recetas (`sourceId`) en Menú, **`items[]` enviará varios objetos compartiendo el mismo `offerId`, cada uno con su propio `plateId` y `sourceId`**.
+  - En `Inventory-Backend`, `OrdersEvents.parseItem` **ignora `offerId`** y lee únicamente `plateId ?? sourceId` (y usa `itemId` solo como fallback si correspondiera a un insumo directo); luego `ReservationService.resolveLinesToItems` expande cada receta desde `recipeModel` (`findOne({ plateId })`) y acumula todos los ingredientes en un solo mapa agregado para reservar atómicamente por `orderId`. *(Nota: si una línea llegara sin `sourceId`, el fallback interno usa `offerId`, por lo que `Menu-Frontend` debe enviar siempre el `sourceId` real de cada receta).*
 
 #### Schema JSON del Payload (`ordenes.orden.creada` / `ordenes.order.created`):
 ```json
@@ -91,10 +95,10 @@ Todos los eventos outbound se publican en el Topic Exchange de Órdenes: **`orde
         "type": "object",
         "required": ["offerId", "quantity"],
         "properties": {
-          "offerId": { "type": "string", "description": "ID comercial de la oferta en Menú (puede repetirse entre componentes de un mismo combo)" },
-          "plateId": { "type": "string", "description": "ID de receta en Inventario (= sourceId); garantizado en ordenes.order.created" },
-          "sourceId": { "type": "string", "description": "ID de receta/fuente en Menú; garantizado en ordenes.order.created" },
-          "itemId": { "type": "string", "description": "Inyectado por _enrich_payload_for_inventory en ordenes.order.created (= plateId)" },
+          "offerId": { "type": "string", "maxLength": 100, "description": "ID comercial de la oferta en Menú (puede repetirse entre componentes de un mismo combo)" },
+          "plateId": { "type": "string", "maxLength": 100, "description": "ID de receta en Inventario (= sourceId); siempre emitido" },
+          "sourceId": { "type": "string", "maxLength": 100, "description": "ID de receta/fuente en Menú; siempre emitido" },
+          "itemId": { "type": "string", "description": "Opcional para insumos directos; no se inyecta sobre ítems de receta" },
           "quantity": { "type": "integer", "minimum": 1 }
         }
       }
@@ -103,7 +107,7 @@ Todos los eventos outbound se publican en el Topic Exchange de Órdenes: **`orde
 }
 ```
 
-#### Ejemplo de Mensaje Real (`ordenes.order.created` con oferta simple + combo `1 offerId : 2 sourceId`):
+#### Ejemplo de Mensaje Real (`ordenes.orden.creada` / `ordenes.order.created` con oferta simple + combo `1 offerId : 2 sourceId`):
 ```json
 {
   "eventId": "a1b2c3d4-0001-5000-8000-111122223333",
@@ -114,21 +118,18 @@ Todos los eventos outbound se publican en el Topic Exchange de Órdenes: **`orde
       "offerId": "offer-combo-hamburguesa-papas-01",
       "plateId": "source-hamburguesa-receta-01",
       "sourceId": "source-hamburguesa-receta-01",
-      "itemId": "source-hamburguesa-receta-01",
       "quantity": 1
     },
     {
       "offerId": "offer-combo-hamburguesa-papas-01",
       "plateId": "source-papas-receta-01",
       "sourceId": "source-papas-receta-01",
-      "itemId": "source-papas-receta-01",
       "quantity": 1
     },
     {
       "offerId": "offer-limonada-01",
       "plateId": "source-limonada-receta-01",
       "sourceId": "source-limonada-receta-01",
-      "itemId": "source-limonada-receta-01",
       "quantity": 2
     }
   ]
@@ -269,8 +270,8 @@ Todos los eventos outbound se publican en el Topic Exchange de Órdenes: **`orde
 
 - **Acción desencadenante en UI:** En KDS, el Chef o Administrador selecciona **"Anular comanda"** (`ChefVoidDialog` o `AdminVoidDialog`) para una orden que ya estaba en cocción o servida.
 - **Routing Keys emitidas (con `RABBITMQ_DUAL_ROUTING=true`):**
-  - `ordenes.comanda.mermada`
-  - `ordenes.order.wasted` *(Enriquecido con `items` y `plateId` / `sourceId` prioritarios en `_enrich_payload_for_inventory`)*
+  - `ordenes.comanda.mermada` *(incluye `itemsAfectados` y `items` con `offerId`, `plateId` y `sourceId`)*
+  - `ordenes.order.wasted` *(Enriquecido con `items`, `plateId` y `sourceId` prioritarios en `_enrich_payload_for_inventory`)*
   - `ordenes.cobro.solicitado` (`ChargeRequestedEvent`) *(Solo cuando la anulación administrativa indica `chargeCustomer: true`)*
 - **Destinatarios:** **Inventario** (asienta merma de producción) y **Pagos** (solicita cobro cuando aplica).
 
@@ -311,8 +312,8 @@ Todos los eventos outbound se publican en el Topic Exchange de Órdenes: **`orde
 
 - **Acción desencadenante en UI:** El mesero o usuario presiona **"Cancelar orden"** en `OrderTicketWidget` para una orden en estado `CREATED` o `RESERVED`.
 - **Routing Keys emitidas (con `RABBITMQ_DUAL_ROUTING=true`):**
-  - `ordenes.orden.cancelada`
-  - `ordenes.order.cancelled` *(Enriquecido con `plateId` / `sourceId` prioritarios)*
+  - `ordenes.orden.cancelada` *(incluye `itemsCancelados` con `offerId`, `plateId` y `sourceId`)*
+  - `ordenes.order.cancelled` *(Enriquecido también en `itemsCancelados` con `plateId` y `sourceId`)*
 - **Destinatarios:** **Inventario** (libera inmediatamente la reserva de ingredientes en MongoDB/PostgreSQL).
 
 #### Schema JSON del Payload:
@@ -541,9 +542,10 @@ Todos los eventos outbound se publican en el Topic Exchange de Órdenes: **`orde
     - `menu.source.created` / `menu.source.updated` / `menu.source.deleted` *(recetas / fuentes físicas identificadas por `sourceId`)*
     - `menu.offer.created` / `menu.offer.updated` / `menu.oferta.creada` / `menu.oferta.actualizada` *(ofertas comerciales identificadas por `offerId` / `data.id`)*
     - `menu.catalog.updated` / `menu.catalogo.actualizado` / `menu.platillo.disponibilidad_actualizada` / `menu.platillo.precio_actualizado` / `menu.platillo.estado_actualizado`
-  - **Inventario (`inventory.topic` y `ordenes.topic`, patrones `inventory.reservation.*`, `inventory.recipe.*`, `inventario.stock.*`):**
+  - **Inventario (`inventory.topic` y `ordenes.topic`, patrones `inventory.reservation.*`, `inventory.recipe.*`, `inventory.source.*`, `inventario.stock.*`):**
     - `inventory.recipe.availability-changed` *(con `plateId`/`sourceId` e `isAvailable`)*
     - `inventory.recipe.not-available` *(marca disponibilidad `false` para el `plateId`/`sourceId` afectado)*
+    - `inventory.source.availability.updated` *(contrato AsyncAPI de Inventario hacia Menú/Órdenes con `sourceId` e `isAvailable`)*
   - **Sala (`sala.events` vía `RABBITMQ_FLOOR_EXCHANGE` y `ordenes.topic`, patrones `sala.#`, `dining.#`) y Pagos (`ordenes.topic`, patrones `pagos.#`, `payments.#`, `pago.#`):**
     - Sincronización de sesiones de mesa (`dining.*`, `sala.*`) y confirmación/cierre de pagos (`pagos.*`, `payments.*`).
 - **Efecto en Órdenes:**
@@ -716,6 +718,8 @@ Todos los endpoints HTTP (`/orders`, `/kds`) y WebSockets (`/ws/kds`, `/ws/waite
 | Iniciar prep. / Platillo y Orden listos | `START_PREPARATION`, `ITEM_READY`, `ORDER_READY` | `kitchen:orders:start_preparation`, `kitchen:items:ready`, `kitchen:orders:ready` | `kitchen`, `chef`, `admin` |
 | Rechazar / Cancelar ítem KDS | `ITEM_REJECT`, `ITEM_CANCEL` | `kitchen:items:reject`, `kitchen:items:cancel` | `kitchen`, `chef`, `admin` |
 | Anular por error de cocina | `VOID_KITCHEN_ERROR` | `kitchen:orders:void_error` | `chef`, `admin` |
+| Consultar turno y folio actual (`GET /shifts/current`) | `SHIFT_VIEW` | `orders:orders:view`, `kitchen:queues:view`, `kitchen:shifts:manage` | `waiter`, `kitchen`, `chef`, `admin` |
+| Abrir/cerrar turno manual (`POST /shifts/open`, `/shifts/current/close`) | `SHIFT_MANAGE` | `kitchen:shifts:manage`, `kitchen:orders:void_error` | `chef`, `admin` |
 
 ### 7.2. Cumplimiento Técnico
 

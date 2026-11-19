@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from redis.asyncio import Redis
 
 from app.api.error_handlers import register_error_handlers
-from app.api.routers import kds, orders
+from app.api.routers import kds, orders, shifts
 from app.api.websockets import routes as websocket_routes
 from app.realtime.redis_bridge import RedisRealtimeBridge
 from app.realtime.router import realtime_router
@@ -77,4 +77,5 @@ def health_check() -> dict[str, str]:
 for _prefix in ("", "/api/v1", "/api/v1/orders", "/api/v1/kitchen"):
     app.include_router(orders.router, prefix=_prefix)
     app.include_router(kds.router, prefix=_prefix)
+    app.include_router(shifts.router, prefix=_prefix)
     app.include_router(websocket_routes.router, prefix=_prefix)

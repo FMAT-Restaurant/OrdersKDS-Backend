@@ -11,8 +11,9 @@ import jwt
 import pytest
 from fastapi.testclient import TestClient
 
-from app.db.models import Order, Outbox
+from app.db.models import Order, Outbox, Shift
 from app.domain.order_status import OrderStatus
+from app.domain.shift import ShiftStatus
 from app.main import app
 
 # Any key works: the service never verifies signatures (ADR-0011).
@@ -27,14 +28,28 @@ class FakeAsyncSession:
     def __init__(self, db: dict[UUID, Order] | None = None) -> None:
         self.db: dict[UUID, Order] = db if db is not None else {}
         self.outbox_rows: list[Outbox] = []
+        self.shifts: list[Shift] = []
         self.committed = False
         self.rolled_back = False
+
+    @staticmethod
+    def _assign_shift_id_if_missing(shift: Shift, next_id: int) -> None:
+        if getattr(shift, "id", None) is None:
+            shift.id = next_id
 
     def add(self, instance: object) -> None:
         if isinstance(instance, Order):
             self.db[instance.public_id] = instance
+        elif isinstance(instance, Shift):
+            if instance not in self.shifts:
+                self.shifts.append(instance)
+            self._assign_shift_id_if_missing(instance, len(self.shifts))
         elif isinstance(instance, Outbox):
             self.outbox_rows.append(instance)
+
+    async def flush(self) -> None:
+        for index, shift in enumerate(self.shifts, start=1):
+            self._assign_shift_id_if_missing(shift, index)
 
     async def commit(self) -> None:
         self.committed = True
@@ -72,7 +87,25 @@ class FakeAsyncSession:
         return _Result()
 
     async def scalar(self, statement: Any, *args: Any, **kwargs: Any) -> Any:
+        column_descs = getattr(statement, "column_descriptions", ())
+        entity = column_descs[0].get("entity") if column_descs else None
         params = statement.compile().params
+        if entity is Shift:
+            shift_statuses = {status.value for status in ShiftStatus}
+            status_val = next(
+                (
+                    v
+                    for v in params.values()
+                    if isinstance(v, ShiftStatus) or (isinstance(v, str) and v in shift_statuses)
+                ),
+                None,
+            )
+            candidates = list(self.shifts)
+            if status_val is not None:
+                expected_status = ShiftStatus(status_val)
+                candidates = [s for s in candidates if s.status == expected_status]
+            return max(candidates, key=lambda s: s.shift_number) if candidates else None
+
         order_id = next((v for v in params.values() if isinstance(v, UUID)), None)
         if order_id is not None:
             return self.db.get(order_id)

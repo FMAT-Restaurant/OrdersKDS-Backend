@@ -97,3 +97,39 @@ class NoteRequiredError(DomainError):
 
     def __init__(self, message: str = "A non-empty note is required for this operation.") -> None:
         super().__init__(message)
+
+
+class ShiftClosedError(DomainError):
+    """Raised when an order folio is requested while the active shift is closed."""
+
+    code: ErrorCode = ErrorCode.INVALID_STATE_TRANSITION
+    http_status: int = 409
+
+    def __init__(
+        self,
+        message: str = (
+            "The current kitchen shift is closed; a Master Chef or Admin must open a new shift "
+            "before creating orders."
+        ),
+    ) -> None:
+        super().__init__(message)
+
+
+class ShiftAlreadyOpenError(DomainError):
+    """Raised when trying to open a shift while another shift is still open."""
+
+    code: ErrorCode = ErrorCode.INVALID_STATE_TRANSITION
+    http_status: int = 409
+
+    def __init__(self, message: str = "A shift is already open.") -> None:
+        super().__init__(message)
+
+
+class NoActiveShiftError(DomainError):
+    """Raised when trying to close a shift while no shift is open."""
+
+    code: ErrorCode = ErrorCode.INVALID_STATE_TRANSITION
+    http_status: int = 409
+
+    def __init__(self, message: str = "No active shift is currently open.") -> None:
+        super().__init__(message)

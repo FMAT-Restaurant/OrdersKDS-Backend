@@ -10,7 +10,7 @@ import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -62,6 +62,7 @@ from app.services.notifications import (
     notify_item_changed,
     notify_order_changed,
 )
+from app.services.shifts import ShiftService
 
 logger = logging.getLogger(__name__)
 
@@ -78,29 +79,24 @@ _NO_REASON_PROVIDED = "No reason provided"
 
 
 def _consolidate_order_items(items: list[OrderItem]) -> list[OrderCreatedItem]:
-    """Group active non-cancelled items by physical recipe/offer IDs and sum quantities."""
-    grouped: dict[tuple[str, str | None], int] = {}
+    """Group active non-cancelled items by physical recipe and offer IDs and sum quantities."""
+    grouped: dict[tuple[str, str], int] = {}
     for item in items:
         if item.status == ItemStatus.CANCELLED or not item.dish_id:
             continue
-        raw_offer_id = getattr(item, "offer_id", None)
-        key = (item.dish_id, raw_offer_id)
+        effective_offer_id = getattr(item, "offer_id", None) or item.dish_id
+        key = (item.dish_id, effective_offer_id)
         grouped[key] = grouped.get(key, 0) + item.quantity
 
-    consolidated: list[OrderCreatedItem] = []
-    for (dish_id, raw_offer_id), qty in grouped.items():
-        if raw_offer_id and raw_offer_id != dish_id:
-            consolidated.append(
-                OrderCreatedItem(
-                    offerId=raw_offer_id,
-                    plateId=dish_id,
-                    sourceId=dish_id,
-                    quantity=qty,
-                )
-            )
-        else:
-            consolidated.append(OrderCreatedItem(offerId=dish_id, quantity=qty))
-    return consolidated
+    return [
+        OrderCreatedItem(
+            offerId=effective_offer_id,
+            plateId=dish_id,
+            sourceId=dish_id,
+            quantity=qty,
+        )
+        for (dish_id, effective_offer_id), qty in grouped.items()
+    ]
 
 
 def _validate_order_items(items: list[OrderItem]) -> None:
@@ -151,6 +147,42 @@ class OrderService:
         if not auth.is_authorized(policy):
             raise ForbiddenRoleError(message)
 
+    async def _commit_or_raise_conflict(self, order_id: UUID) -> None:
+        """Commit transaction or rollback and map StaleDataError to 409 VersionConflictError."""
+        try:
+            await self._session.commit()
+        except StaleDataError as exc:
+            await self._session.rollback()
+            raise VersionConflictError(f"Concurrent update lost for order {order_id}.") from exc
+
+    async def create_order(
+        self,
+        *,
+        table_number: int | None,
+        is_takeaway: bool,
+        dining_session_id: UUID | None,
+        actor_uuid: UUID,
+    ) -> Order:
+        """Create a new draft order inside the active shift with eager empty items."""
+        shift, shift_folio = await ShiftService(self._session).allocate_next_folio_for_order(
+            actor_uuid=actor_uuid
+        )
+        order = Order(
+            public_id=uuid4(),
+            table_number=table_number,
+            is_takeaway=is_takeaway,
+            dining_session_id=dining_session_id,
+            status=OrderStatus.CREATED,
+            created_by=actor_uuid,
+            responsible_waiter_id=actor_uuid,
+            shift_id=shift.id,
+            shift_folio=shift_folio,
+            items=[],
+        )
+        self._orders.save(order)
+        await self._commit_or_raise_conflict(order.public_id)
+        return order
+
     def _stage_dish_prepared(
         self,
         order: Order,
@@ -161,14 +193,14 @@ class OrderService:
         dish_id = item.dish_id
         raw_offer_id = getattr(item, "offer_id", None)
         effective_offer_id = raw_offer_id or dish_id
-        has_distinct_plate = bool(raw_offer_id and dish_id and raw_offer_id != dish_id)
+        effective_plate_id = dish_id or raw_offer_id
         self._outbox.add(
             DishPreparedEvent.for_item(
                 order.public_id,
                 item.public_id,
                 offer_id=effective_offer_id,
-                plate_id=dish_id if has_distinct_plate else None,
-                source_id=dish_id if has_distinct_plate else None,
+                plate_id=effective_plate_id,
+                source_id=effective_plate_id,
                 quantity=item.quantity,
                 is_redo=is_redo,
             )
@@ -202,7 +234,7 @@ class OrderService:
             ITEM_READY,
             "Role or permission not allowed for marking item ready.",
         )
-        order = await self._orders.get_by_public_id(order_id)
+        order = await self._orders.get_by_public_id(order_id, for_update=True)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
 
@@ -231,7 +263,7 @@ class OrderService:
 
         delivered_now = self._sync_delivery_if_all_ready(order)
         self._orders.save(order)
-        await self._session.commit()
+        await self._commit_or_raise_conflict(order_id)
 
         await notify_item_changed(order, target_item, notifier=self._notifier)
         if delivered_now:
@@ -252,7 +284,7 @@ class OrderService:
         if not normalized_note:
             raise NoteRequiredError()
 
-        order = await self._orders.get_by_public_id(order_id)
+        order = await self._orders.get_by_public_id(order_id, for_update=True)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
 
@@ -265,7 +297,7 @@ class OrderService:
         self._save_pre_redo_note(order, target_item)
         target_item.mark_pending_for_redo(normalized_note)
         self._orders.save(order)
-        await self._session.commit()
+        await self._commit_or_raise_conflict(order_id)
         await notify_item_changed(order, target_item, notifier=self._notifier)
         return order
 
@@ -280,7 +312,7 @@ class OrderService:
             ORDER_READY,
             "Role or permission not allowed for marking order ready.",
         )
-        order = await self._orders.get_by_public_id(order_id)
+        order = await self._orders.get_by_public_id(order_id, for_update=True)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
         if order.status == OrderStatus.DELIVERED:
@@ -300,7 +332,7 @@ class OrderService:
                 self._restore_pre_redo_note(order, item)
 
         self._orders.save(order)
-        await self._session.commit()
+        await self._commit_or_raise_conflict(order_id)
         await notify_order_changed(order, notifier=self._notifier)
         return order
 
@@ -319,7 +351,7 @@ class OrderService:
             START_PREPARATION,
             "Role or permission not allowed for starting preparation.",
         )
-        order = await self._orders.get_by_public_id(order_id)
+        order = await self._orders.get_by_public_id(order_id, for_update=True)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
 
@@ -337,7 +369,7 @@ class OrderService:
         self._outbox.add(event)
 
         self._orders.save(order)
-        await self._session.commit()
+        await self._commit_or_raise_conflict(order_id)
         await notify_order_changed(order, notifier=self._notifier)
         return order
 
@@ -360,7 +392,7 @@ class OrderService:
             ITEM_REJECT,
             "Role or permission not allowed for rejecting item.",
         )
-        order = await self._orders.get_by_public_id(order_id)
+        order = await self._orders.get_by_public_id(order_id, for_update=True)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
 
@@ -415,7 +447,7 @@ class OrderService:
             order.recalculate_total()
 
         self._orders.save(order)
-        await self._session.commit()
+        await self._commit_or_raise_conflict(order_id)
 
         await notify_item_changed(order, target_item, notifier=self._notifier)
         await notify_order_changed(order, notifier=self._notifier)
@@ -434,7 +466,7 @@ class OrderService:
             ITEM_CANCEL,
             "Role or permission not allowed for cancelling item.",
         )
-        order = await self._orders.get_by_public_id(order_id)
+        order = await self._orders.get_by_public_id(order_id, for_update=True)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
 
@@ -461,7 +493,7 @@ class OrderService:
         target_item.mark_cancelled()
         order.recalculate_total()
         self._orders.save(order)
-        await self._session.commit()
+        await self._commit_or_raise_conflict(order_id)
 
         await notify_item_changed(order, target_item, notifier=self._notifier)
         await notify_order_changed(order, notifier=self._notifier)
@@ -474,7 +506,7 @@ class OrderService:
         expected_version: int | None = None,
     ) -> Order:
         """Transfer an active order to a different table (RF-16, RNF-09)."""
-        order = await self._orders.get_by_public_id(order_id)
+        order = await self._orders.get_by_public_id(order_id, for_update=True)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
 
@@ -500,10 +532,7 @@ class OrderService:
             order.version = (order.version or 1) + 1
         self._orders.save(order)
 
-        try:
-            await self._session.commit()
-        except StaleDataError as exc:
-            raise VersionConflictError(f"Concurrent update lost for order {order_id}.") from exc
+        await self._commit_or_raise_conflict(order_id)
 
         await notify_order_changed(order, notifier=self._notifier)
         return order
@@ -515,7 +544,7 @@ class OrderService:
         reason: str | None = None,
     ) -> Order:
         """Cancel an order while in CREATED, RESERVED, or REJECTED status (RF-24, RF-25, OP-05)."""
-        order = await self._orders.get_by_public_id(order_id)
+        order = await self._orders.get_by_public_id(order_id, for_update=True)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
 
@@ -547,7 +576,7 @@ class OrderService:
         self._outbox.add(event)
 
         self._orders.save(order)
-        await self._session.commit()
+        await self._commit_or_raise_conflict(order_id)
 
         await notify_order_changed(order, notifier=self._notifier)
         return order
@@ -587,7 +616,7 @@ class OrderService:
             "Only administrators can administratively void an order.",
         )
 
-        order = await self._orders.get_by_public_id(order_id)
+        order = await self._orders.get_by_public_id(order_id, for_update=True)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
 
@@ -641,7 +670,7 @@ class OrderService:
 
         # 3. Save and commit transaction atomically
         self._orders.save(order)
-        await self._session.commit()
+        await self._commit_or_raise_conflict(order_id)
 
         # 4. Push realtime notification
         await notify_order_changed(order, notifier=self._notifier)
@@ -684,7 +713,7 @@ class OrderService:
         if not note or not note.strip():
             raise NoteRequiredError("A non-empty note is required for a kitchen error void.")
 
-        order = await self._orders.get_by_public_id(order_id)
+        order = await self._orders.get_by_public_id(order_id, for_update=True)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
 
@@ -717,7 +746,7 @@ class OrderService:
 
         # 2. Save and commit transaction atomically (strictly ZERO charge events staged)
         self._orders.save(order)
-        await self._session.commit()
+        await self._commit_or_raise_conflict(order_id)
 
         # 3. Push realtime notification
         await notify_order_changed(order, notifier=self._notifier)
@@ -753,7 +782,7 @@ class OrderService:
             "Only waiters and administrators can request the bill for an order.",
         )
 
-        order = await self._orders.get_by_public_id(order_id)
+        order = await self._orders.get_by_public_id(order_id, for_update=True)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
 
@@ -788,7 +817,7 @@ class OrderService:
         self._outbox.add(bill_event)
 
         self._orders.save(order)
-        await self._session.commit()
+        await self._commit_or_raise_conflict(order_id)
 
         await notify_order_changed(order, notifier=self._notifier)
         return order
@@ -825,7 +854,7 @@ class OrderService:
             order.confirmed_by = confirmed_by
 
         self._orders.save(order)
-        await self._session.commit()
+        await self._commit_or_raise_conflict(order_id)
         return order
 
     def _save_pre_redo_note(self, order: Order, item: OrderItem) -> None:

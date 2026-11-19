@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
+from app.domain.constants import MAX_CATALOG_ID_LENGTH, MAX_NOTE_LENGTH
 from app.domain.order_status import ItemStatus, OrderStatus
 
 if TYPE_CHECKING:
@@ -110,19 +111,19 @@ class OrderItemInput(BaseModel):
     dish_id: str | None = Field(
         default=None,
         alias="dishId",
-        max_length=64,
+        max_length=MAX_CATALOG_ID_LENGTH,
         description="Unique catalog plate/item identifier.",
     )
     source_id: str | None = Field(
         default=None,
         alias="sourceId",
-        max_length=64,
+        max_length=MAX_CATALOG_ID_LENGTH,
         description="Recipe/plate source identifier from Menu.",
     )
     offer_id: str | None = Field(
         default=None,
         alias="offerId",
-        max_length=64,
+        max_length=MAX_CATALOG_ID_LENGTH,
         description="Commercial offer identifier from Menu.",
     )
     name: str = Field(
@@ -147,15 +148,20 @@ class OrderItemInput(BaseModel):
     )
     notes: str | None = Field(
         default=None,
-        max_length=500,
+        max_length=MAX_NOTE_LENGTH,
         description="Special preparation instructions for kitchen.",
     )
 
     @model_validator(mode="after")
     def validate_identifier_and_dish_id(self) -> Self:
-        """Ensure dish_id is not empty string when provided."""
-        if self.dish_id is not None and not self.dish_id.strip():
-            raise ValueError("dish_id cannot be an empty string")
+        """Ensure catalog identifiers are not whitespace-only when provided."""
+        for field_name, value in (
+            ("dish_id", self.dish_id),
+            ("source_id", self.source_id),
+            ("offer_id", self.offer_id),
+        ):
+            if value is not None and not value.strip():
+                raise ValueError(f"{field_name} cannot be an empty string")
         return self
 
 
@@ -305,6 +311,7 @@ class OrderResponse(BaseModel):
     version: int
     total_amount: Decimal = Field(alias="totalAmount")
     order_number: int | None = Field(default=None, alias="orderNumber")
+    shift_folio: int | None = Field(default=None, alias="shiftFolio")
     items: list[OrderItemResponse] = Field(default_factory=list)
     confirmed_at: datetime | None = Field(default=None, alias="confirmedAt")
     confirmed_by: UUID | None = Field(default=None, alias="confirmedBy")
@@ -326,6 +333,7 @@ class OrderResponse(BaseModel):
     ) -> OrderResponse:
         now = datetime.now(UTC)
         order_public_id = order.public_id or uuid4()
+        effective_order_number = order.shift_folio if order.shift_folio is not None else order.id
         return cls(
             id=str(order_public_id),
             publicId=order_public_id,
@@ -335,7 +343,8 @@ class OrderResponse(BaseModel):
             status=order.status or OrderStatus.CREATED,
             version=order.version if order.version is not None else 1,
             totalAmount=order.total_amount if order.total_amount is not None else Decimal("0.00"),
-            orderNumber=order.id if order.id is not None else None,
+            orderNumber=effective_order_number,
+            shiftFolio=order.shift_folio,
             items=(
                 items
                 if items is not None
