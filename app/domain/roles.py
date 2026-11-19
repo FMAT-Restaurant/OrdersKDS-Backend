@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections.abc import Collection, Iterable, Mapping
 from enum import StrEnum
 from typing import Final
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 
 class Role(StrEnum):
@@ -78,3 +79,14 @@ ADMIN_ONLY_ROLES: Final[frozenset[Role]] = frozenset({Role.ADMIN})
 
 # Kitchen-error void (-> VOIDED, not charged).
 VOID_KITCHEN_ERROR_ROLES: Final[frozenset[Role]] = frozenset({Role.ADMIN, Role.CHEF})
+
+# Operational shift open/close management (Master Chef & Admin ONLY).
+SHIFT_MANAGEMENT_ROLES: Final[frozenset[Role]] = frozenset({Role.CHEF, Role.ADMIN})
+
+
+def parse_actor_uuid(user_id_str: str) -> UUID:
+    """Parse an actor identifier into a deterministic UUID when non-UUID strings are passed."""
+    try:
+        return UUID(user_id_str)
+    except ValueError:
+        return uuid5(NAMESPACE_URL, f"user:{user_id_str}")
