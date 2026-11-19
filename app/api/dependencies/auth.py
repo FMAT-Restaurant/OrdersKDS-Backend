@@ -56,6 +56,7 @@ HEADER_USER_ROLE: Final = "x-user-role"  # singular spelling used by the shared 
 HEADER_USER_PERMISSIONS: Final = "x-user-permissions"
 HEADER_USER_TYPE: Final = "x-user-type"
 
+_ADMIN_USER_TYPES: Final = frozenset({"ADMIN", "ADMINISTRADOR"})
 _BEARER_SCHEME: Final = "bearer"
 _AUTH_REQUIRED_MESSAGE: Final = "Authentication required."
 
@@ -226,7 +227,7 @@ def _infer_roles_from_identity(
 ) -> frozenset[Role]:
     """Resolve caller roles and infer fallback roles from userType or PBAC permissions."""
     roles = set(resolve_roles(raw_roles))
-    is_admin_type = isinstance(user_type, str) and user_type.strip().upper() == "ADMIN"
+    is_admin_type = isinstance(user_type, str) and user_type.strip().upper() in _ADMIN_USER_TYPES
     if is_admin_type or (permissions is not None and WILDCARD_PERMISSION in permissions):
         roles.add(Role.ADMIN)
 
