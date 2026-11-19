@@ -226,9 +226,13 @@ def _infer_roles_from_identity(
     permissions: frozenset[str] | None,
 ) -> frozenset[Role]:
     """Resolve caller roles and infer fallback roles from userType or PBAC permissions."""
-    roles = set(resolve_roles(raw_roles))
+    raw_role_labels = [label for label in raw_roles if isinstance(label, str) and label.strip()]
+    roles = set(resolve_roles(raw_role_labels))
+    has_wildcard = permissions is not None and WILDCARD_PERMISSION in permissions
     is_admin_type = isinstance(user_type, str) and user_type.strip().upper() in _ADMIN_USER_TYPES
-    if is_admin_type or (permissions is not None and WILDCARD_PERMISSION in permissions):
+    # Defense in depth: Kong does not sanitize X-User-Type yet, so only treat
+    # userType as an admin fallback when no explicit roles or permissions exist.
+    if has_wildcard or (is_admin_type and not raw_role_labels and permissions is None):
         roles.add(Role.ADMIN)
 
     if not roles and permissions:

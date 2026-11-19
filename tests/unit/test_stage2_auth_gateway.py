@@ -10,6 +10,7 @@ from starlette.requests import Request
 
 from app.api.dependencies.auth import get_auth_context, resolve_auth_context
 from app.db.session import get_session
+from app.domain.access import VOID_ADMIN
 from app.domain.errors import UnauthenticatedError
 from app.domain.roles import Role
 from app.main import app
@@ -95,13 +96,67 @@ def test_gateway_headers_resolve_admin_from_wildcard_permission_without_roles() 
     assert context.role is Role.ADMIN
 
 
-def test_jwt_claims_resolve_admin_from_user_type_without_roles(make_token: TokenFactory) -> None:
-    token = make_token(user_id="jwt-admin-1", role=None, userType="ADMIN")
+@pytest.mark.parametrize("user_type", ["ADMIN", "ADMINISTRADOR"])
+def test_jwt_claims_resolve_admin_from_user_type_without_roles(
+    make_token: TokenFactory, user_type: str
+) -> None:
+    token = make_token(user_id="jwt-admin-1", role=None, userType=user_type)
 
     context = resolve_auth_context(f"Bearer {token}")
 
     assert context.user_id == "jwt-admin-1"
     assert context.role is Role.ADMIN
+
+
+@pytest.mark.parametrize("spoofed_user_type", [b"ADMIN", b"ADMINISTRADOR"])
+def test_spoofed_user_type_header_does_not_escalate_non_admin_gateway_identity(
+    spoofed_user_type: bytes,
+) -> None:
+    waiter_request = Request(
+        {
+            "type": "http",
+            "headers": [
+                (b"x-user-id", b"waiter-gw-1"),
+                (b"x-user-roles", b"MESERO"),
+                (b"x-user-permissions", b"orders:orders:view,orders:orders:create"),
+                (b"x-user-type", spoofed_user_type),
+            ],
+        }
+    )
+    waiter_ctx = get_auth_context(waiter_request)
+    assert waiter_ctx.role is Role.WAITER
+    assert Role.ADMIN not in waiter_ctx.effective_roles
+    assert waiter_ctx.is_authorized(VOID_ADMIN) is False
+
+    chef_request = Request(
+        {
+            "type": "http",
+            "headers": [
+                (b"x-user-id", b"chef-gw-1"),
+                (b"x-user-roles", b"CHEF_MASTER"),
+                (b"x-user-permissions", b"kitchen:queues:view,orders:orders:view"),
+                (b"x-user-type", spoofed_user_type),
+            ],
+        }
+    )
+    chef_ctx = get_auth_context(chef_request)
+    assert chef_ctx.role is Role.CHEF
+    assert Role.ADMIN not in chef_ctx.effective_roles
+    assert chef_ctx.is_authorized(VOID_ADMIN) is False
+
+    external_request = Request(
+        {
+            "type": "http",
+            "headers": [
+                (b"x-user-id", b"inv-gw-1"),
+                (b"x-user-roles", b"ALMACENISTA"),
+                (b"x-user-permissions", b"inventory:items:read"),
+                (b"x-user-type", spoofed_user_type),
+            ],
+        }
+    )
+    with pytest.raises(UnauthenticatedError):
+        get_auth_context(external_request)
 
 
 @pytest.mark.parametrize(
