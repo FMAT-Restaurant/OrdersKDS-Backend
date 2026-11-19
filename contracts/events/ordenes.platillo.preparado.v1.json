@@ -33,7 +33,24 @@
         "string",
         "null"
       ],
+      "maxLength": 100,
       "description": "Catalog offer identifier prepared for Inventory consumption."
+    },
+    "plateId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 100,
+      "description": "Inventory plate/recipe identifier corresponding to Menu sourceId."
+    },
+    "sourceId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 100,
+      "description": "Menu recipe/plate source identifier."
     },
     "quantity": {
       "type": "integer",

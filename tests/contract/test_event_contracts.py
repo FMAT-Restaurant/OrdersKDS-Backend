@@ -57,7 +57,9 @@ def test_order_created_event_satisfies_contract() -> None:
     payload = event.model_dump(mode="json", by_alias=True)
 
     validate_event_payload(EventName.ORDER_CREATED, payload)
-    assert payload["items"] == [{"offerId": "dish-1", "quantity": 2}]
+    assert payload["items"] == [
+        {"offerId": "dish-1", "plateId": "dish-1", "sourceId": "dish-1", "quantity": 2}
+    ]
     assert event.items[0].plate_id == "dish-1"
 
 
@@ -73,7 +75,9 @@ def test_order_in_preparation_event_satisfies_contract() -> None:
     payload = event.model_dump(mode="json", by_alias=True)
 
     validate_event_payload(EventName.ORDER_IN_PREPARATION, payload)
-    assert payload["items"] == [{"offerId": "dish-1", "quantity": 2}]
+    assert payload["items"] == [
+        {"offerId": "dish-1", "plateId": "dish-1", "sourceId": "dish-1", "quantity": 2}
+    ]
 
 
 @pytest.mark.contract
@@ -140,7 +144,9 @@ def test_order_expired_event_satisfies_contract() -> None:
     validate_event_payload(EventName.ORDER_EXPIRED, payload)
     assert payload["reason"] == "timeout"
     assert payload["motivo"] == "timeout"
-    assert payload["items"] == [{"offerId": "dish-1", "quantity": 2}]
+    assert payload["items"] == [
+        {"offerId": "dish-1", "plateId": "dish-1", "sourceId": "dish-1", "quantity": 2}
+    ]
 
 
 @pytest.mark.contract
@@ -182,7 +188,9 @@ def test_order_cancelled_event_satisfies_contract() -> None:
     payload = event.model_dump(mode="json", by_alias=True)
 
     validate_event_payload(EventName.ORDER_CANCELLED, payload)
-    assert payload["itemsCancelados"] == [{"offerId": "dish-1", "quantity": 2}]
+    assert payload["itemsCancelados"] == [
+        {"offerId": "dish-1", "plateId": "dish-1", "sourceId": "dish-1", "quantity": 2}
+    ]
 
 
 @pytest.mark.contract
@@ -201,7 +209,9 @@ def test_order_wasted_event_satisfies_contract() -> None:
     validate_event_payload(EventName.ORDER_WASTED, payload)
     assert payload["reason"] == "ADMINISTRATIVE"
     assert payload["motivo"] == "administrativo"
-    assert payload["itemsAfectados"] == [{"offerId": "dish-1", "quantity": 2}]
+    assert payload["itemsAfectados"] == [
+        {"offerId": "dish-1", "plateId": "dish-1", "sourceId": "dish-1", "quantity": 2}
+    ]
 
 
 @pytest.mark.contract

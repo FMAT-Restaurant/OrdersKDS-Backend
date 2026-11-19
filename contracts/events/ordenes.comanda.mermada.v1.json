@@ -46,7 +46,18 @@
         "properties": {
           "offerId": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "plateId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "sourceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
           },
           "quantity": {
             "type": "integer",
@@ -66,7 +77,18 @@
         "properties": {
           "offerId": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "plateId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "sourceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
           },
           "quantity": {
             "type": "integer",

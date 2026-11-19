@@ -50,7 +50,6 @@ def _enrich_item_list(raw_items: object) -> object:
             )
             if plate_id:
                 item_copy.setdefault("plateId", plate_id)
-                item_copy.setdefault("itemId", plate_id)
                 item_copy.setdefault("sourceId", plate_id)
             enriched_items.append(item_copy)
         else:
@@ -59,12 +58,11 @@ def _enrich_item_list(raw_items: object) -> object:
 
 
 def _enrich_payload_for_inventory(payload: Mapping[str, object]) -> dict[str, object]:
-    """Ensure items in payload contain plateId and itemId for inventory compatibility."""
+    """Ensure item lists in payload contain plateId and sourceId for inventory compatibility."""
     enriched = dict(payload)
-    if "items" in enriched:
-        enriched["items"] = _enrich_item_list(enriched.get("items"))
-    if "itemsAfectados" in enriched:
-        enriched["itemsAfectados"] = _enrich_item_list(enriched.get("itemsAfectados"))
+    for field_name in ("items", "itemsAfectados", "itemsCancelados"):
+        if field_name in enriched:
+            enriched[field_name] = _enrich_item_list(enriched.get(field_name))
     return enriched
 
 

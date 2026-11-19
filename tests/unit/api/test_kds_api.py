@@ -605,7 +605,9 @@ def test_start_order_preparation_success(
         event_row.payload if isinstance(event_row.payload, dict) else json.loads(event_row.payload)
     )
     assert payload["orderId"] == str(order.public_id)
-    assert payload["items"] == [{"offerId": "dish-1", "quantity": 2}]
+    assert payload["items"] == [
+        {"offerId": "dish-1", "plateId": "dish-1", "sourceId": "dish-1", "quantity": 2}
+    ]
 
     # Verify WebSocket notification
     assert len(spy_notifier.notified_orders) == 1

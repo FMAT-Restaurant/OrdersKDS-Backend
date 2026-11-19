@@ -27,6 +27,7 @@ DEFAULT_ORDERS_EXCHANGE = "ordenes.topic"
 INBOUND_BINDINGS: tuple[tuple[str, str], ...] = (
     (DEFAULT_INVENTORY_EXCHANGE, "inventory.reservation.*"),
     (DEFAULT_INVENTORY_EXCHANGE, "inventory.recipe.*"),
+    (DEFAULT_INVENTORY_EXCHANGE, "inventory.source.*"),
     (DEFAULT_INVENTORY_EXCHANGE, "inventario.stock.*"),
     (DEFAULT_MENU_EXCHANGE, "menu.#"),
     (DEFAULT_FLOOR_EXCHANGE, "sala.#"),
