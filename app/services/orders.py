@@ -839,6 +839,7 @@ class OrderService:
             raise InvalidStateTransitionError(order.status, "CONFIRM")
 
         if order.confirmed_at is None:
+            await ShiftService(self._session).ensure_shift_open_for_orders()
             self._stage_order_confirmation(order, confirmed_by)
         elif order.confirmed_by is None:
             order.confirmed_by = confirmed_by

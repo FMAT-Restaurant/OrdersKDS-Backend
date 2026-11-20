@@ -73,8 +73,10 @@ def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
-# Direct mounts plus Kong API Gateway mounts (strip_path: false)
-for _prefix in ("", "/api/v1", "/api/v1/orders", "/api/v1/kitchen"):
+# Direct mounts plus Kong API Gateway mounts (strip_path: false).
+# Register specific gateway prefixes before "/api/v1" so static "/orders" routes
+# (e.g. GET /api/v1/orders/orders) win over "/api/v1/orders/{orderId}".
+for _prefix in ("/api/v1/orders", "/api/v1/kitchen", "/api/v1", ""):
     app.include_router(orders.router, prefix=_prefix)
     app.include_router(kds.router, prefix=_prefix)
     app.include_router(shifts.router, prefix=_prefix)

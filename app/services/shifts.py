@@ -71,17 +71,24 @@ class ShiftService:
             can_accept_orders=can_accept_orders,
         )
 
+    async def ensure_shift_open_for_orders(self) -> Shift | None:
+        """Return the locked open shift or None if uninitialized; raise if closed."""
+        active = await self._shifts.get_active_shift(for_update=True)
+        if active is not None:
+            return active
+        latest = await self._shifts.get_latest_shift(for_update=True)
+        if latest is not None:
+            raise ShiftClosedError()
+        return None
+
     async def allocate_next_folio_for_order(
         self,
         *,
         actor_uuid: UUID | None = None,
     ) -> tuple[Shift, int]:
         """Allocate the next 1-based folio from the active shift without committing."""
-        active = await self._shifts.get_active_shift(for_update=True)
+        active = await self.ensure_shift_open_for_orders()
         if active is None:
-            latest = await self._shifts.get_latest_shift(for_update=True)
-            if latest is not None:
-                raise ShiftClosedError()
             active = Shift(
                 public_id=uuid4(),
                 shift_number=1,

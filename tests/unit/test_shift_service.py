@@ -291,3 +291,31 @@ async def test_dining_session_consumer_survives_when_shift_is_closed() -> None:
     assert created.shift_id is None
     assert created.shift_folio is None
     assert created.items == []
+
+
+@pytest.mark.asyncio
+async def test_ensure_shift_open_for_orders_branches() -> None:
+    """ensure_shift_open_for_orders allows empty DB or OPEN shift and blocks CLOSED shift."""
+    session = FakeAsyncSession()
+    service = ShiftService(cast(AsyncSession, session))
+
+    initial = await service.ensure_shift_open_for_orders()
+    assert initial is None
+    assert session.shifts == []
+    assert session.committed is False
+
+    open_shift = Shift(
+        id=1,
+        public_id=uuid4(),
+        shift_number=1,
+        status=ShiftStatus.OPEN,
+        last_order_folio=0,
+    )
+    session.add(open_shift)
+
+    active = await service.ensure_shift_open_for_orders()
+    assert active is open_shift
+
+    open_shift.status = ShiftStatus.CLOSED
+    with pytest.raises(ShiftClosedError):
+        await service.ensure_shift_open_for_orders()
