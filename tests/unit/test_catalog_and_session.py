@@ -61,7 +61,7 @@ def test_get_database_url_defaults_when_empty_string() -> None:
         assert db_session.get_database_url() == "postgresql+asyncpg://localhost:5432/orders"
 
 
-def test_get_engine_and_session_factory() -> None:
+def test_get_engine_and_session_factory(monkeypatch: pytest.MonkeyPatch) -> None:
     with (
         patch("app.db.session.create_async_engine") as mock_create_engine,
         patch("app.db.session.async_sessionmaker") as mock_sessionmaker,
@@ -71,9 +71,9 @@ def test_get_engine_and_session_factory() -> None:
         mock_create_engine.return_value = mock_engine
         mock_sessionmaker.return_value = mock_factory
 
-        # Reset module globals for testing
-        db_session._engine = None
-        db_session._session_factory = None
+        # Reset module globals via monkeypatch so original state is restored automatically
+        monkeypatch.setattr(db_session, "_engine", None)
+        monkeypatch.setattr(db_session, "_session_factory", None)
 
         engine = db_session.get_engine()
         assert engine is mock_engine
