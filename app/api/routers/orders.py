@@ -438,11 +438,12 @@ async def cancel_order(
 @router.patch(
     "/{orderId}/void",
     status_code=status.HTTP_200_OK,
-    summary="Administratively void order (with charge)",
+    summary="Administratively void order (with configurable charge)",
     description=(
         "Administratively voids an order in IN_PREPARATION status (RF-26, RF-27, ADR-0012). "
-        "Transitions the order to WASTED, and publishes both ordenes.comanda.mermada "
-        "and ordenes.cobro.solicitado with frozen prices in the same transaction. "
+        "When chargeCustomer is true (default), transitions the order to WASTED and publishes "
+        "ordenes.cobro.solicitado with frozen prices. When chargeCustomer is false, transitions "
+        "the order to terminal VOIDED status and publishes ordenes.comanda.mermada. "
         "Strictly restricted to admin role."
     ),
     responses={

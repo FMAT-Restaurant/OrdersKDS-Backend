@@ -90,6 +90,7 @@ async def test_dining_session_creates_created_order_with_waiter() -> None:
     processed = Mock()
     processed.add = Mock()
     session = Mock()
+    session.scalar = AsyncMock(return_value=None)
     session.flush = AsyncMock()
     uow = Mock()
     uow.orders = orders

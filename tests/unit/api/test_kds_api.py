@@ -837,7 +837,7 @@ def test_cancel_item_already_ready_conflict(
     test_db: dict[UUID, Order],
 ) -> None:
     """Cannot cancel an item that is already READY (409 Conflict)."""
-    order = _create_in_prep_order(num_items=1)
+    order = _create_in_prep_order(num_items=2)
     order.items[0].status = ItemStatus.READY
     test_db[order.public_id] = order
 
@@ -848,6 +848,26 @@ def test_cancel_item_already_ready_conflict(
 
     assert resp.status_code == 409
     assert resp.json()["error"]["code"] == ErrorCode.INVALID_STATE_TRANSITION
+
+
+def test_cancel_last_active_item_rejected_with_409(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Cannot cancel the last remaining active item; caller must cancel the whole order."""
+    order = _create_in_prep_order(num_items=1)
+    order.status = OrderStatus.RESERVED
+    test_db[order.public_id] = order
+
+    resp = client.patch(
+        f"/orders/{order.public_id}/items/{order.items[0].public_id}/cancel",
+        headers=auth_headers("kitchen"),
+    )
+
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == ErrorCode.INVALID_STATE_TRANSITION
+    assert order.items[0].status == ItemStatus.PENDING
 
 
 def test_kitchen_reject_redo_item_on_delivered_order_success(

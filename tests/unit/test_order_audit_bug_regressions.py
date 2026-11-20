@@ -219,6 +219,17 @@ def _tx_reject_item(svc: OrderService, order: Order, item: OrderItem) -> Awaitab
 
 
 def _tx_cancel_item(svc: OrderService, order: Order, item: OrderItem) -> Awaitable[Order]:
+    order.items.append(
+        OrderItem(
+            public_id=uuid4(),
+            dish_id="recipe-taco-02",
+            offer_id="offer-taco-02",
+            name="Taco Campechano",
+            quantity=1,
+            unit_price=Decimal("60.00"),
+            status=ItemStatus.PENDING,
+        )
+    )
     return svc.cancel_item(
         order.public_id,
         item.public_id,

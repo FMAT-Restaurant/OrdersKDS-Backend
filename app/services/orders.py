@@ -103,9 +103,7 @@ def _has_other_active_items(items: list[OrderItem], excluded_item_id: UUID) -> b
 
 def _has_undelivered_active_items(items: list[OrderItem]) -> bool:
     """Return True if any non-cancelled item has not yet reached DELIVERED status."""
-    return any(
-        item.status not in (ItemStatus.DELIVERED, ItemStatus.CANCELLED) for item in items
-    )
+    return any(item.status not in (ItemStatus.DELIVERED, ItemStatus.CANCELLED) for item in items)
 
 
 def _consolidate_order_items(items: list[OrderItem]) -> list[OrderCreatedItem]:
@@ -610,9 +608,7 @@ class OrderService:
         """Stage a charge or bill request event with frozen item prices into the outbox."""
         if order.total_amount is None:
             order.recalculate_total()
-        effective_total = (
-            order.total_amount if order.total_amount is not None else Decimal("0.00")
-        )
+        effective_total = order.total_amount if order.total_amount is not None else Decimal("0.00")
         charge_items = _build_charge_items(order.items)
         waiter_id = order.responsible_waiter_id or order.confirmed_by or order.created_by
         table_id = f"MESA-{order.table_number}" if order.table_number is not None else None

@@ -225,3 +225,48 @@ def test_request_bill_patch_alias(
     assert test_db[order_id].status == OrderStatus.DELIVERED
     assert len(fake_session.outbox_rows) == 1
     assert fake_session.outbox_rows[0].event_type == "ordenes.cuenta.solicitada"
+
+
+def test_request_bill_rejected_when_item_pending_redo_raises_409(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+) -> None:
+    """Reject bill request when a DELIVERED order has an item returned to PENDING for redo."""
+    order_id = uuid4()
+    order = Order(
+        public_id=order_id,
+        table_number=8,
+        status=OrderStatus.DELIVERED,
+        total_amount=Decimal("200.00"),
+    )
+    order.items.extend(
+        [
+            OrderItem(
+                public_id=uuid4(),
+                dish_id="dish-1",
+                name="Corte Ribeye",
+                quantity=1,
+                unit_price=Decimal("150.00"),
+                status=ItemStatus.DELIVERED,
+            ),
+            OrderItem(
+                public_id=uuid4(),
+                dish_id="dish-2",
+                name="Guarnición",
+                quantity=1,
+                unit_price=Decimal("50.00"),
+                status=ItemStatus.PENDING,
+            ),
+        ]
+    )
+    test_db[order_id] = order
+
+    response = client.post(
+        f"/orders/{order_id}/request-bill",
+        headers=auth_headers("waiter"),
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == ErrorCode.INVALID_STATE_TRANSITION.value
+    assert len(fake_session.outbox_rows) == 0
