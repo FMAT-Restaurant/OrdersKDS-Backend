@@ -59,12 +59,17 @@ async def test_unit_of_work_rolls_back_state_and_outbox_on_failure() -> None:
     session.rollback = AsyncMock()
     session.close = AsyncMock()
     session_factory = Mock(return_value=session)
+    event = OrderCreatedEvent.for_order(uuid4())
+    uow = UnitOfWork(session_factory)
 
-    with pytest.raises(RuntimeError):
-        async with UnitOfWork(session_factory) as uow:
+    async def _stage_and_fail() -> None:
+        async with uow:
             assert uow.outbox is not None
-            uow.outbox.add(OrderCreatedEvent.for_order(uuid4()))
+            uow.outbox.add(event)
             raise RuntimeError("simulated failure after staging the event")
+
+    with pytest.raises(RuntimeError, match="simulated failure after staging the event"):
+        await _stage_and_fail()
 
     session.rollback.assert_awaited_once()
     session.close.assert_awaited_once()

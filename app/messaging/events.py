@@ -67,6 +67,7 @@ class EventName(StrEnum):
     STOCK_INSUFFICIENT_EN = "inventory.reservation.rejected"
     INVENTORY_RECIPE_AVAILABILITY_CHANGED = "inventory.recipe.availability-changed"
     INVENTORY_RECIPE_NOT_AVAILABLE = "inventory.recipe.not-available"
+    INVENTORY_SOURCE_AVAILABILITY_UPDATED = "inventory.source.availability.updated"
     PAYMENT_COMPLETED = "pagos.pago.completado"
     DINING_SESSION_STARTED = "sala.dining_session.iniciada"
 
@@ -121,6 +122,16 @@ class OrderCreatedItem(BaseModel):
     recipe_source_id: str | None = Field(default=None, alias="sourceId")
     quantity: int = Field(gt=0)
 
+    @model_validator(mode="after")
+    def _populate_recipe_aliases(self) -> Self:
+        """Guarantee plateId and sourceId are always populated alongside offerId for Inventory."""
+        effective_plate = self.recipe_plate_id or self.recipe_source_id or self.offer_id
+        if self.recipe_plate_id is None:
+            self.recipe_plate_id = effective_plate
+        if self.recipe_source_id is None:
+            self.recipe_source_id = effective_plate
+        return self
+
     @property
     def plate_id(self) -> str:
         """Universal property alias preferring physical recipe plateId over commercial offerId."""
@@ -135,17 +146,6 @@ class OrderCreatedItem(BaseModel):
     def item_id(self) -> str:
         """Universal property alias for item conventions."""
         return self.recipe_plate_id or self.offer_id
-
-    @model_serializer(mode="wrap")
-    def _serialize_item(self, handler: Any) -> dict[str, Any]:
-        data = cast(dict[str, Any], handler(self))
-        if self.recipe_plate_id is None:
-            data.pop("plateId", None)
-            data.pop("recipe_plate_id", None)
-        if self.recipe_source_id is None:
-            data.pop("sourceId", None)
-            data.pop("recipe_source_id", None)
-        return data
 
 
 class OrderCreatedEvent(OrderEvent):
@@ -298,6 +298,19 @@ class DishPreparedEvent(OrderEvent):
     source_id: str | None = Field(default=None, alias="sourceId")
     quantity: int = Field(default=1, gt=0, alias="quantity")
     is_redo: bool = Field(default=False, alias="isRedo")
+
+    @model_validator(mode="after")
+    def _populate_prepared_aliases(self) -> Self:
+        """Guarantee plateId, sourceId, and offerId stay aligned when any dish ID is present."""
+        effective_plate = self.plate_id or self.source_id or self.offer_id
+        if effective_plate is not None:
+            if self.plate_id is None:
+                self.plate_id = effective_plate
+            if self.source_id is None:
+                self.source_id = effective_plate
+            if self.offer_id is None:
+                self.offer_id = effective_plate
+        return self
 
     @model_serializer(mode="wrap")
     def _serialize_prepared(self, handler: Any) -> dict[str, Any]:
@@ -504,9 +517,13 @@ class BasePaymentRequestEvent(OrderEvent):
         status: str | None = None,
         correlation_id: UUID | None = None,
         data: dict[str, Any] | None = None,
+        attempt_key: str | int | None = None,
     ) -> Self:
         """Build the deterministic payment request event for an order."""
-        event_id = uuid5(NAMESPACE_URL, f"{cls.event_name}:{order_id}")
+        seed = f"{cls.event_name}:{order_id}"
+        if attempt_key is not None:
+            seed = f"{seed}:{attempt_key}"
+        event_id = uuid5(NAMESPACE_URL, seed)
         items_list = items or []
         effective_total = total_amount if total_amount is not None else Decimal("0.00")
         effective_status = status if status is not None else cls.default_status

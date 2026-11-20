@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from redis.asyncio import Redis
 
 from app.api.error_handlers import register_error_handlers
-from app.api.routers import kds, orders
+from app.api.routers import kds, orders, shifts
 from app.api.websockets import routes as websocket_routes
 from app.realtime.redis_bridge import RedisRealtimeBridge
 from app.realtime.router import realtime_router
@@ -73,8 +73,11 @@ def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
-# Direct mounts plus Kong API Gateway mounts (strip_path: false)
-for _prefix in ("", "/api/v1", "/api/v1/orders", "/api/v1/kitchen"):
+# Direct mounts plus Kong API Gateway mounts (strip_path: false).
+# Register specific gateway prefixes before "/api/v1" so static "/orders" routes
+# (e.g. GET /api/v1/orders/orders) win over "/api/v1/orders/{orderId}".
+for _prefix in ("/api/v1/orders", "/api/v1/kitchen", "/api/v1", ""):
     app.include_router(orders.router, prefix=_prefix)
     app.include_router(kds.router, prefix=_prefix)
+    app.include_router(shifts.router, prefix=_prefix)
     app.include_router(websocket_routes.router, prefix=_prefix)

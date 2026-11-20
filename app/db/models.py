@@ -19,29 +19,92 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Numeric, String, UniqueConstraint, Uuid
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship, synonym
 
 from app.db.base import Base
+from app.domain.constants import MAX_CATALOG_ID_LENGTH, MAX_NOTE_LENGTH
+from app.domain.errors import ShiftClosedError
 from app.domain.order_status import (
     ItemStatus,
     OrderStatus,
     ensure_item_transition_allowed,
     ensure_transition_allowed,
 )
+from app.domain.shift import ShiftStatus, ensure_shift_can_close
 
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+class Shift(Base):
+    """Operational kitchen shift scoping sequential per-shift order folios."""
+
+    __tablename__ = "shifts"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    public_id: Mapped[UUID] = mapped_column(Uuid, default=uuid.uuid4, unique=True, nullable=False)
+    shift_number: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
+    status: Mapped[ShiftStatus] = mapped_column(
+        Enum(ShiftStatus, name="shift_status_enum", native_enum=False, validate_strings=True),
+        default=ShiftStatus.OPEN,
+        nullable=False,
+        index=True,
+    )
+    last_order_folio: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    opened_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    opened_by: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    closed_by: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    notes: Mapped[str | None] = mapped_column(String(MAX_NOTE_LENGTH), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    __mapper_args__ = {"version_id_col": version}
+
+    def allocate_next_folio(self) -> int:
+        """Increment and return the next 1-based folio within this open shift."""
+        if self.status != ShiftStatus.OPEN:
+            raise ShiftClosedError()
+        self.last_order_folio = (self.last_order_folio or 0) + 1
+        return self.last_order_folio
+
+    def close(self, *, closed_by: UUID, notes: str | None = None) -> None:
+        """Transition this open shift to CLOSED."""
+        ensure_shift_can_close(self.status)
+        self.status = ShiftStatus.CLOSED
+        self.closed_at = _utcnow()
+        self.closed_by = closed_by
+        if notes is not None:
+            self.notes = notes
+
+
 class Order(Base):
     """Order aggregate root."""
 
     __tablename__ = "orders"
+    __table_args__ = (
+        UniqueConstraint("shift_id", "shift_folio", name="uq_orders_shift_id_shift_folio"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     public_id: Mapped[UUID] = mapped_column(Uuid, default=uuid.uuid4, unique=True, nullable=False)
+    shift_id: Mapped[int | None] = mapped_column(
+        ForeignKey("shifts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    shift_folio: Mapped[int | None] = mapped_column(Integer, nullable=True)
     order_id = synonym("public_id")
     status: Mapped[OrderStatus] = mapped_column(
         Enum(OrderStatus, name="order_status", validate_strings=True),
@@ -166,7 +229,7 @@ class OrderItem(Base):
     order_id: Mapped[int] = mapped_column(
         ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    dish_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    dish_id: Mapped[str | None] = mapped_column(String(MAX_CATALOG_ID_LENGTH), nullable=True)
     offer_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     quantity: Mapped[int] = mapped_column(nullable=False, default=1)
@@ -174,7 +237,7 @@ class OrderItem(Base):
         Numeric(12, 2), nullable=False, default=Decimal("0.00")
     )
     modifiers: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
-    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    notes: Mapped[str | None] = mapped_column(String(MAX_NOTE_LENGTH), nullable=True)
     status: Mapped[ItemStatus] = mapped_column(
         Enum(ItemStatus, name="item_status", validate_strings=True),
         default=ItemStatus.PENDING,

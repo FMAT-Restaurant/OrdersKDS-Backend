@@ -29,6 +29,16 @@ class OutboxRepository:
         self._session.add(row)
         return row
 
+    async def exists(self, event_id: UUID) -> bool:
+        """Return True if an outbox row with event_id has already been staged."""
+        outbox_rows = getattr(self._session, "outbox_rows", None)
+        if not isinstance(outbox_rows, list):
+            outbox_rows = getattr(getattr(self._session, "db", None), "outbox", None)
+        if isinstance(outbox_rows, list):
+            return any(getattr(row, "event_id", None) == event_id for row in outbox_rows)
+        row = await self._session.scalar(select(Outbox.id).where(Outbox.event_id == event_id))
+        return row is not None
+
     async def pending(self, limit: int = 100) -> list[Outbox]:
         """Return unpublished rows oldest first for the outbox worker."""
         result = await self._session.scalars(

@@ -29,13 +29,13 @@ Se determina la siguiente distribución de cobertura y tratamiento para los esce
 ### 1. AT-08: Transferencia de mesa (`table_transfer.feature`, RF-16)
 - **Tratamiento:** Cubierto al 100 % en pruebas unitarias y de contrato de API REST.
 - **Justificación técnica:** La transferencia de comanda entre mesas (`PATCH /orders/{orderId}/transfer`) es una operación administrativa de reasignación de ubicación (`table_number`). No modifica el estado de la comanda en la máquina de estados (`OrderStatus`), no interactúa con la saga de Inventario ni altera la cola de cocina del KDS. Su comportamiento, validaciones de mesa ocupada/activa y control de acceso PBAC están cubiertos rigurosamente en:
-  - `tests/contract/test_rest_contracts.py` (CT-04).
+  - `tests/contract/test_rest_contracts.py` (CT-08).
   - `tests/unit/api/test_orders_transfer_api.py` (`test_transfer_order_*`).
 - **Conclusión:** No se requiere duplicar un archivo `.feature` adicional en la suite BDD para este endpoint puntual.
 
 ### 2. AT-09: Platillo no disponible (`unavailable_dish.feature`, RF-17, RF-40, RF-41)
 - **Tratamiento:** Cubierto al 100 % en pruebas de contrato de eventos, reconciliación e integración de caché Redis.
-- **Justificación técnica:** La regla de disponibilidad congela el catálogo en Redis (`CatalogRepository`) ante eventos consumidos desde Menú e Inventario (`menu.platillo.precio_actualizado`, `menu.catalogo.actualizado`, `inventory.recipe.availability-changed`). Cuando un platillo no está disponible, el backend responde inmediatamente en el borde con `422 Unprocessable Entity` (`DISH_UNAVAILABLE`), evitando llamadas a la base de datos o transiciones de comanda. Esta lógica está cubierta en:
+- **Justificación técnica:** La regla de disponibilidad congela el catálogo en Redis (`CatalogRepository`) ante eventos consumidos desde Menú e Inventario (`menu.platillo.precio_actualizado`, `menu.catalogo.actualizado`, `inventory.recipe.availability-changed`, `inventory.source.availability.updated`). Cuando un platillo no está disponible, el backend responde inmediatamente en el borde con `422 Unprocessable Entity` (`DISH_UNAVAILABLE`), evitando llamadas a la base de datos o transiciones de comanda. Esta lógica está cubierta en:
   - `tests/unit/test_catalog.py`, `tests/unit/api/test_orders_items_api.py` y `tests/unit/test_catalog_reconciliation.py` (validación de borde y excepciones `DishUnavailableError`).
   - `tests/contract/test_consumed_event_contracts.py` (CT-24).
   - `tests/integration/test_it13_catalog_projection.py` (sincronización y consistencia eventual).

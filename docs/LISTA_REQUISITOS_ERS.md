@@ -1,221 +1,168 @@
-# Especificación de Requisitos de Software (ERS) — Orders & KDS
-## Microservicio de Órdenes y Pantalla de Cocina (KDS)
+# Especificación de Requisitos de Software (ERS) — Lista de Requisitos (Orders & KDS)
+## Microservicio de Órdenes y Pantalla de Cocina (Orders & KDS Service)
 
-Documento estructurado de referencia para presentación y evaluación del sistema. Presenta la lista completa de **Requisitos Funcionales (RF)** y **Requisitos No Funcionales (RNF)** con el detalle necesario para su exposición clara ante evaluadores y equipo de desarrollo.
+Documento de referencia rápida alineado al estado real del código fuente (`orders-backend` y `orders-frontend`). Para la especificación formal completa bajo estándar IEEE 830 / ISO/IEC/IEEE 29148 véase [ERS_IEEE_OrdenesKDS.md](./ERS_IEEE_OrdenesKDS.md).
 
 ---
 
 # 1. Requisitos Funcionales (RF)
 
-Los requisitos funcionales definen las capacidades de negocio, flujos operativos de meseros y cocineros, y la interacción coreografiada con otros microservicios (Inventario, Menú, Pagos, Sala).
-
----
-
 ### Módulo A: Visualización y Cola de Cocina (KDS)
 
-- **RF-01 · Agrupación visual de comandas por estado**
-  - **Descripción:** La pantalla de cocina (KDS) debe clasificar y renderizar dinámicamente las órdenes activas en columnas o secciones bien delimitadas según su fase actual de elaboración (`RESERVED`, `IN_PREPARATION` y `DELIVERED`), garantizando una visión clara de la carga de trabajo en cocina.
+- **RF-01 · Agrupación visual de comandas por estado y vigencia**
+  - **Descripción:** La pantalla de cocina (KDS) clasifica y renderiza las órdenes en pestañas operativas según su estado y vigencia: *Pendientes* (`RESERVED` vigente), *En preparación* (`IN_PREPARATION`), *Activas*, *Para rehacer* (`DELIVERED` con ítems `PENDING`), *Entregadas* (`DELIVERED`) y *Caducados* (`EXPIRED` o `RESERVED` cuyo TTL de 15 min + 10 min de gracia haya vencido).
 
-- **RF-02 · Ordenamiento por antigüedad en preparación (FIFO)**
-  - **Descripción:** Las comandas en la cola de cocina deben presentarse ordenadas con base en el mayor tiempo transcurrido en cocina medido desde `in_preparation_at` (primero la orden con mayor antigüedad), evitando que pedidos atrasados se pierdan de vista en horas pico.
+- **RF-02 · Ordenamiento por antigüedad en cocina y reserva (FIFO)**
+  - **Descripción:** La cola KDS ordena las comandas de forma ascendente según `COALESCE(in_preparation_at, stock_reserved_at, created_at)`, manteniendo al frente las órdenes con mayor tiempo de espera.
 
 - **RF-03 · Criterio de desempate cronológico**
-  - **Descripción:** Cuando dos o más órdenes compartan la misma antigüedad o nivel de prioridad, el sistema desempata de manera predecible y determinista utilizando la marca de tiempo de creación original (`created_at`) y el identificador único de la orden.
+  - **Descripción:** Cuando dos o más órdenes compartan la misma marca de tiempo prioritaria, el sistema desempata deterministamente por `created_at` ascendente y posteriormente por `public_id` ascendente.
 
 - **RF-04 · Retiro automático de comandas pagadas**
-  - **Descripción:** En cuanto una comanda pasa al estado terminal `PAID` (tras confirmarse la transacción financiera en el módulo de Pagos), el sistema retira automáticamente su tarjeta del KDS en tiempo real, manteniendo la pantalla despejada.
+  - **Descripción:** En cuanto una comanda transita al estado terminal `PAID` (tras consumirse `pagos.pago.completado`), el sistema excluye la orden de la consulta KDS y actualiza la UI en tiempo real.
 
 - **RF-05 · Visualización integral del platillo (modificadores y notas)**
-  - **Descripción:** Cada tarjeta de comanda en el KDS debe exponer con total claridad la cantidad, nombre del platillo, modificadores seleccionados (ej. término de carne, salsas) y notas especiales de cocina o alérgenos agregadas por el mesero.
+  - **Descripción:** Cada tarjeta de comanda en el KDS expone cantidad, nombre del platillo, modificadores seleccionados, notas especiales de preparación, estación y tiempo de preparación de referencia.
 
 - **RF-06 · Identificador visible de mesa o pedido para llevar**
-  - **Descripción:** La tarjeta debe mostrar de manera prominente el número de la mesa física asignada, o indicar claramente la etiqueta "Para llevar" (*Takeaway*) cuando no pertenezca a una mesa del salón comedor.
+  - **Descripción:** Cada tarjeta muestra de forma destacada el número de mesa física asignada o la etiqueta "Para llevar" (`isTakeaway`), junto con el identificador numérico legible de la orden (`orderNumber`) o respaldo hexadecimal corto.
 
-- **RF-07 · Cronómetro de elaboración y semáforo visual de alerta**
-  - **Descripción:** Cada tarjeta expone un cronómetro que mide el tiempo transcurrido desde el ingreso a preparación y cambia el indicador visual a advertencia (*Warning*, amarillo) y crítico (*Late*, rojo) si se superan los umbrales operativos del restaurante.
+- **RF-07 · Cronómetro, semáforo de atraso y alerta de TTL de reserva**
+  - **Descripción:** Cada tarjeta muestra el tiempo transcurrido con indicadores visuales (`on_time`, `warning`, `late` configurables por `KDS_WARNING_AFTER_SECONDS` / `KDS_LATE_AFTER_SECONDS`) y un conteo regresivo de gracia de 10 minutos cuando una orden `RESERVED` excede el TTL de 15 minutos desde `stock_reserved_at`.
 
 - **RF-08 · Filtrado operativo por estación culinaria**
-  - **Descripción:** Permite a los operadores de cocina filtrar las órdenes o renglones visualizados según la estación física de trabajo (ej. Parrilla, Barra Fría, Bebidas, Freidoras), dirigiendo la atención de cada cocinero a lo que le compete elaborar.
+  - **Descripción:** Permite filtrar los ítems visibles por estación culinaria normalizada (`GET /kds/queue?station=...`) sin perder el contexto de la comanda cuando al menos un ítem coincide con la estación.
 
 ---
 
-### Módulo B: Control de Elaboración y Despacho en Cocina
+### Módulo B: Control de Elaboración, Despacho y Rechazo en Cocina
 
-- **RF-09 · Marcado de preparación por platillo individual ("Listo")**
-  - **Descripción:** El cocinero o chef puede marcar un renglón de platillo específico como preparado individualmente, reflejando el progreso parcial de la comanda cuando los tiempos de cocción son asíncronos.
+- **RF-09 · Inicio explícito de preparación en cocina (`RESERVED → IN_PREPARATION`)**
+  - **Descripción:** Permite al personal de cocina o chef iniciar la preparación de una comanda en `RESERVED` (`PATCH/POST /orders/{orderId}/start-preparation`), fijando `in_preparation_at` y publicando `ordenes.orden.en_preparacion` (`ordenes.order.served`) para el descuento FEFO en Inventario.
 
-- **RF-10 · Emisión de evento de consumo de insumos (`platillo.preparado`)**
-  - **Descripción:** Cada vez que un platillo transita al estado preparado, el backend emite al broker de mensajería el evento `ordenes.platillo.preparado` con su identificador, cantidad e indicador de rehechura (`isRedo`), ordenando al microservicio de Inventario el descuento definitivo de los ingredientes en almacén.
+- **RF-10 · Marcado de preparación por platillo individual y evento `platillo.preparado`**
+  - **Descripción:** Permite marcar un ítem `PENDING` como `READY` (`PATCH /orders/{orderId}/items/{itemId}/ready`), publicando `ordenes.platillo.preparado` con el indicador `isRedo` y transicionando la orden a `DELIVERED` cuando todos los ítems activos han sido completados.
 
 - **RF-11 · Marcado masivo de comanda completa ("Orden lista")**
-  - **Descripción:** Provee una acción rápida (por botón táctil o atajo de teclado) para marcar todos los platillos pendientes de una orden como terminados en un solo paso, transicionando la orden al estado `DELIVERED` para que el mesero la traslade a los comensales.
+  - **Descripción:** Permite marcar todos los ítems pendientes de una orden `IN_PREPARATION` en una sola acción (`PATCH /orders/{orderId}/ready`), publicando los eventos pendientes y transicionando la orden e ítems a `DELIVERED`. En la UI KDS ambas acciones de despacho cuentan con una ventana de cancelación (**Deshacer**) de 15 segundos.
+
+- **RF-11B · Rechazo físico por falta de insumos y cancelación individual de ítem**
+  - **Descripción:** Permite a cocina rechazar un ítem en `RESERVED` o en rehechura (`PATCH /orders/{orderId}/items/{itemId}/kitchen-reject`) indicando motivo y `availableQuantity`; si es `0` inhabilita el platillo en Redis, publica `ordenes.platillo.rechazado_cocina` y devuelve órdenes `RESERVED` a `REJECTED` (con `rejectedItems`/`reservedItems`). También permite cancelar un ítem individual (`ItemStatus.CANCELLED`) mediante `PATCH /orders/{orderId}/items/{itemId}/cancel`.
 
 ---
 
 ### Módulo C: Gestión de Comandas y Terminal del Mesero
 
-- **RF-12 · Apertura de comanda vinculada a mesa física**
-  - **Descripción:** El mesero puede aperturar una nueva comanda asociándola formalmente a una mesa de salón, enlazándola con el identificador de sesión de comensales (`sessionId`) provisto por el microservicio de Sala.
+- **RF-12 · Apertura de comanda vinculada a mesa física y sesión**
+  - **Descripción:** El mesero puede crear comandas en `CREATED` asociadas a una mesa física (`tableNumber`) y opcionalmente a `diningSessionId` (1:N órdenes por sesión).
 
-- **RF-13 · Apertura de comanda para consumo fuera del salón ("Para Llevar")**
-  - **Descripción:** Permite la apertura de órdenes directas para llevar, las cuales no están atadas a mesas de sala pero siguen el mismo flujo de validación, preparación en cocina y facturación.
+- **RF-13 · Apertura de comanda "Para Llevar"**
+  - **Descripción:** Permite crear comandas con `isTakeaway=true` sin número de mesa obligatorio.
 
-- **RF-14 · Captura de renglones, modificadores y notas personalizadas**
-  - **Descripción:** Permite al mesero armar la orden agregando platillos desde el catálogo, incrementando cantidades, seleccionando ingredientes opcionales y redactando instrucciones especiales para cocina.
+- **RF-14 · Captura de renglones, modificadores y notas con doble identificador**
+  - **Descripción:** Permite armar y reemplazar líneas de platillo en borrador con soporte dual (`dishId`, `sourceId`, `offerId`), congelando `unitPrice` en confirmación/edición y preservando historial de ítems.
 
-- **RF-15 · Trazabilidad y auditoría mediante identidad JWT**
-  - **Descripción:** Toda operación de creación, actualización o anulación extrae de manera forzosa el `user_id` y `role` contenidos en las credenciales JWT del usuario autenticado, asegurando la responsabilidad y autoría de cada cambio.
+- **RF-15 · Trazabilidad y autorización PBAC + RBAC por identidad Auth/Gateway**
+  - **Descripción:** Extrae identidad, roles y permisos desde encabezados del API Gateway (`x-user-id`, `x-staff-id`, `x-user-roles`, `x-user-role`, `x-user-permissions`, `x-user-type`) o JWT (`ADR-0011`), evaluando las 16 políticas `AccessPolicy` (`orders:*`, `kitchen:*`) y trazando `created_by` / `responsible_waiter_id` / `confirmed_by`.
 
 - **RF-16 · Reasignación o transferencia entre mesas**
-  - **Descripción:** Permite reasignar una comanda activa a un número de mesa diferente cuando los clientes cambian de ubicación en el salón comedor, manteniendo intactos todos los ítems y estados asociados.
+  - **Descripción:** Permite transferir una comanda no terminal a otra mesa (`PATCH /orders/{orderId}/transfer`) validando concurrencia optimista mediante `version` o cabecera `If-Match`.
 
 - **RF-17 · Bloqueo preventivo de platillos no disponibles**
-  - **Descripción:** El mesero no puede seleccionar ni agregar a la comanda platillos marcados como inactivos o agotados en el catálogo local; el sistema valida la disponibilidad en tiempo real antes de permitir su ingreso a la orden.
+  - **Descripción:** Valida cada platillo agregado contra la vista local materializada en Redis (`CatalogRepository`), rechazando con `422 DISH_UNAVAILABLE` aquellos marcados como `available=false`.
 
 ---
 
-### Módulo D: Sincronización, Ciclo de Vida y Transiciones
+### Módulo D: Sincronización, Ciclo de Vida y Cobro
 
-- **RF-18 · Actualización visual y reactiva de la interfaz (UI en tiempo real)**
-  - **Descripción:** Toda transición de estado de una orden (`CREATED`, `RESERVED`, `IN_PREPARATION`, `DELIVERED`, `PAID`, `CANCELLED`, `REJECTED`, `WASTED`, `VOIDED`, `EXPIRED`) se refleja de inmediato en las pantallas de meseros y cocina mediante WebSockets sin requerir recargar la página (*zero polling*).
+- **RF-18 · Actualización reactiva en tiempo real (WebSockets + Redis Pub/Sub)**
+  - **Descripción:** Refleja transiciones de orden e ítems sobre `/ws/waiter` y `/ws/kds` mediante difusión local y puente `orders:realtime:events` sin necesidad de *polling*.
 
-- **RF-19 · Notificación de eventos a módulos externos**
-  - **Descripción:** El sistema notifica asíncronamente a los microservicios suscritos cada hito relevante del ciclo de vida (reservas solicitadas, comandas mermadas, cobros requeridos, cancelaciones).
+- **RF-19 · Emisión confiable de eventos de dominio (Outbox + dual routing)**
+  - **Descripción:** Etapa todos los eventos de integración (`ordenes.orden.*`, `ordenes.platillo.*`, `ordenes.comanda.mermada`, `ordenes.cobro.solicitado`, `ordenes.cuenta.solicitada`) en la tabla `outbox` y los publica al broker con `publisher_confirms`.
 
-- **RF-20 · Emisión de solicitud de cuenta con precios congelados**
-  - **Descripción:** Al solicitar la cuenta de una mesa, el sistema emite el evento `ordenes.cuenta.solicitada` hacia Pagos incluyendo el importe exacto con los precios unitarios que fueron congelados al momento de confirmar la orden, protegiendo al cliente contra cambios posteriores de la carta.
+- **RF-20 · Solicitud de cuenta con precios congelados**
+  - **Descripción:** Mediante `POST/PATCH /orders/{orderId}/request-bill` sobre órdenes en `DELIVERED`, publica `ordenes.cuenta.solicitada` incluyendo precios congelados, `orderId` y `sessionId`.
 
 - **RF-21 · Cierre terminal exclusivo por confirmación de pago**
-  - **Descripción:** La comanda únicamente transiciona al estado final `PAID` al consumir el evento `pagos.pago.completado`. No es posible cerrar ni dar por pagada una orden desde la UI sin el respaldo de este evento de dominio.
+  - **Descripción:** Una orden únicamente pasa a `PAID` al consumir `pagos.pago.completado` estando en estado `DELIVERED` o `WASTED`.
 
-- **RF-22 · Retorno de platillo a cocina para rehechura (*Redo Item*)**
-  - **Descripción:** Permite al mesero devolver un platillo ya entregado al estado `PENDING` para que cocina vuelva a prepararlo. Exige una nota obligatoria de justificación, mantiene la orden en estado `DELIVERED` y al finalizar emite un evento extraordinario de descuento en Inventario con la bandera `isRedo: true`.
+- **RF-22 · Retorno de platillo entregado para rehechura (`redo`)**
+  - **Descripción:** Permite devolver un ítem de una orden `DELIVERED` a `PENDING` (`PATCH /orders/{orderId}/items/{itemId}/redo`) exigiendo `note` no vacía, preservando las notas previas de preparación para restaurarlas al finalizar la rehechura.
 
 ---
 
-### Módulo E: Cancelaciones y Políticas de Anulación (Mermas)
+### Módulo E: Modificaciones, Cancelaciones y Anulaciones (Mermas)
 
-- **RF-23 · Edición de contenido restringida al estado inicial**
-  - **Descripción:** La modificación de platillos, notas o cantidades está estrictamente permitida mientras la orden permanece en estado `CREATED` (o cuando es reabierta tras un rechazo por stock). Una vez que entra a cocina, la orden no admite modificaciones libres de contenido.
+- **RF-23 · Edición de contenido y reapertura desde `REJECTED`**
+  - **Descripción:** La edición de ítems (`PATCH /orders/{orderId}/items`) está permitida mientras la orden esté en `CREATED` sin `confirmed_at`, o en `REJECTED` (reabriéndola automáticamente a `CREATED` y limpiando `confirmed_at`).
 
-- **RF-24 · Cancelación libre y directa por el mesero en estado inicial**
-  - **Descripción:** El mesero puede cancelar una orden sin costo alguno ni autorización especial únicamente mientras se encuentre en estado `CREATED`, antes de que se hayan comprometido insumos o iniciado la preparación.
+- **RF-24 · Cancelación libre en `CREATED`, `RESERVED` o `REJECTED`**
+  - **Descripción:** Permite cancelar la comanda completa (`PATCH/POST /orders/{orderId}/cancel`) cuando se encuentre en `CREATED`, `RESERVED` o `REJECTED`, transicionando a `CANCELLED`.
 
 - **RF-25 · Emisión de cancelación y liberación de reservas**
-  - **Descripción:** Al cancelarse una orden inicial, se emite el evento `ordenes.orden.cancelada`, instruyendo a Inventario a liberar inmediatamente las pre-reservas de ingredientes y asegurando que no se genere ningún cargo de cobro al comensal.
+  - **Descripción:** Al cancelar una orden se almacena atómicamente `ordenes.orden.cancelada` (`itemsCancelados`) para liberar stock en Inventario sin generar cobro al cliente.
 
 - **RF-26 · Anulación administrativa exclusiva de administrador (`WASTED`)**
-  - **Descripción:** Una comanda en preparación solo puede anularse por motivos ajenos a la cocina (ej. el cliente decide marcharse o cambia intempestivamente de opinión) por un usuario con rol `admin`, transicionando al estado `WASTED` (Mermada).
+  - **Descripción:** Permite únicamente al rol/permiso administrativo (`orders:orders:void_admin`) anular una orden en `IN_PREPARATION` (`PATCH/POST /orders/{orderId}/void`), transicionando a `WASTED`.
 
-- **RF-27 · Cobro obligatorio al cliente en anulación administrativa**
-  - **Descripción:** La orden en `WASTED` publica `ordenes.comanda.mermada` y `ordenes.cobro.solicitado`: el cliente está legalmente obligado a pagar el monto completo y los insumos se registran como consumidos, ya que la merma no fue responsabilidad del restaurante.
+- **RF-27 · Cobro configurable en anulación administrativa (`chargeCustomer`)**
+  - **Descripción:** Cuando `chargeCustomer=true` (por defecto), publica `ordenes.cobro.solicitado` con precios congelados; cuando `chargeCustomer=false`, publica `ordenes.comanda.mermada` (`reason="ADMINISTRATIVE"`) sin cobro.
 
-- **RF-28 · Anulación por error de personal de cocina (`VOIDED`)**
-  - **Descripción:** Cuando ocurre un fallo imputable a cocina (platillo quemado, contaminación cruzada, error grave de elaboración), un administrador o el chef pueden anular la orden en preparación, cancelando de inmediato la comanda completa hacia el estado `VOIDED`.
+- **RF-28 · Anulación por error de cocina (`VOIDED`)**
+  - **Descripción:** Permite únicamente a administrador o chef (`kitchen:orders:void_error`) anular toda una orden en `IN_PREPARATION` (`PATCH/POST /orders/{orderId}/void-kitchen-error`), transicionando a `VOIDED`.
 
 - **RF-29 · Justificación obligatoria en error de cocina**
-  - **Descripción:** La anulación por error de cocina exige registrar una nota de texto que justifique la causa del fallo (facilitada en el KDS mediante botones táctiles rápidos de motivos comunes y teclado virtual opcional).
+  - **Descripción:** La anulación por error de cocina rechaza con `422 NOTE_REQUIRED` si `note` (o alias `reason`/`motivo`) falta o está vacía.
 
-- **RF-30 · Registro de pérdida de insumos en cocina**
-  - **Descripción:** Al transicionar a `VOIDED`, se emite `ordenes.comanda.mermada` a Inventario para registrar la pérdida definitiva de los insumos físicos utilizados, los cuales no pueden reintegrarse al inventario disponible.
+- **RF-30 · Registro de pérdida de insumos en error de cocina**
+  - **Descripción:** Al transicionar a `VOIDED` publica `ordenes.comanda.mermada` con `reason="KITCHEN_ERROR"`, `motivo="error_cocina"` y la nota explicativa.
 
 - **RF-31 · Exención total de cobro al cliente en error de cocina**
-  - **Descripción:** Una comanda en estado `VOIDED` jamás emite solicitud de cobro (`ordenes.cobro.solicitado` nunca se publica). El comensal queda 100% libre de pago dado que el error fue atribuible al establecimiento.
+  - **Descripción:** Una orden `VOIDED` nunca publica eventos de cobro (`ordenes.cobro.solicitado` / `ordenes.cuenta.solicitada`).
 
 ---
 
-### Módulo F: Coordinación Transaccional (Saga de Inventario)
+### Módulo F: Coordinación Transaccional (Saga) e Integración Externa
 
-- **RF-32 · Publicación de solicitud de reserva al confirmar**
-  - **Descripción:** Cuando el mesero confirma la orden armada, el sistema fija la marca de tiempo `confirmed_at` y emite de inmediato el evento `ordenes.orden.creada` con los ítems consolidados para solicitar la reserva de stock a Inventario.
+- **RF-32 · Confirmación y solicitud de reserva a Inventario**
+  - **Descripción:** `POST /orders/{orderId}/confirm` fija `confirmed_at` de forma idempotente bajo bloqueo `FOR UPDATE` y etapa `ordenes.orden.creada` con ítems activos consolidados.
 
-- **RF-33 · Transición a cocina sujeta a confirmación de stock**
-  - **Descripción:** La comanda pasa al estado `RESERVED` y entra a la cola de trabajo del KDS únicamente tras consumir el evento asíncrono `inventario.stock.reservado`, evitando cocinar órdenes que carecen de insumos en bodega.
+- **RF-33 · Reserva confirmada por Inventario (`CREATED → RESERVED`)**
+  - **Descripción:** Al consumir `inventario.stock.reservado` / `inventory.reservation.confirmed`, transiciona la orden a `RESERVED` (fijando `stock_reserved_at`) y etapa `ordenes.order.confirmed`. Ignora respuestas tardías si la orden ya está `EXPIRED` o `CANCELLED`.
 
-- **RF-34 · Manejo de stock insuficiente y alerta inmediata**
-  - **Descripción:** Si Inventario responde con el evento `inventario.stock.insuficiente`, la orden transiciona al estado `REJECTED` y el widget emite una alerta visual destacada al mesero indicando los platillos faltantes para su ajuste o re-edición.
+- **RF-34 · Stock insuficiente (`CREATED → REJECTED`) y alerta al mesero**
+  - **Descripción:** Al consumir `inventario.stock.insuficiente` / `inventory.reservation.rejected`, transiciona la orden a `REJECTED`, almacena `rejection_details` (`rejectedItems`, `reservedItems`, `missingIngredients`) y notifica por WebSocket.
 
-- **RF-35 · Temporizador de vencimiento de Saga (*Saga Timeout*)**
-  - **Descripción:** Si transcurren 60 segundos desde `confirmed_at` sin que Inventario emita confirmación o rechazo, la orden transiciona automáticamente a `EXPIRED` y emite `ordenes.orden.expirada`, liberando cualquier bloqueo y evitando comandas congeladas.
+- **RF-35 · Expiración automática de Saga (`CREATED → EXPIRED`)**
+  - **Descripción:** `SagaTimeoutWatcher` evalúa cada `SAGA_WATCHER_INTERVAL_SECONDS` (5 s) las órdenes `CREATED` con `confirmed_at` mayor a `SAGA_TIMEOUT_SECONDS` (60 s), marcándolas `EXPIRED` y publicando `ordenes.orden.expirada`.
 
----
+- **RF-36..RF-38 · Lotes de platillos intermedios [Opcional / Fase Futura]**
+  - **Descripción:** Funcionalidad deshabilitada en el alcance actual (`INTERMEDIATE_DISHES_ENABLED=false` / `VITE_FEATURE_INTERMEDIATE_DISHES=false`), reservada para fase futura.
 
-### Módulo G: Integración con Microservicios Vecinos
+- **RF-39 · Consumo de inicio de sesión de salón (`sala.dining_session.iniciada`)**
+  - **Descripción:** Crea de forma idempotente la orden inicial `CREATED` vinculando `dining_session_id` y `responsible_waiter_id` (`meseroId`).
 
-- **RF-36 / RF-37 / RF-38 · Lotes de platillos intermedios pre-elaborados [Opcional / Futuro]**
-  - **Descripción:** Permite al chef registrar la elaboración de lotes de bases culinarias o salsas pre-elaboradas fuera del flujo de una comanda de cliente, emitiendo `ordenes.platillo_intermedio.preparado` hacia Inventario bajo una bandera de configuración (*Feature Toggle*).
+- **RF-40 · Proyección y actualización de catálogo en Redis por eventos**
+  - **Descripción:** `CatalogConsumer` procesa eventos de Menú (`menu.catalogo.*`, `menu.platillo.*`, `menu.oferta.*`, `menu.source.*`) e Inventario (`inventory.recipe.*`), protegiendo contra mensajes obsoletos mediante `updated_at` y `menu_version`.
 
-- **RF-39 · Asociación automática a sesión de salón (`DiningSession`)**
-  - **Descripción:** Consume el evento `sala.dining_session.iniciada` emitido por el microservicio de Sala, registrando la apertura de la mesa, el mesero asignado y el identificador de sesión (`sessionId`) para asociar futuras comandas.
-
-- **RF-40 · Proyección y actualización continua de catálogo en caché**
-  - **Descripción:** Consume los eventos `menu.catalogo.actualizado` y `menu.platillo.precio_actualizado` para refrescar la vista materializada en Redis con nombres, precios, fotos y disponibilidad de platillos sin llamar síncronamente al microservicio de Menú.
-
-- **RF-41 · Sincronización de arranque y reconciliación de catálogo**
-  - **Descripción:** Durante el inicio del backend y de forma periódica, ejecuta una reconciliación contra el catálogo del servicio de Menú para auto-recuperar cualquier evento que se haya perdido durante caídas de red o reinicios de servicios.
+- **RF-41 · Reconciliación de catálogo al arranque / periódica**
+  - **Descripción:** Cuando se configura `CATALOG_SYNC_URL`, `CatalogReconciliationWorker` sincroniza el catálogo desde Menú al arranque y opcionalmente en el intervalo configurado (`CATALOG_RECONCILIATION_INTERVAL_SECONDS`).
 
 ---
 
 # 2. Requisitos No Funcionales (RNF)
 
-Los requisitos no funcionales establecen los atributos de calidad, rendimiento, seguridad, confiabilidad, portabilidad y usabilidad que rigen la arquitectura del microservicio.
-
----
-
-### Categoría 1: Arquitectura y Transaccionalidad
-
-- **RNF-01 · Atomicidad de estado y mensajería (Patrón *Transactional Outbox*)**
-  - **Descripción:** Ningún evento de dominio se envía directamente al broker de mensajería desde el controlador web. Todo cambio de estado en la base de datos se almacena en la misma transacción ACID junto con su evento en la tabla `outbox`, garantizando que jamás se emita un evento de una transacción que haya fallado o hecho *rollback*.
-
-- **RNF-02 · Idempotencia en procesamiento y publicación (*At-Least-Once*)**
-  - **Descripción:** El sistema asume entrega *al menos una vez* del broker. Todos los consumidores registran los identificadores de eventos procesados en una tabla `processed_events` para ignorar duplicados, y todos los eventos generados utilizan identificadores UUID deterministas (UUIDv5) basados en el recurso y tipo de evento.
-
-- **RNF-09 · Control de concurrencia optimista**
-  - **Descripción:** Las entidades clave (`Order`, `OrderItem`) implementan control de concurrencia optimista mediante una columna entera de versión (`version`). Si dos usuarios o procesos intentan modificar la misma comanda simultáneamente con una versión obsoleta, el sistema rechaza la operación con código HTTP `409 VERSION_CONFLICT`, evitando sobrescrituras ciegas (*Lost Updates*).
-
----
-
-### Categoría 2: Comunicación y Desempeño
-
-- **RNF-04 · Tiempo real y comunicación bidireccional por WebSockets**
-  - **Descripción:** La sincronización de estados entre el backend, el KDS de cocina y los widgets de meseros se efectúa a través de WebSockets sin realizar peticiones periódicas (*polling*). El protocolo segmenta los mensajes en canales dedicados (`kds:station:{station}`, `kds:all`, `floor`, `user:{userId}`) y ofrece reconexión automática transparente en caídas de red.
-
-- **RNF-06 · Eficiencia y umbrales de rendimiento bajo carga (k6)**
-  - **Descripción:** El sistema garantiza un tiempo de respuesta de API con percentil 95 inferior a 500 ms (`p95 < 500 ms`) y una tasa de error menor al 1% bajo una carga sostenida de 50 usuarios concurrentes (VUs). La latencia de entrega de notificaciones push por WebSocket debe ser inferior a 1 segundo (`p95 < 1 s`).
-
-- **RNF-13 · Compatibilidad y validación estricta de contratos (JSON Schema / OpenAPI)**
-  - **Descripción:** Todo mensaje o evento que cruza una frontera de red (eventos RabbitMQ, contratos REST OpenAPI y sobres de WebSocket) está tipado y validado contra esquemas formales JSON Schema Draft-07 y colecciones ejecutables de Newman/Postman integradas al pipeline de integración continua.
-
----
-
-### Categoría 3: Seguridad y Resiliencia Operativa
-
-- **RNF-03 · Autenticación, autorización RBAC y seguridad defensiva**
-  - **Descripción:** Toda petición protegida valida tokens criptográficos JWT provenientes de Auth. Los endpoints aplican autorización estricta basada en roles (`waiter`, `kitchen`, `chef`, `admin`), sanitizan datos contra inyecciones SQL y Cross-Site Scripting (XSS), y retornan respuestas de error estandarizadas sin filtrar información interna o trazas de la base de datos.
-
-- **RNF-05 · Resiliencia y tolerancia a fallos ante caída de dependencias**
-  - **Descripción:** Si el microservicio de Menú o la red sufren una interrupción, el sistema de Órdenes continúa operando y procesando comandas apoyándose en la última copia materializada en su caché local de Redis, evitando paradas de servicio en el restaurante.
-
----
-
-### Categoría 4: Usabilidad, Accesibilidad y Ergonomía en Cocina
-
-- **RNF-07 · Operabilidad industrial híbrida (Táctil y Teclado / Bump Bar)**
-  - **Descripción:** La interfaz del KDS está diseñada con paridad operativa total para pantalla horizontal táctil de cocina (1920×1080) y para teclados industriales de cocina (*Bump Bar*), garantizando que los cocineros con guantes o manos húmedas puedan navegar y despachar órdenes con flechas del teclado o mediante toques táctiles de gran tamaño (≥ 64 px).
-
-- **RNF-08 · Modularidad y aislamiento estilístico (Module Federation)**
-  - **Descripción:** El widget de mesero (`OrderTicketWidget`) se empaqueta y exporta mediante Vite Module Federation sin declarar estilos CSS globales que contaminen el microfrontend anfitrión (Shell), funcionando como una pieza desacoplada.
-
-- **RNF-11 · Accesibilidad universal e indicaciones de alto contraste (WCAG 2.1 AA)**
-  - **Descripción:** Cumplimiento con estándares WCAG AA: contraste cromático mínimo 4.5:1, foco visualmente nítido en navegación por teclado, anuncios audibles para lectores de pantalla mediante atributos `aria-live`, y codificación dual de información crítica (el estado nunca se comunica únicamente por color, sino también por texto o icono).
-
----
-
-### Categoría 5: Calidad Estática, Mantenibilidad y Observabilidad
-
-- **RNF-10 · Mantenibilidad y cumplimiento de calidad de código (SonarCloud)**
-  - **Descripción:** El código fuente se audita en cada integración mediante un *Quality Gate* estricto en SonarCloud: exige al menos 80% de cobertura de código en pruebas automatizadas, 0 vulnerabilidades de seguridad (*Security Hotspots* revisados) y ausencia de duplicaciones o fallas de mantenibilidad severas.
-
-- **RNF-12 · Observabilidad y auditoría de eventos distribuidos**
-  - **Descripción:** El microservicio emite registros de log estructurados en formato JSON que incorporan identificadores de correlación (`correlation_id`) propagados entre servicios, permitiendo reconstruir la trazabilidad completa de una orden a lo largo de toda la arquitectura de microservicios.
-
+- **RNF-01 · Atomicidad transaccional (*Transactional Outbox*):** Todo cambio de estado con evento de integración se persiste en la misma transacción ACID junto con la fila `outbox`.
+- **RNF-02 · Idempotencia (*At-Least-Once*):** Los consumidores registran `(order_id, event_id)` en `processed_events` y los eventos deterministas emplean UUIDv5 por recurso y tipo.
+- **RNF-03 · Seguridad, PBAC/RBAC y aislamiento de errores:** Autenticación por gateway headers o JWT (`exp`, rechazo de `alg: none`), evaluación PBAC vía `AccessPolicy`, sobres de error estandarizados sin trazas internas y WebSockets con cierre `4401`/`4403`.
+- **RNF-04 · Comunicación en tiempo real bidireccional:** Canales WebSocket segregados (`/ws/kds`, `/ws/waiter`), respaldo de reconexión exponencial con invalidación completa de caché y seguimiento monotónico de versiones por orden.
+- **RNF-05 · Tolerancia a fallos de Menú:** La validación de disponibilidad en creación/edición opera contra la vista local en Redis sin llamadas síncronas bloqueantes al servicio de Menú.
+- **RNF-06 · Rendimiento y latencia (k6):** Respuesta API `p95 < 500 ms` con tasa de error `< 1 %` bajo carga concurrente y entrega WebSocket `p95 < 1 s`.
+- **RNF-07 · Ergonomía táctil y Bump Bar en KDS:** Botones táctiles primarios `>= 64 px`, debouncing de 400 ms en eventos pointer/click y atajos completos por teclado industrial.
+- **RNF-08 · Modularidad dual en Module Federation:** Construcción independiente de los remotos `ordenesApp` (`5177`, `dist/`) y `cocinaApp` (`5179`, `dist-cocina/`) sobre React `^18.3.1` con aislamiento CSS `.orders-kds-root`.
+- **RNF-09 · Control de concurrencia optimista:** Versionamiento en `orders` y `order_items` (`version` / `If-Match`) rechazando escrituras obsoletas.
+- **RNF-10 · Mantenibilidad y calidad de código:** Cobertura unitaria mínima del 85 % configurada en `pyproject.toml`, tipado estricto (`mypy --strict`, `tsc`) y reglas de linting/calidad (`ruff`, `eslint`, SonarCloud).
+- **RNF-11 · Accesibilidad WCAG 2.1 AA:** Contraste adecuado, soporte de teclado, foco visible, regiones `aria-live` y codificación multimodal (color + texto/icono).
+- **RNF-12 · Observabilidad distribuida:** Logs estructurados con propagación de `correlation_id` entre HTTP, Outbox, Broker y Workers.
+- **RNF-13 · Validación estricta de contratos:** Validación contra esquemas JSON Schema Draft-07 (`contracts/events/*.json`), Pydantic (`extra="forbid"` en entradas) y esquemas Zod en frontend.

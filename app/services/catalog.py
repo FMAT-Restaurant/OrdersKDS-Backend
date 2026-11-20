@@ -38,6 +38,10 @@ _CATALOG_MOCK_REGISTRY: dict[str, dict[str, str | None]] = {
     "dish-guacamole": {"station": "Fría", "preparation_time_text": "5 min"},
     "dish-hamburguesa": {"station": "Parrilla", "preparation_time_text": "15 min"},
     "dish-ensalada": {"station": "Fría", "preparation_time_text": "8 min"},
+    "PLATE-BURGER-01": {"station": "Parrilla", "preparation_time_text": "15 min"},
+    "PLATE-QUES-01": {"station": "Parrilla", "preparation_time_text": "10 min"},
+    "PLATE-CESAR-01": {"station": "Fría", "preparation_time_text": "8 min"},
+    "PLATE-SIM-0001": {"station": "Parrilla", "preparation_time_text": "12 min"},
 }
 
 

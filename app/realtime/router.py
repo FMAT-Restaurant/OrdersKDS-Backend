@@ -25,7 +25,6 @@ import time
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any, Final
-from uuid import NAMESPACE_URL, UUID, uuid5
 
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
@@ -38,7 +37,7 @@ from app.api.dependencies.auth import (
 from app.core.error_codes import ErrorCode
 from app.db.models import Order, OrderItem
 from app.domain.access import AccessPolicy
-from app.domain.roles import Role
+from app.domain.roles import Role, parse_actor_uuid
 from app.realtime.schemas import (
     FORBIDDEN_CHANNEL_ERROR,
     ItemStatusChangedMessage,
@@ -59,14 +58,6 @@ CHANNEL_FLOOR: Final = "floor"
 CHANNEL_USER_PREFIX: Final = "user:"
 CHANNEL_KDS_PREFIX: Final = "kds:"
 CHANNEL_KDS_STATION_GENERAL: Final = f"{CHANNEL_KDS_STATION_PREFIX}general"
-
-
-def _parse_actor_uuid(user_id_str: str) -> UUID:
-    """Parse string actor identifier into a valid UUID deterministically."""
-    try:
-        return UUID(user_id_str)
-    except ValueError:
-        return uuid5(NAMESPACE_URL, f"{CHANNEL_USER_PREFIX}{user_id_str}")
 
 
 def is_valid_station(station: str) -> bool:
@@ -204,7 +195,7 @@ class RealtimeChannelRouter:
             if path == WAITER_WS_PATH:
                 conn.channels.add(CHANNEL_FLOOR)
                 conn.channels.add(f"{CHANNEL_USER_PREFIX}{auth_context.user_id}")
-                actor_uuid = _parse_actor_uuid(auth_context.user_id)
+                actor_uuid = parse_actor_uuid(auth_context.user_id)
                 conn.channels.add(f"{CHANNEL_USER_PREFIX}{actor_uuid}")
 
             self._connections[websocket] = conn

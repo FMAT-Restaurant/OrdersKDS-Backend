@@ -6,84 +6,23 @@ Provides in-memory session, catalog validator double, and notification spies.
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
 from typing import Any, Final, cast
 from uuid import UUID
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Order, OrderItem, Outbox
+from app.db.models import Order, OrderItem
 from app.db.session import get_session
 from app.domain.errors import DishUnavailableError
-from app.domain.order_status import OrderStatus
 from app.main import app
 from app.services.catalog import CatalogValidatorProtocol, get_catalog_validator
 from app.services.notifications import OrderNotifier, get_order_notifier
 from app.services.orders import OrderService, get_order_service
+from app.services.shifts import ShiftService, get_shift_service
+from tests.unit.conftest import FakeAsyncSession
 
 EMPTY_MODIFIERS: Final[list[str]] = []
-
-
-class FakeAsyncSession:
-    """In-memory AsyncSession double for testing FastAPI endpoints without I/O."""
-
-    def __init__(self, db: dict[UUID, Order] | None = None) -> None:
-        self.db: dict[UUID, Order] = db if db is not None else {}
-        self.outbox_rows: list[Outbox] = []
-        self.committed = False
-        self.rolled_back = False
-
-    def add(self, instance: object) -> None:
-        if isinstance(instance, Order):
-            self.db[instance.public_id] = instance
-        elif isinstance(instance, Outbox):
-            self.outbox_rows.append(instance)
-
-    async def commit(self) -> None:
-        self.committed = True
-
-    async def rollback(self) -> None:
-        self.rolled_back = True
-
-    async def scalars(self, statement: Any, *args: Any, **kwargs: Any) -> Any:
-        params = statement.compile().params
-        status_val = next((v for v in params.values() if isinstance(v, OrderStatus)), None)
-        session_val = next((v for v in params.values() if isinstance(v, UUID)), None)
-        orders = list(self.db.values())
-        if status_val is not None:
-            orders = [o for o in orders if o.status == status_val]
-        if session_val is not None:
-            orders = [o for o in orders if o.dining_session_id == session_val]
-        orders.sort(
-            key=lambda o: (
-                o.created_at or datetime.min.replace(tzinfo=UTC),
-                o.public_id,
-            ),
-            reverse=True,
-        )
-
-        class _Result:
-            def unique(self) -> _Result:
-                return self
-
-            def all(self) -> list[Order]:
-                return orders
-
-            def __iter__(self) -> Any:
-                return iter(orders)
-
-        return _Result()
-
-    async def scalar(self, statement: Any, *args: Any, **kwargs: Any) -> Any:
-        params = statement.compile().params
-        order_id = next((v for v in params.values() if isinstance(v, UUID)), None)
-        if order_id is not None:
-            return self.db.get(order_id)
-        return None
-
-    async def close(self) -> None:
-        pass
 
 
 class FakeCatalogValidator(CatalogValidatorProtocol):
@@ -155,6 +94,9 @@ def override_dependencies(
     app.dependency_overrides[get_order_service] = lambda: OrderService(
         session=cast(AsyncSession, fake_session),
         notifier=spy_notifier,
+    )
+    app.dependency_overrides[get_shift_service] = lambda: ShiftService(
+        session=cast(AsyncSession, fake_session),
     )
     yield
     app.dependency_overrides.clear()

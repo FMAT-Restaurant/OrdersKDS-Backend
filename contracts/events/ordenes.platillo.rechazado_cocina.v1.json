@@ -38,7 +38,8 @@
     "offerId": {
       "type": "string",
       "description": "Offer identifier from Menu.",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 100
     },
     "quantity": {
       "type": "integer",
@@ -56,10 +57,12 @@
     },
     "plateId": {
       "type": "string",
+      "maxLength": 100,
       "description": "Inventory plate/recipe identifier corresponding to Menu sourceId."
     },
     "sourceId": {
       "type": "string",
+      "maxLength": 100,
       "description": "Menu recipe/plate source identifier."
     }
   },

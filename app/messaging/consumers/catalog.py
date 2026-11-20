@@ -163,6 +163,7 @@ class CatalogConsumer:
             EventName.MENU_DISH_AVAILABILITY_UPDATED,
             EventName.MENU_DISH_STATE_UPDATED,
             EventName.INVENTORY_RECIPE_AVAILABILITY_CHANGED,
+            EventName.INVENTORY_SOURCE_AVAILABILITY_UPDATED,
         ):
             available = _extract_available(item)
             return await self._repository.upsert(dish_id, available=available, **common)

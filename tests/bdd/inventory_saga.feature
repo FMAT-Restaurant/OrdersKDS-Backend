@@ -55,3 +55,10 @@ Feature: Inventory Saga and Stock Reservation
     When the kitchen attempts to mark the order ready via "PATCH /orders/{orderId}/ready"
     Then the system rejects the request with HTTP 409 Conflict
     And the order status remains "EXPIRED"
+
+  Scenario: Kitchen rejects out-of-stock dish on reserved order in Caducados grace window
+    Given a reserved order exists past 15-minute TTL within the 10-minute Caducados grace window
+    When the chef rejects the tacos with availableQuantity 0 via "PATCH /orders/{orderId}/items/{itemId}/kitchen-reject"
+    Then the order status becomes "REJECTED"
+    And the outbox stages "ordenes.platillo.rechazado_cocina"
+    And the staged rejection event includes plateId and sourceId

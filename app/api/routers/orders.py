@@ -16,10 +16,11 @@ import logging
 from collections.abc import Sequence
 from decimal import Decimal
 from typing import Annotated
-from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, Path, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.api.dependencies.auth import AuthContext, require_access
 from app.api.schemas.errors import ErrorResponse
@@ -27,6 +28,7 @@ from app.api.schemas.order import (
     CancelOrderRequest,
     CreateOrderRequest,
     OrderItemInput,
+    OrderItemResponse,
     OrderResponse,
     RedoItemRequest,
     TransferOrderRequest,
@@ -53,8 +55,10 @@ from app.domain.errors import (
     InvalidStateTransitionError,
     NoteRequiredError,
     OrderNotFoundError,
+    VersionConflictError,
 )
 from app.domain.order_status import ItemStatus, OrderStatus
+from app.domain.roles import parse_actor_uuid
 from app.repositories.orders import OrderRepository
 from app.services.catalog import CatalogValidatorProtocol, get_catalog_validator
 from app.services.notifications import (
@@ -82,14 +86,6 @@ router = APIRouter(
 )
 
 OrderIdPath = Annotated[UUID, Path(alias="orderId", description="Public order UUID identifier.")]
-
-
-def _parse_actor_uuid(user_id_str: str) -> UUID:
-    """Parse string actor identifier into a valid UUID deterministically."""
-    try:
-        return UUID(user_id_str)
-    except ValueError:
-        return uuid5(NAMESPACE_URL, f"user:{user_id_str}")
 
 
 @router.get(
@@ -180,32 +176,25 @@ async def transfer_order(
 async def create_order(
     payload: CreateOrderRequest,
     auth: Annotated[AuthContext, Depends(require_access(ORDER_CREATE))],
-    session: Annotated[AsyncSession, Depends(get_session)],
+    order_service: Annotated[OrderService, Depends(get_order_service)],
 ) -> OrderResponse:
     """Create a new order draft for dining room or takeaway (RF-12, RF-13, RF-15).
 
     Args:
         payload: Table or takeaway configuration.
         auth: Authenticated caller context from JWT.
-        session: Active database session.
+        order_service: Order domain service instance.
 
     Returns:
         The newly created Order aggregate representation.
     """
-    actor_uuid = _parse_actor_uuid(auth.user_id)
-    order = Order(
-        public_id=uuid4(),
+    actor_uuid = parse_actor_uuid(auth.user_id)
+    order = await order_service.create_order(
         table_number=payload.table_number,
         is_takeaway=payload.is_takeaway,
         dining_session_id=payload.dining_session_id,
-        status=OrderStatus.CREATED,
-        created_by=actor_uuid,
-        responsible_waiter_id=actor_uuid,
+        actor_uuid=actor_uuid,
     )
-
-    repo = OrderRepository(session)
-    repo.save(order)
-    await session.commit()
 
     logger.info(
         "Created order %s (table=%s, takeaway=%s) by waiter %s",
@@ -214,7 +203,7 @@ async def create_order(
         order.is_takeaway,
         auth.user_id,
     )
-    return OrderResponse.from_model(order)
+    return OrderResponse.from_model(order, items=[])
 
 
 def _ensure_order_modifiable(order: Order) -> None:
@@ -361,7 +350,7 @@ async def update_order_items(
         DishUnavailableError: If a requested dish is inactive in catalog (422).
     """
     repo = OrderRepository(session)
-    order = await repo.get_by_public_id(order_id)
+    order = await repo.get_by_public_id(order_id, for_update=True)
     if order is None:
         raise OrderNotFoundError(f"Order with id={order_id} not found.")
 
@@ -379,7 +368,11 @@ async def update_order_items(
     order.recalculate_total()
 
     repo.save(order)
-    await session.commit()
+    try:
+        await session.commit()
+    except StaleDataError as exc:
+        await session.rollback()
+        raise VersionConflictError(f"Concurrent update lost for order {order_id}.") from exc
 
     await notify_order_changed(order, notifier=notifier)
 
@@ -390,7 +383,10 @@ async def update_order_items(
         auth.user_id,
         order.total_amount,
     )
-    return OrderResponse.from_model(order)
+    return OrderResponse.from_model(
+        order,
+        items=[OrderItemResponse.from_model(item) for item in new_items],
+    )
 
 
 @router.patch(
@@ -442,11 +438,12 @@ async def cancel_order(
 @router.patch(
     "/{orderId}/void",
     status_code=status.HTTP_200_OK,
-    summary="Administratively void order (with charge)",
+    summary="Administratively void order (with configurable charge)",
     description=(
         "Administratively voids an order in IN_PREPARATION status (RF-26, RF-27, ADR-0012). "
-        "Transitions the order to WASTED, and publishes both ordenes.comanda.mermada "
-        "and ordenes.cobro.solicitado with frozen prices in the same transaction. "
+        "When chargeCustomer is true (default), transitions the order to WASTED and publishes "
+        "ordenes.cobro.solicitado with frozen prices. When chargeCustomer is false, transitions "
+        "the order to terminal VOIDED status and publishes ordenes.comanda.mermada. "
         "Strictly restricted to admin role."
     ),
     responses={
@@ -665,7 +662,7 @@ async def confirm_order(
     """
     order = await order_service.confirm_order(
         order_id,
-        confirmed_by=_parse_actor_uuid(auth.user_id),
+        confirmed_by=parse_actor_uuid(auth.user_id),
     )
     return OrderResponse.from_model(order)
 

@@ -9,11 +9,13 @@ Feature: Order Complete Lifecycle
     When the waiter creates a table order draft via "POST /orders"
     Then the order status becomes "CREATED"
     And the created_by user matches the authenticated waiter
+    And the active shift has issued folio 1
     When the waiter adds 2 items via "PATCH /orders/{orderId}/items"
     Then the order contains 2 items
     When the waiter confirms the order via "POST /orders/{orderId}/confirm"
     Then the order confirmed_at timestamp is recorded
     And the stock reservation event "ordenes.orden.creada" is staged in the outbox
+    And the stock reservation event "ordenes.orden.creada" includes plateId and sourceId
     When inventory confirms stock reservation via "inventario.stock.reservado"
     Then the order status becomes "RESERVED"
     When the kitchen starts preparation via "PATCH /orders/{orderId}/start-preparation"
@@ -23,6 +25,7 @@ Feature: Order Complete Lifecycle
     Then item 1 status becomes "READY"
     And the order status remains "IN_PREPARATION"
     And a dish prepared event "ordenes.platillo.preparado" is staged in the outbox
+    And the outbox dish prepared events include plateId and sourceId
     When the kitchen marks item 2 as ready via "PATCH /orders/{orderId}/items/{itemId}/ready"
     Then item 2 status becomes "DELIVERED"
     And the order status becomes "DELIVERED"
