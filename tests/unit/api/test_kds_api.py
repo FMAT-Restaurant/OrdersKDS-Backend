@@ -1096,3 +1096,126 @@ def test_kitchen_reject_item_with_partial_available_quantity(
     assert reserved_by_item[str(rejected_target.public_id)] == 2
     assert reserved_by_item[str(other_item.public_id)] == 1
     assert fake_catalog.availabilities.get("dish-tacos") is None
+
+
+def test_kitchen_reject_multiple_items_updates_breakdown_outbox_and_catalog(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+    fake_catalog: FakeCatalogValidator,
+    spy_notifier: SpyOrderNotifier,
+) -> None:
+    """Rejecting multiple items records per-item availability, outbox events, and catalog lock."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=10,
+        status=OrderStatus.RESERVED,
+    )
+    first_item = OrderItem(
+        public_id=uuid4(),
+        dish_id="PLATE-BURGER-01",
+        offer_id="OFFER-BURGER-01",
+        name="Hamburguesa clásica",
+        quantity=2,
+        unit_price=Decimal("165.00"),
+        status=ItemStatus.PENDING,
+    )
+    second_item = OrderItem(
+        public_id=uuid4(),
+        dish_id="PLATE-QUES-01",
+        offer_id="OFFER-QUES-01",
+        name="Quesadilla Oaxaca",
+        quantity=2,
+        unit_price=Decimal("115.00"),
+        status=ItemStatus.PENDING,
+    )
+    third_item = OrderItem(
+        public_id=uuid4(),
+        dish_id="PLATE-CESAR-01",
+        offer_id="OFFER-CESAR-01",
+        name="Ensalada César",
+        quantity=1,
+        unit_price=Decimal("135.00"),
+        status=ItemStatus.PENDING,
+    )
+    order.items.extend([first_item, second_item, third_item])
+    order.recalculate_total()
+    test_db[order.public_id] = order
+
+    resp = client.patch(
+        f"/orders/{order.public_id}/items/{second_item.public_id}/kitchen-reject",
+        headers=auth_headers("chef"),
+        json={
+            "reason": "Sin queso Oaxaca y solo media lechuga",
+            "availableQuantity": 1,
+            "items": [
+                {"itemId": str(second_item.public_id), "availableQuantity": 1},
+                {"itemId": str(third_item.public_id), "availableQuantity": 0},
+            ],
+        },
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "REJECTED"
+    details = data["rejectionDetails"]
+    rejected_by_id = {entry["itemId"]: entry for entry in details["rejectedItems"]}
+    assert set(rejected_by_id.keys()) == {str(second_item.public_id), str(third_item.public_id)}
+    assert rejected_by_id[str(second_item.public_id)]["requestedQuantity"] == 2
+    assert rejected_by_id[str(second_item.public_id)]["availableQuantity"] == 1
+    assert rejected_by_id[str(third_item.public_id)]["requestedQuantity"] == 1
+    assert rejected_by_id[str(third_item.public_id)]["availableQuantity"] == 0
+
+    reserved_by_id = {
+        entry["itemId"]: entry["reservedQuantity"] for entry in details["reservedItems"]
+    }
+    assert reserved_by_id == {
+        str(first_item.public_id): 2,
+        str(second_item.public_id): 1,
+    }
+
+    assert len(fake_session.outbox_rows) == 2
+    assert fake_catalog.availabilities.get("PLATE-BURGER-01") is None
+    assert fake_catalog.availabilities.get("PLATE-QUES-01") is None
+    assert fake_catalog.availabilities.get("PLATE-CESAR-01") is False
+    assert fake_catalog.availabilities.get("OFFER-CESAR-01") is False
+    assert len(spy_notifier.notified_items) == 2
+    assert len(spy_notifier.notified_orders) == 1
+
+
+def test_kitchen_reject_multiple_items_unknown_item_id_returns_404(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Passing an unknown itemId inside multi-item rejection payload returns 404."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=11,
+        status=OrderStatus.RESERVED,
+    )
+    existing_item = OrderItem(
+        public_id=uuid4(),
+        dish_id="PLATE-BURGER-01",
+        name="Hamburguesa clásica",
+        quantity=1,
+        unit_price=Decimal("165.00"),
+        status=ItemStatus.PENDING,
+    )
+    order.items.append(existing_item)
+    test_db[order.public_id] = order
+
+    resp = client.patch(
+        f"/orders/{order.public_id}/items/{existing_item.public_id}/kitchen-reject",
+        headers=auth_headers("chef"),
+        json={
+            "reason": "Stock insuficiente",
+            "items": [
+                {"itemId": str(uuid4()), "availableQuantity": 0},
+            ],
+        },
+    )
+
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == ErrorCode.ORDER_NOT_FOUND

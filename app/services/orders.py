@@ -7,6 +7,7 @@ Satisfies: RF-09, RF-10, RF-11, RF-16, RF-18, RF-24, RF-25, RF-26, RF-27, RNF-01
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated
@@ -17,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.exc import StaleDataError
 
 from app.api.dependencies.auth import AuthContext
+from app.api.schemas.order import KitchenRejectItemInput
 from app.db.models import Order, OrderItem
 from app.db.session import get_session
 from app.domain.access import (
@@ -406,6 +408,33 @@ class OrderService:
         await notify_order_changed(order, notifier=self._notifier)
         return order
 
+    async def _stage_kitchen_rejections(
+        self,
+        order: Order,
+        targets: Sequence[tuple[OrderItem, int, str]],
+    ) -> None:
+        """Disable unavailable catalog entries (qty 0) and stage outbox rejection events."""
+        for target_item, effective_available, item_reason in targets:
+            dish_id = target_item.dish_id or str(target_item.public_id)
+            offer_id = getattr(target_item, "offer_id", None) or dish_id
+            if self._catalog_repo is not None and effective_available == 0:
+                await self._catalog_repo.set_availability(dish_id, False)
+                if offer_id != dish_id:
+                    await self._catalog_repo.set_availability(offer_id, False)
+
+            event = KitchenDishRejectedEvent.for_item(
+                order_id=order.public_id,
+                item_id=target_item.public_id,
+                offer_id=offer_id,
+                plate_id=dish_id,
+                source_id=dish_id,
+                quantity=target_item.quantity,
+                reason=item_reason,
+            )
+            payload = event.model_dump(mode="json", by_alias=True)
+            validate_event_payload(event.event_name, payload)
+            self._outbox.add(event)
+
     async def kitchen_reject_item(
         self,
         order_id: UUID,
@@ -413,12 +442,13 @@ class OrderService:
         auth: AuthContext,
         reason: str = "Insumo físico insuficiente en cocina",
         available_quantity: int = 0,
+        rejected_items: Sequence[KitchenRejectItemInput] | None = None,
     ) -> Order:
-        """Kitchen rejects an item from RESERVED order due to lack of physical stock.
+        """Kitchen rejects one or more items from a RESERVED order due to lack of stock.
 
         Updates local Redis catalog availability (available: false when 0 units remain),
-        publishes KitchenDishRejectedEvent to Inventory/Menu, and transitions order to REJECTED
-        with partial/zero availableQuantity so the waiter can edit and re-confirm the order.
+        stages KitchenDishRejectedEvent(s) for Inventory/Menu, and transitions order to REJECTED
+        with per-item availableQuantity breakdown so the waiter can adjust and re-confirm.
         """
         self._verify_policy(
             auth,
@@ -432,59 +462,38 @@ class OrderService:
         if order.status not in (OrderStatus.RESERVED, OrderStatus.DELIVERED):
             raise InvalidStateTransitionError(order.status, OrderStatus.REJECTED)
 
-        target_item = next((i for i in order.items if i.public_id == item_id), None)
-        if target_item is None:
-            raise OrderNotFoundError(f"Item with id={item_id} not found in order {order_id}.")
-
-        if order.status == OrderStatus.DELIVERED and target_item.status != ItemStatus.PENDING:
-            raise InvalidStateTransitionError(target_item.status, ItemStatus.CANCELLED)
-
-        dish_id = target_item.dish_id or str(target_item.public_id)
-        offer_id = getattr(target_item, "offer_id", None) or dish_id
-        max_partial = max(0, target_item.quantity - 1)
-        effective_available = max(0, min(available_quantity, max_partial))
-
-        # 1. Update local Redis catalog to block new additions when zero physical units remain
-        if self._catalog_repo is not None and effective_available == 0:
-            await self._catalog_repo.set_availability(dish_id, False)
-            if offer_id != dish_id:
-                await self._catalog_repo.set_availability(offer_id, False)
-
-        # 2. Stage KitchenDishRejectedEvent into Outbox for Inventory and Menu
-        event = KitchenDishRejectedEvent.for_item(
-            order_id=order.public_id,
-            item_id=target_item.public_id,
-            offer_id=offer_id,
-            plate_id=dish_id,
-            source_id=dish_id,
-            quantity=target_item.quantity,
-            reason=reason,
+        targets = self._resolve_kitchen_reject_targets(
+            order,
+            primary_item_id=item_id,
+            default_reason=reason,
+            default_available=available_quantity,
+            rejected_items=rejected_items,
         )
-        payload = event.model_dump(mode="json", by_alias=True)
-        validate_event_payload(event.event_name, payload)
-        self._outbox.add(event)
+        primary_item = targets[0][0]
+        if order.status == OrderStatus.DELIVERED and primary_item.status != ItemStatus.PENDING:
+            raise InvalidStateTransitionError(primary_item.status, ItemStatus.CANCELLED)
 
-        # 3. Transition handling (RESERVED -> REJECTED; DELIVERED -> cancel item or VOIDED)
+        await self._stage_kitchen_rejections(order, targets)
+
         if order.status == OrderStatus.RESERVED:
-            rejection_details = self._build_kitchen_rejection_details(
-                order=order,
-                target_item=target_item,
-                offer_id=offer_id,
-                dish_id=dish_id,
-                reason=reason,
-                effective_available=effective_available,
+            order.mark_rejected(
+                details=self._build_kitchen_rejection_details(
+                    order=order,
+                    rejected_targets=targets,
+                    default_reason=reason,
+                )
             )
-            order.mark_rejected(details=rejection_details)
         else:
-            target_item.mark_cancelled()
+            primary_item.mark_cancelled()
             order.recalculate_total()
-            if not _has_other_active_items(order.items, target_item.public_id):
+            if not _has_other_active_items(order.items, primary_item.public_id):
                 order.mark_voided()
 
         self._orders.save(order)
         await self._commit_or_raise_conflict(order_id)
 
-        await notify_item_changed(order, target_item, notifier=self._notifier)
+        for target_item, _, _ in targets:
+            await notify_item_changed(order, target_item, notifier=self._notifier)
         await notify_order_changed(order, notifier=self._notifier)
         return order
 
@@ -887,60 +896,110 @@ class OrderService:
         if getattr(item, "_has_pre_redo_notes", False):
             item.restore_notes_after_redo()
 
+    @staticmethod
+    def _find_order_item(order: Order, target_id: UUID) -> OrderItem:
+        item = next((i for i in order.items if i.public_id == target_id), None)
+        if item is None:
+            raise OrderNotFoundError(
+                f"Item with id={target_id} not found in order {order.public_id}."
+            )
+        return item
+
+    @staticmethod
+    def _clamp_available_quantity(item: OrderItem, raw_available: int) -> int:
+        return max(0, min(raw_available, max(0, item.quantity - 1)))
+
+    def _resolve_kitchen_reject_targets(
+        self,
+        order: Order,
+        *,
+        primary_item_id: UUID,
+        default_reason: str,
+        default_available: int,
+        rejected_items: Sequence[KitchenRejectItemInput] | None,
+    ) -> list[tuple[OrderItem, int, str]]:
+        if not rejected_items or order.status == OrderStatus.DELIVERED:
+            target = self._find_order_item(order, primary_item_id)
+            return [
+                (target, self._clamp_available_quantity(target, default_available), default_reason)
+            ]
+
+        resolved: dict[UUID, tuple[OrderItem, int, str]] = {}
+        for entry in rejected_items:
+            target = self._find_order_item(order, entry.item_id)
+            resolved[target.public_id] = (
+                target,
+                self._clamp_available_quantity(target, entry.available_quantity),
+                entry.reason or default_reason,
+            )
+        return list(resolved.values())
+
+    @staticmethod
+    def _build_reserved_entry(
+        item: OrderItem,
+        dish_id: str,
+        offer_id: str,
+        reserved_quantity: int,
+    ) -> dict[str, object]:
+        return {
+            "itemId": str(item.public_id),
+            "offerId": offer_id,
+            "dishId": dish_id,
+            "name": item.name,
+            "reservedQuantity": reserved_quantity,
+        }
+
     def _build_kitchen_rejection_details(
         self,
         *,
         order: Order,
-        target_item: OrderItem,
-        offer_id: str,
-        dish_id: str,
-        reason: str,
-        effective_available: int,
+        rejected_targets: Sequence[tuple[OrderItem, int, str]],
+        default_reason: str,
     ) -> dict[str, object]:
-        """Build structured rejectionDetails payload including partial availableQuantity."""
-        reserved_items: list[dict[str, object]] = []
-        if effective_available > 0:
-            reserved_items.append(
-                {
-                    "itemId": str(target_item.public_id),
-                    "offerId": offer_id,
-                    "dishId": dish_id,
-                    "name": target_item.name,
-                    "reservedQuantity": effective_available,
-                }
-            )
+        """Build structured rejectionDetails payload including multi-item availability."""
+        rejected_by_id = {
+            target.public_id: (effective_available, item_reason)
+            for target, effective_available, item_reason in rejected_targets
+        }
+        rejected_entries: list[dict[str, object]] = []
+        reserved_entries: list[dict[str, object]] = []
+
         for item in order.items:
-            if item.public_id == target_item.public_id or item.status == ItemStatus.CANCELLED:
+            if item.status == ItemStatus.CANCELLED:
                 continue
-            item_dish = item.dish_id or str(item.public_id)
-            item_offer = getattr(item, "offer_id", None) or item_dish
-            reserved_items.append(
+            dish_id = item.dish_id or str(item.public_id)
+            offer_id = getattr(item, "offer_id", None) or dish_id
+            rejected_info = rejected_by_id.get(item.public_id)
+            if rejected_info is None:
+                reserved_entries.append(
+                    self._build_reserved_entry(item, dish_id, offer_id, item.quantity)
+                )
+                continue
+            effective_available, item_reason = rejected_info
+            rejected_entries.append(
                 {
                     "itemId": str(item.public_id),
-                    "offerId": item_offer,
-                    "dishId": item_dish,
-                    "name": item.name,
-                    "reservedQuantity": item.quantity,
-                }
-            )
-        details: dict[str, object] = {
-            "source": "kitchen",
-            "reason": reason,
-            "rejectedItems": [
-                {
-                    "itemId": str(target_item.public_id),
                     "offerId": offer_id,
                     "dishId": dish_id,
                     "sourceId": dish_id,
-                    "name": target_item.name,
-                    "requestedQuantity": target_item.quantity,
+                    "name": item.name,
+                    "requestedQuantity": item.quantity,
                     "availableQuantity": effective_available,
-                    "reason": reason,
+                    "reason": item_reason,
                 }
-            ],
+            )
+            if effective_available > 0:
+                reserved_entries.append(
+                    self._build_reserved_entry(item, dish_id, offer_id, effective_available)
+                )
+
+        details: dict[str, object] = {
+            "source": "kitchen",
+            "reason": default_reason,
+            "rejectedItems": rejected_entries,
         }
-        if reserved_items:
-            details["reservedItems"] = reserved_items
+        if reserved_entries:
+            details["reservedItems"] = reserved_entries
         return details
 
 

@@ -42,8 +42,33 @@ class RedoItemRequest(BaseModel):
     )
 
 
+class KitchenRejectItemInput(BaseModel):
+    """Per-item kitchen availability breakdown when rejecting an order."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    item_id: UUID = Field(
+        validation_alias=AliasChoices("itemId", "item_id"),
+        serialization_alias="itemId",
+        description="Identifier of the order item with physical stock shortage.",
+    )
+    available_quantity: int = Field(
+        default=0,
+        ge=0,
+        validation_alias=AliasChoices("availableQuantity", "available_quantity"),
+        serialization_alias="availableQuantity",
+        description="Physical units kitchen can still prepare out of requested quantity.",
+    )
+    reason: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=500,
+        description="Optional item-specific shortage reason.",
+    )
+
+
 class KitchenRejectRequest(BaseModel):
-    """Payload for kitchen rejecting an item due to physical lack of stock."""
+    """Payload for kitchen rejecting one or multiple items due to physical lack of stock."""
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
@@ -59,6 +84,11 @@ class KitchenRejectRequest(BaseModel):
         validation_alias=AliasChoices("availableQuantity", "available_quantity"),
         serialization_alias="availableQuantity",
         description="Physical units kitchen can still prepare out of requested quantity.",
+    )
+    items: list[KitchenRejectItemInput] | None = Field(
+        default=None,
+        min_length=1,
+        description="Optional multi-item shortage breakdown for multi-dish orders.",
     )
 
 
