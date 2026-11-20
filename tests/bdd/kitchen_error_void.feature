@@ -1,5 +1,5 @@
 # language: en
-@bdd @RF-28 @RF-29 @RF-30 @RF-31
+@bdd
 Feature: Kitchen Error Order Void (Voided without Charge)
   As a restaurant chef or administrator
   I want to void an order that failed during cooking
