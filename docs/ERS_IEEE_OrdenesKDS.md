@@ -5,8 +5,8 @@
 |---|---|
 | **Estándar de Referencia** | IEEE Std 830-1998 / ISO/IEC/IEEE 29148:2018 |
 | **Sistema** | Módulo de Gestión de Órdenes y Pantalla de Cocina (Orders & KDS) |
-| **Versión** | 5.0 (Línea base verificada de integración) |
-| **Fecha** | 18 de noviembre de 2026 |
+| **Versión** | 5.1 (Línea base verificada y consolidada de integración) |
+| **Fecha** | 19 de noviembre de 2026 |
 | **Ámbito** | Operación integral de comandas de salón/para llevar, coordinación con cocina, saga de reservas y ciclo de liquidación |
 
 ---
@@ -34,21 +34,21 @@ Quedan fuera del alcance del producto la gestión directa de existencias de alma
 | **Platillo / Renglón de Comanda** | Unidad individual de producto solicitado dentro de una comanda, con cantidad, precio congelado, modificadores e instrucciones especiales. |
 | **KDS** (*Kitchen Display System*) | Pantalla operativa destinada al personal de cocina para visualizar, priorizar, iniciar y despachar comandas y platillos en tiempo real. |
 | **Saga de Reserva** | Flujo distribuido de coordinación entre la confirmación de una comanda y la respuesta de reserva o rechazo emitida por el sistema de Inventario. |
-| **TTL de Reserva en Cocina** | Tiempo máximo estándar de vigencia operativa (15 minutos) durante el cual una comanda reservada permanece vigente para iniciar preparación antes de considerarse caducada en cocina. |
+| **TTL de Reserva en Cocina** | Tiempo máximo estándar de vigencia operativa (15 minutos, más 10 minutos de ventana de gracia visual) durante el cual una comanda en estado Reservada permanece habilitada para iniciar preparación en el KDS antes de bloquear su cocción y trasladarse a la vista de Caducados para su rechazo o cancelación. |
 | **Rehechura** (*Redo*) | Devolución formal a cocina de un platillo ya entregado al comensal para que vuelva a elaborarse debido a una inconformidad o incidente posterior a la entrega. |
-| **Merma Administrativa** | Anulación de una comanda en preparación ordenada por un administrador debido a causas ajenas a la responsabilidad de cocina. |
-| **Anulación por Error de Cocina** | Cancelación total e inmediata de una comanda en preparación ocasionada por un fallo imputable a cocina, sin cargo al comensal. |
-| **Folio Legible** | Número corto asignado a la comanda para facilitar su identificación visual por meseros y cocineros en la operación diaria. |
+| **Merma Administrativa** | Anulación de una comanda en preparación ordenada por un administrador por causas ajenas a cocina: cuando incluye cargo al comensal (`chargeCustomer = true`), transiciona a estado Mermada en espera de liquidación; cuando se exime de cargo (`chargeCustomer = false`), transiciona directamente al estado terminal Anulada registrando la pérdida en Inventario. |
+| **Anulación por Error de Cocina** | Cancelación total e inmediata de una comanda en preparación ocasionada por un fallo imputable a cocina, sin cargo al comensal, que transiciona al estado terminal Anulada. |
+| **Folio Legible** | Número corto secuencial por turno asignado a la comanda para facilitar su identificación visual por meseros y cocineros en la operación diaria. |
 | **RF / RNF / RC** | Requisito Funcional / Requisito No Funcional / Requisito de Atributo de Calidad. |
 
 ### 1.4 Referencias Normativas
 * IEEE Std 830-1998 — *IEEE Recommended Practice for Software Requirements Specifications*.
 * ISO/IEC/IEEE 29148:2018 — *Systems and software engineering — Life cycle processes — Requirements engineering*.
-* ISO/IEC 25010:2011 — *Systems and software Quality Requirements and Evaluation (SQuaRE)*.
+* ISO/IEC 25010:2023 — *Systems and software engineering — Systems and software Quality Requirements and Evaluation (SQuaRE) — Product quality model*.
 * W3C WCAG 2.1 — *Web Content Accessibility Guidelines* (Nivel AA).
 
 ### 1.5 Visión General del Documento
-La **Sección 2** describe la perspectiva del sistema en el ecosistema del restaurante, las clases de actores, el modelo de estados del dominio y las restricciones generales. Las **Secciones 3, 4 y 5** especifican de forma atómica y estandarizada los Requisitos Funcionales (`RF`), Requisitos No Funcionales (`RNF`) y Requisitos de Calidad (`RC`), respectivamente. La **Sección 6** presenta la matriz de trazabilidad por módulo y método de verificación.
+La **Sección 2** describe la perspectiva del sistema en el ecosistema del restaurante, las clases de actores, el modelo de estados del dominio, las restricciones generales y los contratos de interfaces externas. Las **Secciones 3, 4 y 5** especifican de forma atómica y estandarizada los Requisitos Funcionales (`RF`), Requisitos No Funcionales (`RNF`) y Requisitos de Calidad (`RC`), respectivamente. La **Sección 6** presenta la matriz de trazabilidad individualizada (1 a 1) por requisito, actor, prioridad y método de verificación.
 
 ---
 
@@ -59,7 +59,7 @@ El Sistema de Órdenes y Pantalla de Cocina opera como un componente autónomo d
 * **Sistema de Autenticación y Acceso:** Provee identidad verificada, roles y permisos granulares de los operadores.
 * **Sistema de Sala y Mesas:** Informa la apertura de sesiones de consumo en mesa y el mesero responsable asignado.
 * **Sistema de Menú y Catálogo:** Provee los platillos comerciales, recetas vinculadas, precios vigentes, estaciones culinarias, tiempos estimados de preparación y estado de disponibilidad comercial.
-* **Sistema de Inventario:** Recibe solicitudes de reserva de insumos, confirma o rechaza suficiencia de stock, ejecuta descuentos definitivos al iniciar preparación o despachar platillos, libera reservas canceladas/expiradas y registra pérdidas por mermas.
+* **Sistema de Inventario:** Recibe solicitudes de reserva de insumos, confirma o rechaza suficiencia de stock, ejecuta el descuento definitivo de la reserva al iniciar preparación y el descuento adicional extraordinario al despachar platillos rehechos, libera reservas canceladas/expiradas o rechazadas en cocina y registra pérdidas por mermas.
 * **Sistema de Pagos y Caja:** Recibe solicitudes de cuenta o cobros administrativos y notifica la liquidación financiera completada.
 
 ### 2.2 Resumen de Capacidades del Sistema
@@ -86,22 +86,22 @@ El Sistema de Órdenes y Pantalla de Cocina opera como un componente autónomo d
 
 | Estado | Naturaleza | Significado en el Dominio |
 |---|---|---|
-| **Creada** | Activo / Borrador o Esperando Stock | Comanda recién abierta en edición o confirmada mientras aguarda respuesta de reserva de inventario. |
-| **Reservada** | Activo en Espera de Cocina | Comanda cuyos insumos han sido pre-reservados por inventario y que aguarda inicio de elaboración en cocina. |
-| **En Preparación** | Activo en Cocina | Comanda cuya elaboración física ha sido iniciada en cocina y cuyos insumos reservados han pasado a consumo definitivo. |
-| **Entregada** | Activo Pendiente de Pago | Comanda con todos sus platillos activos terminados por cocina y lista para consumo o cobro (admite rehechura de platillos). |
-| **Rechazada** | Recuperable | Comanda devuelta al mesero por insuficiencia de insumos en inventario o falta física reportada por cocina; admite ajuste y reconfirmación o cancelación. |
-| **Mermada** | En Espera de Liquidación | Comanda en preparación anulada por decisión administrativa (permanece cobrable hasta liquidación cuando procede cargo). |
-| **Pagada** | Terminal | Comanda liquidada financieramente tras confirmación del sistema de pagos; desaparece de las colas activas. |
-| **Cancelada** | Terminal | Comanda anulada antes de iniciar preparación sin cargo alguno al comensal. |
-| **Anulada** | Terminal | Comanda en preparación cancelada integralmente por error imputable a cocina, exenta de cobro al comensal. |
-| **Expirada** | Terminal | Comanda confirmada que superó el tiempo límite máximo esperando respuesta de reserva del sistema de inventario. |
+| **Creada** (`CREATED`) | Activo / Borrador o Esperando Stock | Comanda recién abierta en edición o confirmada mientras aguarda respuesta de reserva de inventario (máximo 60 s). |
+| **Reservada** (`RESERVED`) | Activo en Espera de Cocina | Comanda cuyos insumos han sido pre-reservados por inventario y que aguarda inicio de elaboración en cocina (sujeta a vigencia operativa en KDS de 15 min más 10 min de ventana de gracia antes de pasar a la vista *Caducados* para su rechazo o cancelación). |
+| **En Preparación** (`IN_PREPARATION`) | Activo en Cocina | Comanda cuya elaboración física ha sido iniciada en cocina y cuyos insumos pre-reservados han pasado por única vez a consumo definitivo en inventario. |
+| **Entregada** (`DELIVERED`) | Activo Pendiente de Pago | Comanda con todos sus platillos activos terminados por cocina y lista para consumo o solicitud de cuenta (admite rehechura de platillos entregados; la solicitud de cuenta requiere que ningún platillo esté en rehechura pendiente). |
+| **Rechazada** (`REJECTED`) | Recuperable | Comanda devuelta al mesero por insuficiencia de insumos en inventario o falta física reportada por cocina; admite ajuste y reconfirmación o cancelación. |
+| **Mermada** (`WASTED`) | En Espera de Liquidación | Comanda en preparación anulada por decisión administrativa **con cargo al comensal** (`chargeCustomer = true`); permanece pendiente de liquidación hasta confirmación de Pagos (`Mermada → Pagada`). |
+| **Pagada** (`PAID`) | Terminal | Comanda liquidada financieramente tras confirmación del sistema de pagos; desaparece de las colas activas. |
+| **Cancelada** (`CANCELLED`) | Terminal | Comanda anulada antes de iniciar preparación sin cargo alguno al comensal, liberando cualquier pre-reserva en inventario. |
+| **Anulada** (`VOIDED`) | Terminal | Comanda cancelada integralmente **sin cargo al comensal**, ya sea en preparación por error imputable a cocina con nota justificativa (`RF-39`), por anulación administrativa con exención de cargo (`chargeCustomer = false`, `RF-38`), o en estado Entregada cuando cocina rechaza por falta de insumos el único platillo activo restante que se encontraba en rehechura (`RF-27`). |
+| **Expirada** (`EXPIRED`) | Terminal | Comanda confirmada en estado Creada que superó el tiempo límite máximo de 60 segundos esperando respuesta de reserva del sistema de inventario. |
 
 #### 2.4.2 Estados de cada Platillo dentro de la Comanda
-* **Pendiente:** Platillo aún no elaborado por cocina (estado inicial o asignado al solicitar rehechura).
-* **Listo:** Platillo marcado como terminado individualmente en cocina mientras la comanda continúa en preparación.
-* **Entregado:** Platillo completado cuyo estado acompaña a la entrega total de la comanda.
-* **Cancelado:** Platillo suprimido antes de iniciar cocción y excluido del monto total y de la preparación.
+* **Pendiente** (`PENDING`): Platillo aún no elaborado por cocina (estado inicial o asignado al solicitar rehechura).
+* **Listo** (`READY`): Platillo marcado como terminado individualmente en cocina mientras la comanda continúa en preparación.
+* **Entregado** (`DELIVERED`): Platillo completado cuyo estado acompaña a la entrega total de la comanda o la conclusión de su rehechura.
+* **Cancelado** (`CANCELLED`): Platillo suprimido individualmente antes de iniciar cocción (siempre que permanezca al menos otro platillo activo en la comanda) o durante una rehechura rechazada/cancelada, excluido del monto total y de la preparación.
 
 #### 2.4.3 Diagrama Conceptual de Transiciones de la Comanda
 
@@ -113,14 +113,15 @@ stateDiagram-v2
     Creada --> Cancelada: Cancelación por Mesero o Admin
     Creada --> Expirada: Vencimiento de espera de reserva (60 s)
     Reservada --> EnPreparacion: Cocina inicia preparación
-    Reservada --> Rechazada: Falta física reportada por Cocina
+    Reservada --> Rechazada: Falta física o rechazo en Caducados por Cocina
     Reservada --> Cancelada: Cancelación por Mesero o Admin
     Rechazada --> Creada: Mesero modifica los platillos
     Rechazada --> Cancelada: Cancelación por Mesero o Admin
     EnPreparacion --> Entregada: Todos los platillos activos listos
-    EnPreparacion --> Mermada: Anulación administrativa (solo Admin)
-    EnPreparacion --> Anulada: Error de cocina con nota (Chef o Admin)
+    EnPreparacion --> Mermada: Anulación admin con cargo (Admin, chargeCustomer=true)
+    EnPreparacion --> Anulada: Error de cocina (Chef/Admin) o Anulación admin sin cargo (Admin, chargeCustomer=false)
     Entregada --> Pagada: Pago confirmado
+    Entregada --> Anulada: Rechazo en cocina del único platillo activo en rehechura
     Mermada --> Pagada: Pago confirmado
     Pagada --> [*]
     Cancelada --> [*]
@@ -139,6 +140,51 @@ stateDiagram-v2
 * El sistema de Menú mantiene actualizados los platillos, precios unitarios, asignaciones de estación culinaria e indicadores de disponibilidad comercial.
 * El sistema de Inventario procesa de forma atómica las solicitudes de reserva de insumos y responde dentro del umbral operativo configurado.
 * El sistema de Pagos procesa las cuentas solicitadas y notifica la liquidación exitosa de cada comanda.
+
+### 2.7 Interfaces Externas y Contratos de Integración
+
+#### 2.7.1 Eventos de Dominio Publicados y Consumidos (Mensajería Asíncrona)
+
+| Dirección | Clave de Enrutamiento Principal | Alias / Enrutamiento Dual | Sistema Contraparte | Propósito Contractual |
+|---|---|---|---|---|
+| **Publicado** | `ordenes.orden.creada` | `ordenes.order.created` | Inventario | Solicitar reserva atómica de insumos al confirmar una comanda (`RF-09`). |
+| **Publicado** | `ordenes.orden.en_preparacion` | `ordenes.order.served`, `ordenes.order.in_preparation` | Inventario | Notificar inicio de cocción para ejecutar el consumo definitivo único de la reserva (`RF-22`). |
+| **Publicado** | `ordenes.platillo.preparado` | `ordenes.dish.prepared` | Inventario / Auditoría | Notificar despacho individual de platillo terminado con indicador booleano `isRedo` (`RF-24`, `RF-31`). |
+| **Publicado** | `ordenes.platillo.rechazado_cocina` | `ordenes.dish.rejected` | Inventario / Menú | Notificar rechazo físico de platillo en cocina para liberar stock reservado y actualizar disponibilidad (`RF-27`). |
+| **Publicado** | `ordenes.orden.cancelada` | `ordenes.order.cancelled` | Inventario | Liberar pre-reservas de insumos al cancelar una comanda previa a preparación (`RF-36`). |
+| **Publicado** | `ordenes.orden.expirada` | `ordenes.order.expired`, `ordenes.order.cancelled` | Inventario | Compensar y liberar bloqueos de stock tras vencimiento de 60 s de la saga de reserva (`RF-12`). |
+| **Publicado** | `ordenes.comanda.mermada` | `ordenes.order.wasted` | Inventario | Registrar pérdida de insumos sin cargo al cliente por error de cocina (`KITCHEN_ERROR`) o anulación administrativa sin cobro (`ADMINISTRATIVE`) (`RF-38`, `RF-40`). |
+| **Publicado** | `ordenes.cobro.solicitado` | — | Pagos y Caja | Solicitar cobro con precios congelados de una comanda anulada administrativamente con cargo (`WASTED`, `RF-38`). |
+| **Publicado** | `ordenes.cuenta.solicitada` | — | Pagos y Caja | Emitir solicitud de cuenta con precios congelados y sesión asociada para una comanda entregada (`DELIVERED`, `RF-41`). |
+| **Consumido** | `inventario.stock.reservado` | `inventory.reservation.confirmed` | Inventario | Confirmar apartado de insumos y transicionar la comanda de Creada a Reservada (`RF-10`). |
+| **Consumido** | `inventario.stock.insuficiente` | `inventory.reservation.rejected` | Inventario | Notificar insuficiencia de stock con desglose de faltantes y transicionar a Rechazada (`RF-11`). |
+| **Consumido** | `inventory.recipe.availability-changed` | `inventory.recipe.not-available`, `inventory.source.availability.updated` | Inventario | Actualizar disponibilidad de recetas e insumos en la vista local del catálogo (`RF-43`). |
+| **Consumido** | `menu.catalogo.actualizado` | `menu.platillo.*`, `menu.oferta.*`, `menu.source.*`, `menu.offer.*` | Menú y Catálogo | Sincronizar precios, estaciones culinarias, tiempos estimados y disponibilidad comercial (`RF-43`). |
+| **Consumido** | `pagos.pago.completado` | — | Pagos y Caja | Confirmar liquidación financiera y cerrar la comanda en estado terminal Pagada (`RF-42`). |
+| **Consumido** | `sala.dining_session.iniciada` | — | Sala y Mesas | Abrir de forma idempotente la comanda inicial vinculada a una sesión de comensales y mesero (`RF-03`). |
+
+> **Nota sobre alias de compensación hacia Inventario:** Los eventos `ordenes.orden.cancelada` y `ordenes.orden.expirada` incluyen intencionalmente el alias de enrutamiento dual `ordenes.order.cancelled` (además de `ordenes.order.expired` en expiración) para que el sistema de Inventario dispare de forma uniforme la misma operación idempotente de liberación de stock pre-reservado en ambos escenarios.
+
+#### 2.7.2 Canales y Eventos en Tiempo Real (WebSockets)
+
+| Punto de Conexión | Roles Autorizados | Canales Soportados | Eventos Difundidos / Códigos de Control |
+|---|---|---|---|
+| `/ws/kds` | Cocinero, Jefe de Cocina, Administrador | `kds:all`, `kds:station:{station}` (normalizado, máx. 50 caracteres) | Eventos `order.status_changed` e `item.status_changed` con `version` monotónica; cierre `4401` (`UNAUTHENTICATED`), cierre `4403` (`FORBIDDEN_ROLE`), error `{"error": "FORBIDDEN_CHANNEL"}`. |
+| `/ws/waiter` | Mesero, Administrador | `floor` (automático), `user:{userId}` (automático desde identidad autenticada) | Eventos `order.status_changed` e `item.status_changed` con `version` monotónica y `rejectionDetails`; cierre `4401` (`UNAUTHENTICATED`), cierre `4403` (`FORBIDDEN_ROLE`), error `{"error": "FORBIDDEN_CHANNEL"}`. |
+
+#### 2.7.3 Catálogo Estándar de Códigos de Error de Dominio (`ErrorResponse`)
+
+| Código Estable (`error.code`) | Estado HTTP | Condición de Disparo en el Dominio |
+|---|---|---|
+| `VALIDATION_ERROR` | `422 Unprocessable Content` | Esquema inválido, límites cuantitativos excedidos o campos adicionales no permitidos (`extra="forbid"`). |
+| `NOTE_REQUIRED` | `422 Unprocessable Content` | Ausencia o cadena en blanco en nota obligatoria de rehechura (`RF-29`) o anulación por error de cocina (`RF-39`). |
+| `DISH_UNAVAILABLE` | `422 Unprocessable Content` | Intento de agregar o actualizar un platillo marcado como no disponible en la vista local del catálogo (`RF-06`). |
+| `UNAUTHENTICATED` | `401 Unauthorized` | Credencial ausente, malformada, sin algoritmo criptográfico válido o expirada (`RNF-08`). |
+| `FORBIDDEN_ROLE` | `403 Forbidden` | Usuario autenticado sin el permiso granular ni el rol de respaldo requerido para la operación (`RNF-08`). |
+| `ORDER_NOT_FOUND` | `404 Not Found` | Identificador público UUID de comanda o de renglón de platillo inexistente. |
+| `INVALID_STATE_TRANSITION` | `409 Conflict` | Operación incompatible con el estado actual de la comanda o platillo (incluyendo cancelar el último ítem activo o pedir cuenta con rehechura pendiente). |
+| `VERSION_CONFLICT` | `409 Conflict` | Conflicto de concurrencia optimista por versión obsoleta en cuerpo o cabecera `If-Match` (`RNF-06`). |
+| `INTERNAL_ERROR` | `500 Internal Server Error` | Falla interna controlada con respuesta saneada sin exposición de trazas ni credenciales (`RNF-09`). |
 
 ---
 
@@ -195,10 +241,10 @@ Todos los requisitos funcionales del presente documento utilizan una plantilla e
 | **Categoría** | Apertura y Captura de Comandas |
 | **Prioridad** | Esencial |
 | **Actor / Fuente** | Mesero / Administrador |
-| **Especificación** | El sistema deberá permitir agregar o reemplazar la lista de platillos de una comanda mientras esta permanezca en estado Creada sin haber sido confirmada previamente. |
-| **Precondiciones** | La comanda existe en estado Creada sin confirmación pendiente; el usuario posee permiso de actualización de comandas y envía al menos un platillo con cantidad entera positiva. |
+| **Especificación** | El sistema deberá permitir agregar o reemplazar la lista de platillos de una comanda mientras esta permanezca en estado Creada sin haber sido confirmada previamente, exigiendo un mínimo de 1 renglón por actualización (sin límite superior estático de renglones; en la interfaz de mesero se ocultará la opción de eliminar individualmente un renglón cuando sea el único presente en el borrador), cantidad entera positiva mayor o igual a 1 por platillo (acotada dinámicamente por la validación de stock en Inventario), nombre de platillo de 1 a 200 caracteres, identificadores de catálogo de 1 a 100 caracteres y precio unitario monetario no negativo con precisión de 2 decimales (hasta 10 dígitos enteros y 2 decimales, mayor o igual a `0.00`). |
+| **Precondiciones** | La comanda existe en estado Creada sin confirmación pendiente; el usuario posee permiso de actualización de comandas y envía una lista con al menos 1 platillo que cumple los límites cuantitativos de cantidad (`>= 1`), longitud de nombre (`1..200`) e identificador de catálogo (`1..100`). |
 | **Postcondiciones** | Los renglones de la comanda quedan actualizados con todos los platillos enviados, cada uno con identificador único y estado inicial Pendiente. |
-| **Criterio de Verificación** | Enviar una lista de platillos a una comanda en borrador y verificar que sus renglones y cantidades reflejen exactamente la lista capturada. |
+| **Criterio de Verificación** | Aplicar análisis de valores límite enviando 0 renglones o cantidad 0 (verificando rechazo `422 VALIDATION_ERROR`) y enviando 1 o más platillos con cantidad `>= 1` y nombre entre 1 y 200 caracteres (verificando actualización exitosa). |
 
 #### `RF-05` — Registro de modificadores e instrucciones de preparación por platillo
 | Atributo | Especificación |
@@ -208,10 +254,10 @@ Todos los requisitos funcionales del presente documento utilizan una plantilla e
 | **Categoría** | Apertura y Captura de Comandas |
 | **Prioridad** | Esencial |
 | **Actor / Fuente** | Mesero / Administrador |
-| **Especificación** | El sistema deberá registrar y conservar para cada platillo de una comanda la cantidad solicitada, la lista de modificadores seleccionados y las notas o instrucciones especiales dirigidas a cocina. |
-| **Precondiciones** | La comanda se encuentra habilitada para captura o edición de platillos; las notas opcionales cumplen la longitud máxima permitida. |
-| **Postcondiciones** | Cada platillo conserva sus modificadores y nota especial asociados para consulta de mesero, cocina y facturación. |
-| **Criterio de Verificación** | Agregar un platillo con dos modificadores y una nota especial y comprobar que ambos atributos se preservan al consultar la comanda y en la vista de cocina. |
+| **Especificación** | El sistema deberá registrar y conservar para cada platillo de una comanda la cantidad solicitada, la lista de modificadores seleccionados y las notas o instrucciones especiales opcionales dirigidas a cocina con una longitud de 0 a 500 caracteres como máximo. |
+| **Precondiciones** | La comanda se encuentra habilitada para captura o edición de platillos; las notas opcionales tienen una longitud menor o igual a 500 caracteres. |
+| **Postcondiciones** | Cada platillo conserva sus modificadores y nota especial asociados para consulta de mesero, cocina y facturación; si la nota supera 500 caracteres, la solicitud se rechaza con `422 VALIDATION_ERROR`. |
+| **Criterio de Verificación** | Agregar un platillo con modificadores y una nota de 500 caracteres comprobando que se preserva en mesero y cocina, y verificar rechazo `422 VALIDATION_ERROR` al enviar una nota de 501 caracteres. |
 
 #### `RF-06` — Bloqueo preventivo de platillos no disponibles
 | Atributo | Especificación |
@@ -385,10 +431,10 @@ Todos los requisitos funcionales del presente documento utilizan una plantilla e
 | **Categoría** | Gestión de Cola y Visualización KDS |
 | **Prioridad** | Esencial |
 | **Actor / Fuente** | Cocinero / Jefe de Cocina / Administrador |
-| **Especificación** | El sistema deberá mostrar el tiempo transcurrido de preparación para cada comanda en cocina y reflejar niveles de urgencia mediante estados diferenciados de tiempo regular, advertencia y retraso crítico cuando se superen los umbrales operativos configurados. |
-| **Precondiciones** | La comanda está activa en la pantalla de cocina con una marca temporal de referencia válida. |
-| **Postcondiciones** | El operador distingue visual y textualmente qué comandas se encuentran en tiempo normal, próximas a retraso o en retraso crítico. |
-| **Criterio de Verificación** | Evaluar tarjetas con distintos tiempos transcurridos frente a los umbrales configurados y confirmar la transición visual y textual entre los niveles normal, advertencia y crítico. |
+| **Especificación** | El sistema deberá mostrar el tiempo transcurrido de preparación para cada comanda en cocina calculado a partir de su marca temporal de inicio de preparación (con respaldo a su marca temporal de reserva confirmada si aún no inicia cocción, sin utilizar la fecha de creación del borrador) y reflejar tres niveles de urgencia mediante estados visuales y textuales con umbrales configurables por entorno: **En tiempo** (`"En tiempo"`, verde) para tiempos menores al umbral de advertencia (valor por defecto `< 600` segundos / 10 minutos); **Advertencia** (`"Por atrasarse"`, ámbar) desde el umbral de advertencia hasta antes del umbral crítico (valor por defecto `>= 600` segundos y `< 900` segundos / 10 a 14:59 minutos); y **Retraso crítico** (`"Atrasada"`, rojo) al alcanzar o superar el umbral crítico (valor por defecto `>= 900` segundos / 15 minutos). |
+| **Precondiciones** | La comanda está activa en la pantalla de cocina con marca temporal de inicio de preparación o de reserva confirmada válida. |
+| **Postcondiciones** | El operador distingue visual y textualmente qué comandas se encuentran en estado `"En tiempo"`, `"Por atrasarse"` o `"Atrasada"`. |
+| **Criterio de Verificación** | Evaluar tarjetas con tiempos transcurridos de 599 s, 600 s y 900 s frente a los umbrales por defecto y confirmar la transición visual y textual entre `"En tiempo"`, `"Por atrasarse"` y `"Atrasada"`. |
 
 #### `RF-19` — Control de vigencia y ventana de gracia de órdenes reservadas en cocina
 | Atributo | Especificación |
@@ -398,10 +444,10 @@ Todos los requisitos funcionales del presente documento utilizan una plantilla e
 | **Categoría** | Gestión de Cola y Visualización KDS |
 | **Prioridad** | Esencial |
 | **Actor / Fuente** | Cocinero / Jefe de Cocina / Mesero |
-| **Especificación** | El sistema deberá considerar vencido el tiempo de espera de inicio de preparación tras 15 minutos desde la confirmación de reserva, bloqueando el inicio de cocción en cocina y manteniendo visible la alerta con cuenta regresiva de gracia durante 10 minutos adicionales antes de trasladar la comanda exclusivamente a la vista de Caducados. |
-| **Precondiciones** | Una comanda permanece en estado Reservada y han transcurrido 15 minutos o más desde su marca temporal de reserva. |
-| **Postcondiciones** | Entre los minutos 15 y 25 la comanda impide iniciar preparación desde la vista de Pendientes mostrando el tiempo restante de gracia; a partir del minuto 25 desaparece de Pendientes y se ubica únicamente en Caducados. |
-| **Criterio de Verificación** | Simular órdenes reservadas con 14, 16 y 26 minutos de antigüedad y verificar su estado habilitado, alerta en ventana de gracia y traslado definitivo a Caducados, respectivamente. |
+| **Especificación** | La interfaz de pantalla de cocina (KDS) deberá evaluar sobre toda comanda en estado de dominio Reservada (`RESERVED`) un tiempo límite operativo de 15 minutos (`900` segundos) medido desde su marca temporal de reserva confirmada: al cumplirse los 15 minutos, bloqueará en la interfaz KDS el control *"Iniciar preparación"* y mostrará una alerta con cuenta regresiva de gracia durante 10 minutos adicionales (`600` segundos); al cumplirse los 25 minutos totales (`1500` segundos), retirará la tarjeta de la vista de Pendientes ubicándola exclusivamente en la vista de Caducados (conservando su estado de dominio Reservada), donde cocina tendrá habilitada la acción *"Rechazar insumo"* (`RF-27`, que transiciona la comanda a Rechazada y emite `ordenes.platillo.rechazado_cocina` para liberar el stock reservado en Inventario) o el mesero/administrador podrá cancelarla (`RF-35` y `RF-36`, transicionándola a Cancelada y emitiendo `ordenes.orden.cancelada`). |
+| **Precondiciones** | Una comanda permanece en estado Reservada y han transcurrido 15 minutos o más desde su marca temporal de reserva confirmada. |
+| **Postcondiciones** | Entre los minutos 15 y 25 la tarjeta en KDS deshabilita el botón de inicio de preparación mostrando el conteo regresivo de gracia; a partir del minuto 25 permanece únicamente en la pestaña Caducados con el botón de rechazo habilitado para liberar formalmente la pre-reserva de Inventario sin retener stock indefinidamente. |
+| **Criterio de Verificación** | Simular en el KDS órdenes reservadas con 14, 16 y 26 minutos de antigüedad y verificar su estado habilitado, bloqueo del botón de inicio en ventana de gracia y traslado definitivo a Caducados con liberación de stock al ejecutar el rechazo o cancelación. |
 
 #### `RF-20` — Reaparición automática de comanda entregada ante solicitud de rehechura
 | Atributo | Especificación |
@@ -441,10 +487,10 @@ Todos los requisitos funcionales del presente documento utilizan una plantilla e
 | **Categoría** | Control de Preparación y Despacho en Cocina |
 | **Prioridad** | Esencial |
 | **Actor / Fuente** | Cocinero / Jefe de Cocina / Administrador |
-| **Especificación** | El sistema deberá permitir al personal de cocina iniciar la preparación de una comanda en estado Reservada, transicionándola a En Preparación, registrando la marca temporal única de inicio y notificando al sistema de Inventario los platillos activos para el consumo definitivo de los insumos apartados. |
-| **Precondiciones** | El usuario cuenta con permiso de inicio de preparación; la comanda existe en estado Reservada (si ya se encuentra en En Preparación, la operación responde de forma idempotente). |
-| **Postcondiciones** | La comanda adopta estado En Preparación con marca de inicio fijada, se emite el evento de inicio de preparación hacia Inventario y se actualiza la interfaz en tiempo real. |
-| **Criterio de Verificación** | Ejecutar el inicio de preparación sobre una comanda Reservada y confirmar la transición a En Preparación, el registro de su hora de inicio y la generación de la notificación para Inventario. |
+| **Especificación** | El sistema deberá permitir al personal de cocina iniciar la preparación de una comanda en estado Reservada, transicionándola a En Preparación, registrando la marca temporal única de inicio (`inPreparationAt`) y emitiendo el evento `ordenes.orden.en_preparacion` hacia el sistema de Inventario con los platillos activos consolidados para que Inventario ejecute por única vez el consumo definitivo (FEFO) de los insumos pre-reservados. |
+| **Precondiciones** | El usuario cuenta con permiso de inicio de preparación; la comanda existe en estado Reservada (si ya se encuentra en En Preparación, la operación responde de forma idempotente sin reemitir el evento de consumo). |
+| **Postcondiciones** | La comanda adopta estado En Preparación con marca de inicio fijada, se registra una única notificación `ordenes.orden.en_preparacion` que consume la pre-reserva inicial en Inventario, y se actualiza la interfaz en tiempo real. |
+| **Criterio de Verificación** | Ejecutar el inicio de preparación sobre una comanda Reservada y confirmar la transición a En Preparación, el registro de su hora de inicio y la emisión única de `ordenes.orden.en_preparacion` para Inventario. |
 
 #### `RF-23` — Marcado individual de platillo como Listo
 | Atributo | Especificación |
@@ -459,18 +505,18 @@ Todos los requisitos funcionales del presente documento utilizan una plantilla e
 | **Postcondiciones** | El platillo cambia de estado a Listo (o directamente a Entregado si corresponde a una rehechura dentro de una orden Entregada) y los operadores conectados reciben la actualización en tiempo real. |
 | **Criterio de Verificación** | Marcar un único platillo de una comanda con dos renglones y confirmar que solo ese platillo cambia a Listo mientras el otro permanece Pendiente. |
 
-#### `RF-24` — Notificación de consumo de insumos por platillo completado
+#### `RF-24` — Notificación de despacho operativo por platillo completado
 | Atributo | Especificación |
 |---|---|
 | **ID** | `RF-24` |
-| **Nombre** | Notificación de consumo de insumos por platillo completado |
+| **Nombre** | Notificación de despacho operativo por platillo completado |
 | **Categoría** | Control de Preparación y Despacho en Cocina |
 | **Prioridad** | Esencial |
 | **Actor / Fuente** | Sistema |
-| **Especificación** | El sistema deberá generar una notificación hacia el sistema de Inventario cada vez que un platillo Pendiente sea completado en cocina, indicando el platillo, la cantidad y si se trata o no de una rehechura, sin duplicar notificaciones si la operación se repite sobre un platillo ya completado. |
+| **Especificación** | El sistema deberá generar el evento `ordenes.platillo.preparado` cada vez que un platillo Pendiente sea completado en cocina, indicando el platillo, la cantidad y el indicador booleano de rehechura (`isRedo`), sin duplicar notificaciones si la operación se repite sobre un platillo ya completado; cuando `isRedo = false`, este evento notifica únicamente el avance operativo del platillo sin volver a descontar la reserva inicial ya consumida en `RF-22`, reservándose el descuento adicional extraordinario exclusivamente para rehechuras con `isRedo = true` (`RF-31`). |
 | **Precondiciones** | Un platillo transiciona desde Pendiente tras ser marcado como Listo (individualmente o por despacho total de comanda). |
-| **Postcondiciones** | Se registra atómicamente una notificación de platillo preparado con identificador único por emisión, cantidad correspondiente e indicador booleano de rehechura. |
-| **Criterio de Verificación** | Marcar dos veces seguidas un mismo platillo como Listo y comprobar que se genera exactamente una notificación de consumo. |
+| **Postcondiciones** | Se registra atómicamente una notificación `ordenes.platillo.preparado` con identificador único por emisión, cantidad correspondiente e indicador booleano `isRedo`, garantizando ausencia de doble descuento sobre la reserva inicial. |
+| **Criterio de Verificación** | Marcar dos veces seguidas un mismo platillo como Listo y comprobar que se genera exactamente una notificación `ordenes.platillo.preparado` con `isRedo = false` sin provocar doble descuento de la reserva inicial en Inventario. |
 
 #### `RF-25` — Entrega automática de comanda al completar todos los platillos activos
 | Atributo | Especificación |
@@ -506,10 +552,10 @@ Todos los requisitos funcionales del presente documento utilizan una plantilla e
 | **Categoría** | Control de Preparación y Despacho en Cocina |
 | **Prioridad** | Esencial |
 | **Actor / Fuente** | Cocinero / Jefe de Cocina / Administrador |
-| **Especificación** | El sistema deberá permitir a cocina rechazar un platillo de una comanda en estado Reservada (o un platillo pendiente de rehechura en estado Entregada) cuando exista falta física de insumos, indicando un motivo y opcionalmente la cantidad física aún disponible, notificando al mesero e inventarios y actualizando la disponibilidad local en caso de agotamiento total. |
-| **Precondiciones** | El usuario posee permiso de rechazo de platillo en cocina; la comanda está en Reservada o el platillo está Pendiente dentro de una comanda Entregada; la cantidad disponible reportada es no negativa. |
-| **Postcondiciones** | Si la comanda estaba Reservada, transiciona a Rechazada almacenando el desglose de ítem rechazado, cantidad disponible y restantes reservados; si estaba Entregada, el platillo pendiente se marca Cancelado. Cuando la disponibilidad reportada es cero, el platillo queda bloqueado como no disponible en la vista local del catálogo y se emite notificación de rechazo de platillo. |
-| **Criterio de Verificación** | Rechazar un platillo con cantidad disponible cero en una comanda Reservada y confirmar que la comanda cambia a Rechazada, el mesero es notificado y el platillo queda bloqueado en catálogo local. |
+| **Especificación** | El sistema deberá permitir a cocina rechazar un platillo de una comanda en estado Reservada (o un platillo pendiente de rehechura en estado Entregada) cuando exista falta física de insumos, indicando un motivo textual de 1 a 500 caracteres (con valor por defecto `"Insumo físico insuficiente en cocina"`) y opcionalmente la cantidad física aún disponible (`availableQuantity`, entero mayor o igual a 0; si se envía un valor negativo se rechaza con `422 VALIDATION_ERROR`, y si se envía un valor mayor o igual a la cantidad solicitada el servicio lo acota automáticamente a `max(0, cantidad solicitada - 1)`), notificando al mesero e Inventario mediante `ordenes.platillo.rechazado_cocina` y actualizando la disponibilidad local en caso de agotamiento total (`availableQuantity` efectiva igual a 0). |
+| **Precondiciones** | El usuario posee permiso de rechazo de platillo en cocina; la comanda está en Reservada o el platillo está Pendiente dentro de una comanda Entregada; el motivo tiene entre 1 y 500 caracteres y la cantidad disponible reportada es un entero mayor o igual a 0 (valores negativos producen `422 VALIDATION_ERROR`). |
+| **Postcondiciones** | Si la comanda estaba Reservada, transiciona a Rechazada almacenando el desglose de ítem rechazado, cantidad disponible efectiva acotada a `0..cantidad-1` y restantes reservados; si estaba Entregada, el platillo pendiente de rehechura se marca Cancelado y se recalcula el monto total: cuando aún permanece al menos otro platillo entregado activo, la comanda conserva su estado Entregada con el nuevo total, pero si el platillo rechazado era el único platillo activo restante (quedando 0 platillos activos y total `0.00`), la comanda transiciona automáticamente al estado terminal Anulada (`VOIDED`) sin cargo para no quedar bloqueada esperando liquidación de Pagos. Cuando la disponibilidad efectiva es cero, el platillo queda bloqueado como no disponible en la vista local del catálogo y se emite `ordenes.platillo.rechazado_cocina`. |
+| **Criterio de Verificación** | Rechazar un platillo con `availableQuantity = 0` en una comanda Reservada verificando paso a Rechazada y bloqueo en catálogo; enviar `availableQuantity = -1` verificando `422 VALIDATION_ERROR`; rechazar un platillo en rehechura dentro de una comanda Entregada con 2 ítems verificando que conserva Entregada con total reducido, y con 1 solo ítem activo verificando transición automática al estado terminal Anulada (`VOIDED`). |
 
 #### `RF-28` — Cancelación individual de platillo antes de su cocción
 | Atributo | Especificación |
@@ -519,10 +565,10 @@ Todos los requisitos funcionales del presente documento utilizan una plantilla e
 | **Categoría** | Control de Preparación y Despacho en Cocina |
 | **Prioridad** | Condicional |
 | **Actor / Fuente** | Cocinero / Jefe de Cocina / Administrador |
-| **Especificación** | El sistema deberá permitir cancelar un platillo individual marcándolo en estado Cancelado cuando su comanda se encuentre en Creada o Reservada, o cuando sea un platillo pendiente de rehechura dentro de una comanda Entregada, recalculando el monto total de la comanda. |
-| **Precondiciones** | El usuario cuenta con permiso de cancelación de platillo; el platillo pertenece a la comanda en estado elegible antes del inicio de preparación o durante una rehechura pendiente. |
-| **Postcondiciones** | El platillo adopta el estado terminal Cancelado, deja de contarse en el monto total y en futuras preparaciones, y la actualización se refleja en tiempo real. |
-| **Criterio de Verificación** | Cancelar un platillo individual en una comanda con dos renglones en estado Reservada y verificar que su estado cambia a Cancelado y el monto total de la orden disminuye en su subtotal. |
+| **Especificación** | El sistema deberá permitir al personal autorizado de cocina o administración cancelar un platillo individual en estado Pendiente marcándolo como Cancelado cuando su comanda se encuentre en Creada o Reservada, o cuando sea un platillo pendiente de rehechura dentro de una comanda Entregada, recalculando el monto total de la comanda y excluyendo dicho platillo de la lista consolidada de ítems activos en eventos posteriores (`RF-22` o `RF-36`), siempre y cuando permanezca al menos otro platillo activo no cancelado en la comanda; cuando solo quede un único platillo activo en la comanda, el servicio deberá rechazar la cancelación individual con `409 INVALID_STATE_TRANSITION`, exigiendo que la comanda completa sea cancelada mediante `RF-35` y `RF-36` (o rechazada físicamente mediante `RF-27`) para liberar íntegramente la reserva en Inventario. |
+| **Precondiciones** | El usuario cuenta con permiso de cancelación de platillo en cocina (`kitchen:items:cancel` o roles Cocinero, Jefe de Cocina o Administrador); el platillo objetivo está en estado Pendiente dentro de una comanda en Creada, Reservada o Entregada (en rehechura); y existe al menos otro platillo no cancelado dentro de la misma comanda. |
+| **Postcondiciones** | Si existe al menos otro platillo activo, el platillo objetivo adopta el estado terminal Cancelado, se excluye del monto total y de futuras notificaciones de preparación; si era el último platillo activo restante, la operación individual se rechaza con `409 INVALID_STATE_TRANSITION`. *(Nota: Para liberar stock físico de un platillo individual en estado Reservada hacia Inventario se emplea el rechazo físico de `RF-27`, o bien la cancelación total de la orden de `RF-35`/`RF-36` cuando es el único platillo).* |
+| **Criterio de Verificación** | Cancelar un platillo individual en una comanda con 2 renglones en estado Reservada verificando éxito y recálculo del total; intentar cancelar el único platillo activo restante verificando rechazo `409 INVALID_STATE_TRANSITION`. |
 
 ---
 
@@ -536,10 +582,10 @@ Todos los requisitos funcionales del presente documento utilizan una plantilla e
 | **Categoría** | Rehechura de Platillos Entregados |
 | **Prioridad** | Esencial |
 | **Actor / Fuente** | Mesero / Administrador |
-| **Especificación** | El sistema deberá permitir retornar un platillo ya entregado al estado Pendiente exigiendo obligatoriamente una nota de texto no vacía con la explicación de la rehechura, manteniendo la comanda en estado Entregada. |
-| **Precondiciones** | El usuario posee permiso para solicitar rehechura; la comanda está en estado Entregada; el platillo está en estado Entregado y se proporciona una justificación textual distinta de blanco. |
-| **Postcondiciones** | El platillo transiciona a Pendiente con la nota justificativa visible para cocina, la comanda conserva estado Entregada y reaparece en la cola activa de cocina en tiempo real. |
-| **Criterio de Verificación** | Solicitar rehechura sin nota verificando rechazo de validación; repetir con nota válida verificando que solo el platillo vuelve a Pendiente y la orden conserva Entregada. |
+| **Especificación** | El sistema deberá permitir retornar un platillo ya entregado al estado Pendiente exigiendo obligatoriamente una nota justificativa de texto con una longitud de 1 a 500 caracteres útiles (tras eliminar espacios iniciales y finales), manteniendo la comanda en estado Entregada. |
+| **Precondiciones** | El usuario posee permiso para solicitar rehechura; la comanda está en estado Entregada; el platillo está en estado Entregado y se proporciona una justificación textual de entre 1 y 500 caracteres distintos de blanco. |
+| **Postcondiciones** | El platillo transiciona a Pendiente con la nota justificativa visible para cocina, la comanda conserva estado Entregada y reaparece en la cola activa de cocina en tiempo real; si la nota está vacía o solo contiene espacios se rechaza con `422 NOTE_REQUIRED`, y si supera 500 caracteres se rechaza con `422 VALIDATION_ERROR`. |
+| **Criterio de Verificación** | Solicitar rehechura con nota vacía (`422 NOTE_REQUIRED`), con 501 caracteres (`422 VALIDATION_ERROR`) y con nota válida entre 1 y 500 caracteres verificando que el platillo vuelve a Pendiente y la orden conserva Entregada. |
 
 #### `RF-30` — Preservación de instrucciones previas tras completar rehechura
 | Atributo | Especificación |
@@ -605,10 +651,10 @@ Todos los requisitos funcionales del presente documento utilizan una plantilla e
 | **Categoría** | Modificación, Transferencia y Cancelación |
 | **Prioridad** | Esencial |
 | **Actor / Fuente** | Mesero / Administrador |
-| **Especificación** | El sistema deberá permitir reasignar una comanda activa no terminal (Creada, Reservada, En Preparación o Entregada) a otra mesa física del salón, actualizando su modalidad a consumo en mesa y manteniendo todos sus platillos, estados y montos intactos. |
-| **Precondiciones** | El usuario cuenta con permiso de transferencia; la comanda no está en estado Pagada, Cancelada, Rechazada, Expirada ni Anulada; se indica un número de mesa destino positivo y la versión coincide cuando se especifica. |
-| **Postcondiciones** | La comanda queda asignada a la nueva mesa con modalidad en salón, incrementa su versión y notifica el cambio en tiempo real a mesero y cocina. |
-| **Criterio de Verificación** | Transferir una comanda para llevar o de la mesa 3 hacia la mesa 8 verificando la actualización inmediata en la tarjeta de cocina y el rechazo si se intenta con una versión obsoleta o sobre una orden Pagada. |
+| **Especificación** | El sistema deberá permitir reasignar una comanda activa elegible (Creada, Reservada, En Preparación o Entregada) a otra mesa física del salón, actualizando su modalidad a consumo en mesa (`isTakeaway = false`) y conservando intactos su identificador de sesión de comensales (`diningSessionId`), mesero responsable, platillos, estados y montos. |
+| **Precondiciones** | El usuario cuenta con permiso de transferencia; la comanda no está en estado Pagada, Cancelada, Rechazada, Expirada, Anulada ni Mermada; se indica un número entero de mesa destino mayor o igual a 1 y la versión coincide cuando se especifica en el cuerpo o en la cabecera `If-Match`. |
+| **Postcondiciones** | La comanda queda asignada a la nueva mesa con modalidad en salón, conserva sin alteración su `diningSessionId`, incrementa su versión y notifica el cambio en tiempo real a mesero y cocina. |
+| **Criterio de Verificación** | Transferir una comanda de la mesa 3 hacia la mesa 8 verificando la actualización inmediata en cocina, la conservación intacta de `diningSessionId` y el rechazo `409 INVALID_STATE_TRANSITION` si se intenta sobre una orden Pagada, Cancelada, Rechazada, Expirada, Anulada o Mermada. |
 
 #### `RF-35` — Cancelación libre de comanda previa al inicio de preparación
 | Atributo | Especificación |
@@ -644,14 +690,14 @@ Todos los requisitos funcionales del presente documento utilizan una plantilla e
 | Atributo | Especificación |
 |---|---|
 | **ID** | `RF-37` |
-| **Nombre** | Anulación administrativa exclusiva sobre comandas en preparación (Mermada) |
+| **Nombre** | Anulación administrativa exclusiva sobre comandas en preparación |
 | **Categoría** | Anulaciones y Mermas |
 | **Prioridad** | Esencial |
 | **Actor / Fuente** | Administrador |
-| **Especificación** | El sistema deberá permitir únicamente al rol o permiso administrativo anular una comanda que se encuentre en estado En Preparación por causas administrativas o de negocio ajenas a cocina, transicionándola al estado Mermada. |
-| **Precondiciones** | El usuario autenticado cuenta con rol Administrador o permiso explícito de anulación administrativa; la comanda se encuentra en estado En Preparación. |
-| **Postcondiciones** | La comanda transiciona a Mermada, deja de mostrarse en preparación activa en cocina y notifica en tiempo real. |
-| **Criterio de Verificación** | Intentar la anulación administrativa como mesero o chef verificando rechazo de autorización; ejecutarla como administrador en En Preparación comprobando transición a Mermada. |
+| **Especificación** | El sistema deberá permitir únicamente al rol o permiso administrativo anular una comanda que se encuentre en estado En Preparación por causas administrativas o de negocio ajenas a cocina (aceptando un motivo opcional de hasta 500 caracteres), transicionándola al estado Mermada (`WASTED`, en espera de liquidación) cuando incluya cargo al comensal (`chargeCustomer = true`), o directamente al estado terminal Anulada (`VOIDED`) cuando se exima de cargo al comensal (`chargeCustomer = false`). |
+| **Precondiciones** | El usuario autenticado cuenta con rol Administrador o permiso explícito de anulación administrativa; la comanda se encuentra en estado En Preparación y el motivo opcional no excede 500 caracteres. |
+| **Postcondiciones** | La comanda transiciona a Mermada (si `chargeCustomer = true`) o al estado terminal Anulada (si `chargeCustomer = false`), deja de mostrarse en preparación activa en cocina y notifica en tiempo real. |
+| **Criterio de Verificación** | Intentar la anulación administrativa como mesero o chef verificando rechazo `403 FORBIDDEN_ROLE`; ejecutarla como administrador en En Preparación comprobando transición a Mermada con cargo y a Anulada sin cargo. |
 
 #### `RF-38` — Emisión configurable de cobro o merma sin cargo en anulación administrativa
 | Atributo | Especificación |
@@ -661,10 +707,10 @@ Todos los requisitos funcionales del presente documento utilizan una plantilla e
 | **Categoría** | Anulaciones y Mermas |
 | **Prioridad** | Esencial |
 | **Actor / Fuente** | Administrador |
-| **Especificación** | El sistema deberá emitir una solicitud de cobro al sistema de Pagos con los precios congelados cuando la anulación administrativa incluya cargo al cliente (comportamiento predeterminado), o emitir únicamente una notificación de merma administrativa hacia Inventario sin generar cobro cuando se indique expresamente exención de cargo. |
-| **Precondiciones** | Una comanda En Preparación transiciona válidamente a Mermada tras invocación de un Administrador. |
-| **Postcondiciones** | Si procede cobro al comensal, se registra la solicitud de cobro con el total e ítems congelados en estado Mermada; si no procede cobro, se registra únicamente el evento de merma administrativa. |
-| **Criterio de Verificación** | Ejecutar una anulación administrativa con cobro activado y otra con cobro desactivado verificando la emisión exclusiva de solicitud de cobro en el primer caso y solo merma en el segundo. |
+| **Especificación** | Cuando la anulación administrativa incluya cargo al cliente (`chargeCustomer = true`, comportamiento predeterminado), el sistema deberá transicionar la comanda a Mermada (`WASTED`) y emitir exclusivamente el evento `ordenes.cobro.solicitado` hacia Pagos con los precios congelados (sin emitir evento de merma, dado que Inventario ya descontó los insumos al iniciar la preparación y el platillo sí se cobra); cuando se indique exención de cargo (`chargeCustomer = false`), el sistema deberá transicionar la comanda directamente al estado terminal Anulada (`VOIDED`) y emitir exclusivamente el evento `ordenes.comanda.mermada` (`reason="ADMINISTRATIVE"`, `motivo="administrativo"`) hacia Inventario sin generar solicitud de cobro hacia Pagos. |
+| **Precondiciones** | Un Administrador invoca la anulación administrativa sobre una comanda en estado En Preparación indicando `chargeCustomer = true` (o por omisión) o `chargeCustomer = false`. |
+| **Postcondiciones** | Si `chargeCustomer = true`, la comanda queda en estado Mermada en espera de confirmación de pago (`RF-42`) y se registra únicamente `ordenes.cobro.solicitado`; si `chargeCustomer = false`, la comanda queda cerrada en el estado terminal Anulada y se registra únicamente `ordenes.comanda.mermada`. |
+| **Criterio de Verificación** | Ejecutar una anulación administrativa con `chargeCustomer = true` verificando estado `WASTED` y emisión exclusiva de `ordenes.cobro.solicitado`; ejecutar otra con `chargeCustomer = false` verificando estado terminal `VOIDED` y emisión exclusiva de `ordenes.comanda.mermada`. |
 
 #### `RF-39` — Anulación total inmediata por error atribuible a cocina
 | Atributo | Especificación |
@@ -674,10 +720,10 @@ Todos los requisitos funcionales del presente documento utilizan una plantilla e
 | **Categoría** | Anulaciones y Mermas |
 | **Prioridad** | Esencial |
 | **Actor / Fuente** | Jefe de Cocina / Administrador |
-| **Especificación** | El sistema deberá permitir únicamente al Administrador o al Jefe de Cocina anular de manera completa e inmediata una comanda en estado En Preparación por un fallo imputable a cocina, exigiendo obligatoriamente una nota textual no vacía con la causa del incidente y transicionando toda la comanda al estado terminal Anulada. |
-| **Precondiciones** | El usuario cuenta con permiso de anulación por error de cocina (Jefe de Cocina o Administrador); la comanda está en estado En Preparación y se provee una nota explicativa distinta de blanco. |
-| **Postcondiciones** | La comanda completa transiciona al estado terminal Anulada con trazabilidad del incidente y desaparece de la cola activa de cocina. |
-| **Criterio de Verificación** | Rechazar la acción para mesero, cocinero base o sin nota explicativa; aprobar para Jefe de Cocina con nota válida comprobando el paso completo de la orden a Anulada. |
+| **Especificación** | El sistema deberá permitir únicamente al Administrador o al Jefe de Cocina anular de manera completa e inmediata una comanda en estado En Preparación por un fallo imputable a cocina, exigiendo obligatoriamente una nota textual de 1 a 500 caracteres útiles (tras eliminar espacios iniciales y finales) con la causa del incidente y transicionando toda la comanda al estado terminal Anulada (`VOIDED`). |
+| **Precondiciones** | El usuario cuenta con permiso de anulación por error de cocina (Jefe de Cocina o Administrador); la comanda está en estado En Preparación y se provee una nota explicativa de entre 1 y 500 caracteres distintos de blanco. |
+| **Postcondiciones** | La comanda completa transiciona al estado terminal Anulada con trazabilidad del incidente y desaparece de la cola activa de cocina; si la nota está vacía se rechaza con `422 NOTE_REQUIRED` y si supera 500 caracteres se rechaza con `422 VALIDATION_ERROR`. |
+| **Criterio de Verificación** | Rechazar la acción para mesero, cocinero base (`403 FORBIDDEN_ROLE`), con nota vacía (`422 NOTE_REQUIRED`) o mayor a 500 caracteres (`422 VALIDATION_ERROR`); aprobar para Jefe de Cocina con nota válida de 1 a 500 caracteres comprobando el paso de la orden a Anulada. |
 
 #### `RF-40` — Registro de pérdida de insumos y exención de cobro por error de cocina
 | Atributo | Especificación |
@@ -687,10 +733,10 @@ Todos los requisitos funcionales del presente documento utilizan una plantilla e
 | **Categoría** | Anulaciones y Mermas |
 | **Prioridad** | Esencial |
 | **Actor / Fuente** | Sistema |
-| **Especificación** | El sistema deberá emitir hacia Inventario el evento de comanda mermada indicando causa atribuible a cocina y su nota explicativa cuando una orden transicione a Anulada, absteniéndose estrictamente de emitir cualquier evento de solicitud de cobro al cliente. |
-| **Precondiciones** | Una comanda transiciona válidamente al estado Anulada. |
-| **Postcondiciones** | Se registra el evento de merma con motivo de error de cocina y los ítems afectados para contabilidad de inventario; no se genera solicitud de cuenta ni de cobro hacia Pagos. |
-| **Criterio de Verificación** | Anular por error de cocina y verificar que únicamente existe el evento de merma con motivo de error de cocina y ningún evento dirigido a cobro o facturación. |
+| **Especificación** | El sistema deberá emitir hacia Inventario el evento `ordenes.comanda.mermada` indicando causa atribuible a cocina (`reason="KITCHEN_ERROR"`, `motivo="error_cocina"`) y su nota explicativa obligatoria cuando una orden transicione al estado terminal Anulada por error de cocina (`RF-39`), absteniéndose estrictamente de emitir cualquier evento de solicitud de cobro al cliente. *(La transición a Anulada por anulación administrativa sin cargo se rige por `RF-38` con `reason="ADMINISTRATIVE"`, y el rechazo del único platillo activo en rehechura se rige por `RF-27`).* |
+| **Precondiciones** | Una comanda en estado En Preparación transiciona válidamente al estado terminal Anulada mediante la operación de anulación por error de cocina (`RF-39`). |
+| **Postcondiciones** | Se registra el evento `ordenes.comanda.mermada` con motivo de error de cocina (`KITCHEN_ERROR`), la nota justificativa y los ítems afectados para contabilidad de inventario; no se genera solicitud de cuenta ni de cobro hacia Pagos. |
+| **Criterio de Verificación** | Anular por error de cocina (`RF-39`) y verificar que únicamente existe el evento `ordenes.comanda.mermada` con `reason="KITCHEN_ERROR"` y ningún evento dirigido a cobro o facturación. |
 
 ---
 
@@ -704,10 +750,10 @@ Todos los requisitos funcionales del presente documento utilizan una plantilla e
 | **Categoría** | Liquidación y Sincronización Externa |
 | **Prioridad** | Esencial |
 | **Actor / Fuente** | Mesero / Administrador |
-| **Especificación** | El sistema deberá permitir solicitar la cuenta de una comanda en estado Entregada, emitiendo hacia el sistema de Pagos el detalle completo con los precios unitarios congelados, subtotales, modificadores, identificador de mesa o pedido para llevar, identificador de mesero e identificadores de orden y sesión, manteniendo la comanda en estado Entregada hasta confirmarse su pago. |
-| **Precondiciones** | El usuario cuenta con permiso de solicitud de cuenta y la comanda se encuentra en estado Entregada. |
-| **Postcondiciones** | Se registra la solicitud de cuenta hacia el sistema de Pagos, la comanda conserva estado Entregada y las vistas conectadas son notificadas. |
-| **Criterio de Verificación** | Solicitar la cuenta de una comanda Entregada y comprobar la emisión de la solicitud de cuenta con monto, ítems y sesión correctos manteniendo el estado Entregada. |
+| **Especificación** | El sistema deberá permitir solicitar la cuenta de una comanda en estado Entregada que cuente con al menos un platillo activo y cuyos platillos no cancelados se encuentren en su totalidad en estado Entregado (bloqueando la acción si existe algún platillo devuelto a cocina en estado Pendiente por rehechura activa), emitiendo hacia el sistema de Pagos el evento `ordenes.cuenta.solicitada` con identificador determinista (`uuid5`) derivado del identificador de la comanda, su versión, el monto total vigente y el número de platillos activos (`ordenes.cuenta.solicitada:{orderId}:v{version}:{totalAmount}:{activeCount}`), junto con los precios unitarios congelados, subtotales, modificadores, identificador de mesa o pedido para llevar, identificador de mesero e identificadores de orden y sesión, manteniendo la comanda en estado Entregada hasta confirmarse su pago (`RF-42`). Las solicitudes repetidas sobre una misma comanda sin cambios en su versión o monto son idempotentes (no duplican registros en el Outbox), mientras que si ocurre una rehechura (`RF-29`) y un rechazo parcial (`RF-27`) que modifique el monto total antes del pago, una nueva solicitud de cuenta emitirá un nuevo identificador de evento determinista para que Pagos actualice el cobro sin descartarlo como duplicado. |
+| **Precondiciones** | El usuario cuenta con permiso de solicitud de cuenta; la comanda se encuentra en estado Entregada, posee al menos un platillo no cancelado y todos sus platillos no cancelados están en estado Entregado (cero platillos en estado Pendiente por rehechura). |
+| **Postcondiciones** | Se registra en el Outbox el evento `ordenes.cuenta.solicitada` con identificador determinista sensible al estado/monto de la orden (o se responde de forma idempotente si ya fue emitido para esa misma versión y monto), la comanda conserva estado Entregada y las vistas conectadas son notificadas; si algún platillo activo está en rehechura (`Pendiente`), la solicitud es rechazada con `409 INVALID_STATE_TRANSITION`. |
+| **Criterio de Verificación** | Solicitar dos veces seguidas la cuenta de una comanda Entregada sin cambios comprobando idempotencia (un solo evento en Outbox); devolver uno de sus dos platillos a rehechura (`RF-29`), verificar rechazo `409` al pedir cuenta mientras está Pendiente, rechazar ese platillo en cocina (`RF-27`) reduciendo el total y volver a solicitar la cuenta comprobando la emisión de un nuevo evento `ordenes.cuenta.solicitada` con nuevo `eventId` y el monto actualizado. |
 
 #### `RF-42` — Cierre exclusivo a estado Pagada por confirmación externa
 | Atributo | Especificación |
@@ -907,10 +953,10 @@ Todos los requisitos funcionales del presente documento utilizan una plantilla e
 | **Categoría** | Usabilidad / Operabilidad (ISO 25010) |
 | **Prioridad** | Esencial |
 | **Actor / Fuente** | Cocinero / Jefe de Cocina |
-| **Especificación** | La interfaz de cocina deberá ofrecer paridad operativa mediante teclado físico dedicado permitiendo navegar entre tarjetas, iniciar preparación, despachar platillos o comandas completas y revertir la última acción pendiente sin requerir el uso de ratón ni pantalla táctil. |
-| **Precondiciones** | La pantalla de cocina tiene el foco activo y el operador utiliza atajos de teclado configurados. |
-| **Postcondiciones** | Todas las acciones principales de cocina responden a pulsaciones de teclado con indicador visual claro de la tarjeta enfocada. |
-| **Criterio de Verificación** | Completar un flujo íntegro de inicio de preparación, despacho y deshacer empleando exclusivamente eventos de teclado. |
+| **Especificación** | La interfaz de cocina deberá ofrecer paridad operativa mediante teclado físico dedicado evaluando códigos físicos de tecla (`KeyboardEvent.code`) sin requerir ratón ni pantalla táctil, implementando como mínimo el siguiente mapeo verificable: `ArrowLeft` (`FOCUS_PREVIOUS_ORDER`, orden o página anterior), `ArrowRight` (`FOCUS_NEXT_ORDER`, orden o página siguiente), `ArrowUp` (`FOCUS_PREVIOUS_ITEM`, platillo anterior), `ArrowDown` (`FOCUS_NEXT_ITEM`, platillo siguiente), `Enter` (`MARK_FOCUSED_ITEM_READY`, iniciar preparación en orden Reservada enfocada o marcar platillo enfocado como listo), `NumpadEnter` (`MARK_FOCUSED_ORDER_READY`, marcar comanda enfocada completa como lista), `Backspace` (`UNDO_LAST_READY`, revertir el último despacho en ventana de 15 s), `PageUp` (`PREVIOUS_STATION`, estación culinaria anterior), `PageDown` (`NEXT_STATION`, estación culinaria siguiente) y `Digit1` a `Digit9` (`FOCUS_ORDER_BY_POSITION_1` a `9`, selección directa de tarjeta por posición). |
+| **Precondiciones** | La pantalla de cocina tiene el foco activo y el operador envía eventos de teclado con los códigos físicos `KeyboardEvent.code` especificados. |
+| **Postcondiciones** | Cada tecla reconocida intercepta el comportamiento por defecto del navegador (`preventDefault()`) y ejecuta la acción operativa correspondiente con indicador visual claro en la tarjeta enfocada. |
+| **Criterio de Verificación** | Completar un flujo íntegro de navegación por estación (`PageUp`/`PageDown`), selección de orden (`ArrowLeft`/`ArrowRight` y `Digit1`..`Digit9`), inicio/despacho (`Enter` y `NumpadEnter`) y deshacer (`Backspace`) empleando exclusivamente eventos `KeyboardEvent.code`. |
 
 #### `RC-03` — Prevención de errores mediante ventana de cancelación rápida
 | Atributo | Especificación |
@@ -972,10 +1018,10 @@ Todos los requisitos funcionales del presente documento utilizan una plantilla e
 | **Categoría** | Mantenibilidad / Capacidad de Prueba (ISO 25010) |
 | **Prioridad** | Esencial |
 | **Actor / Fuente** | Equipo de Ingeniería y QA |
-| **Especificación** | La base de código del servicio deberá mantener una suite de pruebas automatizadas que cubra la lógica de dominio, contratos de eventos, casos límite y matrices de permisos alcanzando una cobertura mínima obligatoria del 85 % en el backend. |
-| **Precondiciones** | Ejecución completa de la suite de pruebas unitarias y de contrato del proyecto. |
-| **Postcondiciones** | Todas las pruebas ejecutadas aprueban sin regresiones y la cobertura medida cumple el umbral establecido. |
-| **Criterio de Verificación** | Ejecutar el reporte automatizado de pruebas y cobertura confirmando cumplimiento del umbral mínimo del 85 % y cero fallos. |
+| **Especificación** | La base de código del sistema (tanto en el servicio backend como en la aplicación frontend) deberá mantener una suite de pruebas automatizadas que cubra la lógica de dominio, contratos de eventos, casos límite y matrices de permisos alcanzando una cobertura mínima obligatoria del 80 % de código, alineada con el umbral estándar de la puerta de calidad de SonarCloud. |
+| **Precondiciones** | Ejecución completa de las suites de pruebas unitarias, de componentes y de contrato del proyecto en backend y frontend. |
+| **Postcondiciones** | Todas las pruebas ejecutadas aprueban sin regresiones y la cobertura medida en ambos repositorios cumple o supera el umbral mínimo del 80 %. |
+| **Criterio de Verificación** | Ejecutar el reporte automatizado de pruebas y cobertura en backend y frontend confirmando cumplimiento del umbral mínimo del 80 % y cero fallos. |
 
 #### `RC-08` — Mantenibilidad y calidad estática continua
 | Atributo | Especificación |
@@ -985,24 +1031,76 @@ Todos los requisitos funcionales del presente documento utilizan una plantilla e
 | **Categoría** | Mantenibilidad / Seguridad Estática (ISO 25010) |
 | **Prioridad** | Esencial |
 | **Actor / Fuente** | Equipo de Ingeniería |
-| **Especificación** | Todo el código fuente deberá cumplir verificación estática de tipos estricta, reglas estandarizadas de estilo y complejidad acotada, manteniendo cero vulnerabilidades de seguridad críticas abiertas y un mínimo de 80 % de cobertura en la puerta de calidad continua. |
+| **Especificación** | Todo el código fuente de backend y frontend deberá cumplir verificación estática de tipos estricta, reglas estandarizadas de estilo y complejidad acotada, manteniendo cero vulnerabilidades de seguridad críticas abiertas y un mínimo de 80 % de cobertura en la puerta de calidad continua de SonarCloud (*Quality Gate*). |
 | **Precondiciones** | Análisis estático ejecutado previo a integración en rama principal. |
-| **Postcondiciones** | El análisis estático aprueba sin errores de tipado, estilo ni vulnerabilidades abiertas. |
-| **Criterio de Verificación** | Ejecutar las herramientas de análisis estático y revisión continua obteniendo aprobación íntegra. |
+| **Postcondiciones** | El análisis estático aprueba sin errores de tipado, estilo ni vulnerabilidades abiertas y con cobertura mayor o igual al 80 %. |
+| **Criterio de Verificación** | Ejecutar las herramientas de análisis estático y revisión continua en SonarCloud obteniendo aprobación íntegra (*Passed*). |
 
 ---
 
-## 6. Matriz de Trazabilidad de Requisitos
+## 6. Matriz de Trazabilidad de Requisitos (1 a 1)
 
-| Módulo / Categoría | Identificadores Cubiertos | Nivel de Verificación Principal |
-|---|---|---|
-| **3.1 Apertura y Captura de Comandas** | `RF-01` a `RF-08` | Pruebas unitarias, de integración de servicios y componente de terminal de mesero |
-| **3.2 Confirmación y Saga de Reservas** | `RF-09` a `RF-13` | Pruebas de integración concurrente, saga de inventario y expiración automática |
-| **3.3 Cola y Visualización en Cocina** | `RF-14` a `RF-21` | Pruebas de consulta ordenada, filtrado por estación y vistas de tablero KDS |
-| **3.4 Control de Preparación y Despacho** | `RF-22` a `RF-28` | Pruebas de flujo de cocina, rechazo físico, cancelación de ítem y eventos salientes |
-| **3.5 Rehechura de Platillos Entregados** | `RF-29` a `RF-31` | Pruebas de retorno a cocina, preservación de notas e indicador de rehechura |
-| **3.6 Modificación, Transferencia y Cancelación** | `RF-32` a `RF-36` | Pruebas de máquina de estados, control de versión optimista y compensación |
-| **3.7 Anulaciones (Mermas y Error Cocina)** | `RF-37` a `RF-40` | Pruebas de matriz de permisos, cargo configurable y exención en error de cocina |
-| **3.8 Liquidación y Sincronización Externa** | `RF-41` a `RF-44` | Pruebas de facturación congelada, cierre por pago y reconciliación de catálogo |
-| **4. Requisitos No Funcionales** | `RNF-01` a `RNF-10` | Pruebas de rendimiento bajo carga, seguridad por matriz de permisos y roles y validación formal de contratos de intercambio |
-| **5. Requisitos de Atributos de Calidad** | `RC-01` a `RC-08` | Pruebas de extremo a extremo táctiles/teclado, auditoría de conformidad WCAG 2.1 AA y análisis estático |
+| ID | Nombre del Requisito | Actor / Fuente | Prioridad | Método de Verificación y Contrato / Interfaz Asociada |
+|---|---|---|---|---|
+| `RF-01` | Creación de comanda vinculada a mesa de salón | Mesero / Administrador | Esencial | Prueba unitaria y API (`POST /orders`, `tableNumber >= 1`, `isTakeaway = false`) |
+| `RF-02` | Creación de comanda para consumo fuera del salón (Para Llevar) | Mesero / Administrador | Esencial | Prueba unitaria y API (`POST /orders`, `isTakeaway = true`, `tableNumber = null`) |
+| `RF-03` | Vinculación múltiple de comandas a una sesión de comensales | Mesero / Sistema de Sala | Esencial | Prueba de consumidor e integración (`sala.dining_session.iniciada`, `GET /orders?diningSessionId=`) |
+| `RF-04` | Captura y reemplazo de platillos en comanda borrador | Mesero / Administrador | Esencial | Prueba BVA y API (`PATCH /orders/{orderId}/items`, `items >= 1`, `quantity >= 1`, `name 1..200`, `IDs 1..100`) |
+| `RF-05` | Registro de modificadores e instrucciones de preparación por platillo | Mesero / Administrador | Esencial | Prueba BVA y componente (`PATCH /orders/{orderId}/items`, `modifiers`, `notes 0..500` caracteres) |
+| `RF-06` | Bloqueo preventivo de platillos no disponibles | Mesero / Administrador | Esencial | Prueba unitaria y contrato (`PATCH /orders/{orderId}/items` → `422 DISH_UNAVAILABLE`) |
+| `RF-07` | Congelamiento de precio unitario y cálculo de monto total | Sistema | Esencial | Prueba unitaria de dominio (`Order.recalculate_total`, `NUMERIC(12,2)` excluyendo ítems `CANCELLED`) |
+| `RF-08` | Consulta de listado y detalle de comandas | Mesero / Jefe de Cocina / Administrador | Esencial | Prueba API y matriz de permisos (`GET /orders`, `GET /orders/{orderId}`) |
+| `RF-09` | Confirmación atómica e idempotente de la comanda | Mesero / Administrador | Esencial | Prueba de concurrencia, BDD y Outbox (`POST /orders/{orderId}/confirm` → `ordenes.orden.creada`) |
+| `RF-10` | Transición a estado Reservada ante confirmación de inventario | Sistema de Inventario | Esencial | Prueba de consumidor y BDD (`inventario.stock.reservado` → `RESERVED`, `stockReservedAt`) |
+| `RF-11` | Transición a estado Rechazada por insuficiencia de inventario | Sistema de Inventario | Esencial | Prueba de consumidor y UI (`inventario.stock.insuficiente` → `REJECTED`, `rejectionDetails`) |
+| `RF-12` | Expiración automática de reserva pendiente por tiempo límite (60 s) | Sistema | Esencial | Prueba de worker y BDD (`SagaTimeoutWatcher`, `60 s` → `EXPIRED`, `ordenes.orden.expirada`) |
+| `RF-13` | Descarte de respuestas tardías de reserva sobre comandas cerradas | Sistema de Inventario | Esencial | Prueba de consumidor y BDD (mensajes tardíos sobre `CANCELLED` o `EXPIRED` ignorados) |
+| `RF-14` | Agrupación visual de comandas en la pantalla de cocina | Cocinero / Jefe de Cocina / Administrador | Esencial | Prueba de componente KDS y API (`GET /kds/queue?view=active`, `view=delivered`, pestañas KDS) |
+| `RF-15` | Ordenamiento prioritario cronológico en cola de cocina | Sistema | Esencial | Prueba unitaria de repositorio (`COALESCE(inPreparationAt, stockReservedAt, createdAt) ASC`) |
+| `RF-16` | Visualización integral de tarjeta de comanda en cocina | Cocinero / Jefe de Cocina / Administrador | Esencial | Prueba de componente `OrderCard` (folio, mesa/para llevar, cantidad, modificadores, notas, estación) |
+| `RF-17` | Filtrado de cola de cocina por estación culinaria | Cocinero / Jefe de Cocina / Administrador | Esencial | Prueba API y componente (`GET /kds/queue?station=`, normalización sin acentos ni mayúsculas) |
+| `RF-18` | Cronómetro y semáforo visual de atraso en preparación | Cocinero / Jefe de Cocina / Administrador | Esencial | Prueba BVA de hook `useElapsedTime` (`< 600 s` En tiempo, `600..899 s` Por atrasarse, `>= 900 s` Atrasada) |
+| `RF-19` | Control de vigencia y ventana de gracia de órdenes reservadas en cocina | Cocinero / Jefe de Cocina / Mesero | Esencial | Prueba BVA de `getOrderTtlStatus` (`15 min` bloqueo cocción + `10 min` gracia → pestaña `Caducados`) |
+| `RF-20` | Reaparición automática de comanda entregada ante solicitud de rehechura | Mesero / Cocinero / Jefe de Cocina | Esencial | Prueba de integración KDS y BDD (orden `DELIVERED` con ítem `PENDING` reaparece en `Activas`/`Rehechuras`) |
+| `RF-21` | Retiro definitivo de comanda de cocina al confirmarse su pago | Sistema de Pagos | Esencial | Prueba de consumidor y KDS (`pagos.pago.completado` → `PAID`, exclusión total en `build_kds_queue_query`) |
+| `RF-22` | Inicio explícito de preparación en cocina | Cocinero / Jefe de Cocina / Administrador | Esencial | Prueba API y Outbox (`PATCH /orders/{orderId}/start-preparation` → `IN_PREPARATION`, `ordenes.orden.en_preparacion`) |
+| `RF-23` | Marcado individual de platillo como Listo | Cocinero / Jefe de Cocina / Administrador | Esencial | Prueba API y WebSocket (`PATCH /orders/{orderId}/items/{itemId}/ready` → `READY`, `item.status_changed`) |
+| `RF-24` | Notificación de despacho operativo por platillo completado | Sistema | Esencial | Prueba de contrato Outbox (`ordenes.platillo.preparado` con `isRedo = false`, sin doble descuento de reserva) |
+| `RF-25` | Entrega automática de comanda al completar todos los platillos activos | Sistema | Esencial | Prueba unitaria y BDD (último ítem `READY` → orden e ítems activos pasan a `DELIVERED` en la misma transacción) |
+| `RF-26` | Despacho completo de comanda como Lista ("Orden Lista") | Cocinero / Jefe de Cocina / Administrador | Esencial | Prueba API y BDD (`PATCH /orders/{orderId}/ready` → `DELIVERED`, eventos solo por ítems `PENDING`) |
+| `RF-27` | Rechazo físico de platillo por falta de insumos en cocina | Cocinero / Jefe de Cocina / Administrador | Esencial | Prueba API y catálogo (`PATCH /orders/{orderId}/items/{itemId}/kitchen-reject` → `ordenes.platillo.rechazado_cocina`) |
+| `RF-28` | Cancelación individual de platillo antes de su cocción | Cocinero / Jefe de Cocina / Administrador | Condicional | Prueba API y UI (`PATCH /orders/{orderId}/items/{itemId}/cancel`; bloquea con `409` si es el último ítem activo) |
+| `RF-29` | Devolución de platillo entregado a cocina con motivo obligatorio | Mesero / Administrador | Esencial | Prueba BVA, API y BDD (`PATCH /orders/{orderId}/items/{itemId}/redo`, `note 1..500` caracteres, `422 NOTE_REQUIRED`) |
+| `RF-30` | Preservación de instrucciones previas tras completar rehechura | Sistema | Esencial | Prueba unitaria y BDD (`_save_pre_redo_note` / `_restore_pre_redo_note` al completar rehechura) |
+| `RF-31` | Emisión diferenciada de consumo por platillo rehecho | Sistema | Esencial | Prueba de contrato Outbox y BDD (`ordenes.platillo.preparado` con `isRedo = true` al completar rehechura) |
+| `RF-32` | Restricción de edición libre tras confirmación o inicio de preparación | Sistema | Esencial | Prueba negativa de máquina de estados (`PATCH /orders/{orderId}/items` → `409 INVALID_STATE_TRANSITION`) |
+| `RF-33` | Reapertura automática a borrador al editar comanda Rechazada | Mesero / Administrador | Esencial | Prueba API (`PATCH /orders/{orderId}/items` sobre `REJECTED` → `CREATED`, limpia `confirmedAt` y `rejectionDetails`) |
+| `RF-34` | Transferencia de comanda activa entre mesas | Mesero / Administrador | Esencial | Prueba API (`PATCH /orders/{orderId}/transfer`, conserva `diningSessionId`, rechaza `409` en `WASTED` y terminales) |
+| `RF-35` | Cancelación libre de comanda previa al inicio de preparación | Mesero / Administrador | Esencial | Prueba API y BDD (`PATCH /orders/{orderId}/cancel` permitido en `CREATED`/`RESERVED`/`REJECTED`, `409` en cocina) |
+| `RF-36` | Emisión de compensación y liberación de insumos al cancelar | Sistema | Esencial | Prueba Outbox y BDD (`ordenes.orden.cancelada` con `itemsCancelados` y cero eventos de cobro) |
+| `RF-37` | Anulación administrativa exclusiva sobre comandas en preparación | Administrador | Esencial | Prueba de matriz de roles y BDD (`PATCH /orders/{orderId}/void`, exclusivo `admin`, `403 FORBIDDEN_ROLE` otros) |
+| `RF-38` | Emisión configurable de cobro o merma sin cargo en anulación administrativa | Administrador | Esencial | Prueba API (`chargeCustomer=true` → `WASTED` + `ordenes.cobro.solicitado`; `chargeCustomer=false` → `VOIDED` + `ordenes.comanda.mermada`) |
+| `RF-39` | Anulación total inmediata por error atribuible a cocina | Jefe de Cocina / Administrador | Esencial | Prueba BVA, API y BDD (`PATCH /orders/{orderId}/void-kitchen-error`, `note 1..500` caracteres → `VOIDED`) |
+| `RF-40` | Registro de pérdida de insumos y exención de cobro por error de cocina | Sistema | Esencial | Prueba Outbox y BDD (`ordenes.comanda.mermada` con `reason="KITCHEN_ERROR"` y cero eventos `ordenes.cobro.solicitado`) |
+| `RF-41` | Solicitud de cuenta con precios congelados | Mesero / Administrador | Esencial | Prueba API y BDD (`POST /orders/{orderId}/request-bill` → `ordenes.cuenta.solicitada`; rechaza `409` si hay ítem en rehechura) |
+| `RF-42` | Cierre exclusivo a estado Pagada por confirmación externa | Sistema de Pagos | Esencial | Prueba de consumidor y BDD (`pagos.pago.completado` sobre `DELIVERED` o `WASTED` → `PAID`) |
+| `RF-43` | Sincronización y reconciliación del catálogo local de platillos | Sistema de Menú / Sistema de Inventario | Esencial | Prueba de consumidor y worker (`CatalogReconciliationWorker`, descarte de eventos obsoletos) |
+| `RF-44` | Registro de platillos intermedios pre-elaborados (Opcional / Fase Futura) | Jefe de Cocina | Opcional - Fase Futura | Inspección de bandera de configuración (`INTERMEDIATE_DISHES_ENABLED = false`) |
+| `RNF-01` | Desempeño y tiempo de respuesta de operaciones síncronas | Operadores del Restaurante | Esencial | Prueba de rendimiento con Grafana k6 (`p95 < 500 ms` en endpoints REST de órdenes y KDS) |
+| `RNF-02` | Estabilidad bajo concurrencia operativa sostenida | Operadores Concurrentes | Esencial | Prueba de carga sostenida con Grafana k6 (`>= 50 VUs` concurrentes con tasa de error `< 1 %`) |
+| `RNF-03` | Latencia de propagación de notificaciones en tiempo real | Cocineros / Meseros | Esencial | Prueba de fanout WebSocket (`/ws/kds`, `/ws/waiter`, `p95 < 1 s`, versión monotónica y reconexión) |
+| `RNF-04` | Atomicidad entre persistencia de estado y publicación de eventos | Sistema | Esencial | Prueba unitaria y de integración del patrón Transactional Outbox (`OutboxWorker` y `OutboxRepository`) |
+| `RNF-05` | Idempotencia en recepción y emisión de eventos | Sistema | Esencial | Prueba de deduplicación (`ProcessedEventsRepository` con clave única `(order_id, event_id)` y `uuid5` determinista) |
+| `RNF-06` | Control de concurrencia optimista | Sistema | Esencial | Prueba de colisión concurrente (`version_id_col`, `StaleDataError` → `409 VERSION_CONFLICT`) |
+| `RNF-07` | Continuidad operativa ante indisponibilidad del catálogo externo | Sistema | Esencial | Prueba de resiliencia operando con proyección local de catálogo (`CatalogValidatorProtocol`) sin conexión a Menú |
+| `RNF-08` | Seguridad, autenticación y control de acceso granular (PBAC y RBAC) | Todos los Usuarios | Esencial | Prueba de matriz completa HTTP/WebSocket (`test_role_matrix.py`, `401`/`403`, cierres `4401`/`4403`, `FORBIDDEN_CHANNEL`) |
+| `RNF-09` | Confidencialidad en errores y saneamiento de registros | Sistema | Esencial | Prueba de manejadores de error y DAST con OWASP ZAP (`extra="forbid"`, esquema `ErrorResponse`, sin stacktraces) |
+| `RNF-10` | Cumplimiento estricto de contratos e intercambios externos | Sistemas Integrados | Esencial | Prueba de contratos JSON Schema y Postman/Newman (`validate_event_payload`, aislamiento de payloads corruptos) |
+| `RC-01` | Operabilidad táctil en entorno industrial de cocina | Cocinero / Jefe de Cocina | Esencial | Prueba E2E con Playwright en `1920x1080` (botones `>= 64 px` / `>= 48 px`, anti-rebote `pointerAction < 400 ms`) |
+| `RC-02` | Operabilidad total mediante teclado industrial dedicado (*Bump Bar*) | Cocinero / Jefe de Cocina | Esencial | Prueba unitaria y E2E de `useBumpBar` y `BUMP_BAR_KEY_MAP` (`Arrow*`, `Enter`, `NumpadEnter`, `Backspace`, `Page*`, `Digit1..9`) |
+| `RC-03` | Prevención de errores mediante ventana de cancelación rápida (15 s) | Cocinero / Jefe de Cocina | Esencial | Prueba de componente KDS y temporizador (`registerGracePeriodCountdown`, reversión antes de 15 s sin petición HTTP) |
+| `RC-04` | Accesibilidad visual y perceptibilidad multimodal (WCAG 2.1 AA) | Todos los Usuarios | Esencial | Auditoría automatizada con Playwright + Axe-core (`pnpm run test:a11y`, contraste `>= 4.5:1`, texto + icono + color) |
+| `RC-05` | Aislamiento visual e integración modular en contenedor anfitrión | Sistema Anfitrión (*Shell*) | Esencial | Prueba de aislamiento CSS (`css-scoping.test.ts`, prefijo `.orders-kds-root`) y compilación Module Federation |
+| `RC-06` | Trazabilidad y correlación de auditoría entre servicios | Equipo de Operación y Auditoría | Esencial | Inspección de bitácoras estructuradas y propagación de `correlationId`, `orderId` y `actor_uuid` en eventos |
+| `RC-07` | Verificabilidad y cobertura de pruebas automatizadas (`>= 80 %`) | Equipo de Ingeniería y QA | Esencial | Ejecución de Pytest Coverage (`orders-backend`) y Vitest v8 Coverage (`orders-frontend`) verificando `>= 80 %` |
+| `RC-08` | Mantenibilidad y calidad estática continua (*SonarCloud Quality Gate*) | Equipo de Ingeniería | Esencial | Verificación en CI con Ruff, Mypy `--strict`, ESLint, TypeScript `tsc --noEmit`, Gitleaks y SonarCloud (`>= 80 %`) |

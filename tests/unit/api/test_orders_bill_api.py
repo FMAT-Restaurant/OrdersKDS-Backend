@@ -300,6 +300,7 @@ def test_request_bill_idempotent_on_unchanged_order_and_reemits_when_total_chang
         public_id=order_id,
         table_number=9,
         status=OrderStatus.DELIVERED,
+        version=1,
         items=[item1, item2],
     )
     order.recalculate_total()
@@ -308,12 +309,14 @@ def test_request_bill_idempotent_on_unchanged_order_and_reemits_when_total_chang
     # 1. First bill request ($200.00)
     resp1 = client.post(f"/orders/{order_id}/request-bill", headers=auth_headers("waiter"))
     assert resp1.status_code == 200
+    assert order.version == 1
     assert len(fake_session.outbox_rows) == 1
     first_event_id = fake_session.outbox_rows[0].event_id
 
     # 2. Second bill request without changes -> idempotent (no duplicate outbox row staged)
     resp2 = client.post(f"/orders/{order_id}/request-bill", headers=auth_headers("waiter"))
     assert resp2.status_code == 200
+    assert order.version == 1
     assert len(fake_session.outbox_rows) == 1
 
     # 3. Item 2 goes through redo and gets cancelled/rejected ($150.00 remaining)

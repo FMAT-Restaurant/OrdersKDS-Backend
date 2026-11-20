@@ -14,6 +14,7 @@
 
 | ID | Tema | Estado Actual | Dueño / Contraparte | Hito Objetivo de Cierre | Impacto / Tareas Afectadas |
 |---|---|:---:|---|:---:|---|
+| **OP-14 [CRÍTICO]** | **Anulación de cuenta abierta en Pagos (Equipo 2) cuando una orden `DELIVERED` con cuenta solicitada (`RF-41`) entra a rehechura (`RF-29`) y cocina rechaza su único platillo activo pasando a `VOIDED` (`RF-27`)** | **CRÍTICO — Pendiente de acuerdo con Equipo 2 (Pagos)** *(Ver [`ADR-0020`](0020-op14-critico-integracion-pagos-anulacion-post-cuenta-rehechura.md))* | Backend Orders (Equipo 5) + Pagos (`Payments-BE`, Equipo 2) | Acople Inter-Equipos (`TASK-38`) | `RF-27`, `RF-29`, `RF-41`, Tabla `2.7.1` ERS, `INT-05` |
 | **OP-12** | Rehacer platillo (`redo`) con orden en `DELIVERED` y descuento extra de insumos en Inventario | **Pendiente de cerrar contrato con Inventario** *(Diseño listo para S5)* | Backend + Frontend Orders + Inventario (Héctor) | Sprint 5 (`TASK-32`, `TASK-23`) | `TASK-32`, `TASK-23`, `INT-02` |
 | **Propuesta Menú → Inventario** | Suscripción paralela (fan-out Pub/Sub) de Inventario y OrdersKDS a los eventos de disponibilidad de Menú | **Pendiente de formalizar en Broker** | Inventario (Héctor) + Menú + Backend Orders | Sprint 5 (`TASK-21b`, `TASK-38`) | `TASK-21b`, `INT-01`, `INT-04` |
 | **OP-10** | Topología compartida de RabbitMQ, vhost, colas, DLQ y credenciales de staging | **En curso** | Infraestructura / Broker + Backend Orders | Sprint 5 (`TASK-38`) | `TASK-05`, `TASK-07`, `TASK-38`, `INT-01..12` |
@@ -89,3 +90,19 @@
 - **Hito de resolución:** Sprint 6 (`INT-03`).
 - **Acciones pendientes:**
   - [ ] Definir con el equipo de Sala si su mapa de mesas consumirá el canal WebSocket `/ws/waiter` (`floor` / `user:{userId}`) para pintar la alerta de orden lista para recoger (**Opción A, recomendada**) o si el frontend de Órdenes exportará el componente federado `./ReadyOrdersAlert` (**Opción B**, activando `TASK-42`).
+
+---
+
+### 2.5 OP-14 [CRÍTICO]: Acuerdo de integración con Equipo 2 (Pagos) ante paso `DELIVERED → VOIDED` posterior a solicitud de cuenta (`RF-41` → `RF-29` → `RF-27`)
+
+- **Estado:** **CRÍTICO** — Pendiente de acuerdo en acople con Equipo 2 (`Payments-BE`).
+- **Documento ADR completo:** [`docs/adr/0020-op14-critico-integracion-pagos-anulacion-post-cuenta-rehechura.md`](0020-op14-critico-integracion-pagos-anulacion-post-cuenta-rehechura.md).
+- **Dueño:** Backend Orders & KDS (Equipo 5) + Microservicio de Pagos (Equipo 2).
+- **Resumen del escenario extremo:**
+  1. Un mesero pide la cuenta (`RF-41`, `POST /orders/{orderId}/request-bill`) de una comanda `DELIVERED` de 1 solo platillo activo, emitiéndose `ordenes.cuenta.solicitada` hacia Pagos.
+  2. Antes de liquidarse la cuenta, el cliente devuelve el platillo y el mesero solicita rehechura (`RF-29`, `PATCH /orders/{orderId}/items/{itemId}/redo`).
+  3. Cocina rechaza físicamente el platillo en rehechura por falta de stock (`RF-27`, `PATCH /orders/{orderId}/items/{itemId}/kitchen-reject`). Al quedar `0` platillos activos (`totalAmount = 0.00`), la comanda transiciona automáticamente de `DELIVERED` al estado terminal `VOIDED` (`Anulada`) y emite `ordenes.platillo.rechazado_cocina` (hacia Inventario/Menú).
+  4. **Brecha a resolver con Equipo 2:** Dado que en la tabla `2.7.1` del ERS no existe un evento de cancelación de cuenta dirigido a Pagos, se debe acordar con el Equipo 2 si:
+     - **Opción A:** Pagos se suscribe a `ordenes.platillo.rechazado_cocina` / `ordenes.comanda.mermada` para anular cuentas abiertas sin pagar cuando la orden pasa a `VOIDED`.
+     - **Opción B:** `orders-backend` reemite automáticamente `ordenes.cuenta.solicitada` con `status: "VOIDED"` y `totalAmount: 0.0` al ocurrir `DELIVERED → VOIDED`.
+     - **Opción C:** El cajero anula manualmente la cuenta abierta en Pagos.

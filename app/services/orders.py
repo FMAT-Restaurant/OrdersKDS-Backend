@@ -798,6 +798,7 @@ class OrderService:
 
         if order.total_amount is None:
             order.recalculate_total()
+            self._orders.save(order)
         active_count = sum(1 for item in order.items if item.status != ItemStatus.CANCELLED)
         bill_attempt_key = f"v{order.version or 1}:{order.total_amount}:{active_count}"
         await self._stage_payment_request(
@@ -806,7 +807,6 @@ class OrderService:
             attempt_key=bill_attempt_key,
         )
 
-        self._orders.save(order)
         await self._commit_or_raise_conflict(order_id)
 
         await notify_order_changed(order, notifier=self._notifier)
