@@ -75,7 +75,37 @@ _IDEMPOTENT_CONFIRM_STATUSES = {
     OrderStatus.PAID,
 }
 
+_NON_TRANSFERABLE_STATUSES = {
+    OrderStatus.PAID,
+    OrderStatus.CANCELLED,
+    OrderStatus.REJECTED,
+    OrderStatus.EXPIRED,
+    OrderStatus.VOIDED,
+    OrderStatus.WASTED,
+}
+
+_ALLOWED_CANCEL_STATUSES = {
+    OrderStatus.CREATED,
+    OrderStatus.RESERVED,
+    OrderStatus.REJECTED,
+}
+
 _NO_REASON_PROVIDED = "No reason provided"
+
+
+def _has_other_active_items(items: list[OrderItem], excluded_item_id: UUID) -> bool:
+    """Return True if at least one non-cancelled item other than excluded_item_id exists."""
+    return any(
+        item.public_id != excluded_item_id and item.status != ItemStatus.CANCELLED
+        for item in items
+    )
+
+
+def _has_undelivered_active_items(items: list[OrderItem]) -> bool:
+    """Return True if any non-cancelled item has not yet reached DELIVERED status."""
+    return any(
+        item.status not in (ItemStatus.DELIVERED, ItemStatus.CANCELLED) for item in items
+    )
 
 
 def _consolidate_order_items(items: list[OrderItem]) -> list[OrderCreatedItem]:
@@ -481,6 +511,9 @@ class OrderService:
         if not (is_creatable_or_reserved or is_delivered_redo_pending):
             raise InvalidStateTransitionError(order.status, ItemStatus.CANCELLED)
 
+        if not _has_other_active_items(order.items, target_item.public_id):
+            raise InvalidStateTransitionError(order.status, ItemStatus.CANCELLED)
+
         logger.info(
             "Item %s of order %s cancelled by actor %s (role=%s). Reason: %s",
             item_id,
@@ -510,14 +543,7 @@ class OrderService:
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
 
-        terminal_statuses = {
-            OrderStatus.PAID,
-            OrderStatus.CANCELLED,
-            OrderStatus.REJECTED,
-            OrderStatus.EXPIRED,
-            OrderStatus.VOIDED,
-        }
-        if order.status in terminal_statuses:
+        if order.status in _NON_TRANSFERABLE_STATUSES:
             raise InvalidStateTransitionError(order.status, "TRANSFER")
 
         if expected_version is not None and order.version != expected_version:
@@ -548,12 +574,7 @@ class OrderService:
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
 
-        allowed_cancel_statuses = {
-            OrderStatus.CREATED,
-            OrderStatus.RESERVED,
-            OrderStatus.REJECTED,
-        }
-        if order.status not in allowed_cancel_statuses:
+        if order.status not in _ALLOWED_CANCEL_STATUSES:
             raise InvalidStateTransitionError(order.status, OrderStatus.CANCELLED)
 
         logger.info(
@@ -581,6 +602,54 @@ class OrderService:
         await notify_order_changed(order, notifier=self._notifier)
         return order
 
+    def _stage_payment_request(
+        self,
+        order: Order,
+        event_cls: type[ChargeRequestedEvent | BillRequestedEvent],
+    ) -> None:
+        """Stage a charge or bill request event with frozen item prices into the outbox."""
+        if order.total_amount is None:
+            order.recalculate_total()
+        effective_total = (
+            order.total_amount if order.total_amount is not None else Decimal("0.00")
+        )
+        charge_items = _build_charge_items(order.items)
+        waiter_id = order.responsible_waiter_id or order.confirmed_by or order.created_by
+        table_id = f"MESA-{order.table_number}" if order.table_number is not None else None
+        payment_event = event_cls.for_order(
+            order.public_id,
+            total_amount=effective_total,
+            items=charge_items,
+            session_id=order.dining_session_id,
+            table_id=table_id,
+            waiter_id=waiter_id,
+            status=order.status.value,
+        )
+        payload = payment_event.model_dump(mode="json", by_alias=True)
+        validate_event_payload(payment_event.event_name, payload)
+        self._outbox.add(payment_event)
+
+    def _stage_order_wasted(
+        self,
+        order: Order,
+        *,
+        reason: str,
+        motivo: str,
+        note: str | None = None,
+    ) -> None:
+        """Stage an OrderWastedEvent into the outbox for uncharged kitchen or admin waste."""
+        wasted_items = _consolidate_order_items(order.items)
+        wasted_event = OrderWastedEvent.for_order(
+            order.public_id,
+            items=wasted_items,
+            reason=reason,
+            motivo=motivo,
+            note=note,
+        )
+        payload = wasted_event.model_dump(mode="json", by_alias=True)
+        validate_event_payload(wasted_event.event_name, payload)
+        self._outbox.add(wasted_event)
+
     async def void_order(
         self,
         order_id: UUID,
@@ -590,25 +659,11 @@ class OrderService:
     ) -> Order:
         """Administratively void an order in IN_PREPARATION status (RF-26, RF-27, ADR-0012).
 
-        Transitions the order from IN_PREPARATION to WASTED.
-        Stages both OrderWastedEvent and ChargeRequestedEvent into outbox atomically
-        in the same transaction.
-        Only users with 'admin' role are permitted (defense in depth).
-        Orders not in IN_PREPARATION (e.g. RESERVED or CREATED) raise
-        InvalidStateTransitionError.
-
-        Args:
-            order_id: Public UUID of target order.
-            auth: Authenticated caller context from JWT.
-            reason: Optional administrative reason.
-
-        Returns:
-            The order aggregate in WASTED status.
-
-        Raises:
-            OrderNotFoundError: If order does not exist (404).
-            ForbiddenRoleError: If caller lacks admin role (403).
-            InvalidStateTransitionError: If order is not in IN_PREPARATION status (409).
+        When ``charge_customer`` is True, transitions the order from IN_PREPARATION to
+        WASTED (awaiting settlement) and stages ChargeRequestedEvent into the outbox.
+        When ``charge_customer`` is False, transitions the order to terminal VOIDED
+        status and stages OrderWastedEvent into the outbox without charging the customer.
+        Only users with 'admin' role or administrative void permission are permitted.
         """
         self._verify_policy(
             auth,
@@ -620,59 +675,34 @@ class OrderService:
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
 
+        target_status = OrderStatus.WASTED if charge_customer else OrderStatus.VOIDED
         if order.status != OrderStatus.IN_PREPARATION:
-            raise InvalidStateTransitionError(order.status, OrderStatus.WASTED)
+            raise InvalidStateTransitionError(order.status, target_status)
 
         logger.info(
-            "Order %s administratively voided (WASTED) by actor %s (role=%s). Reason: %s",
+            "Order %s administratively voided (%s, charge=%s) by actor %s (role=%s). Reason: %s",
             order.public_id,
+            target_status.value,
+            charge_customer,
             auth.user_id,
             auth.role,
             reason or _NO_REASON_PROVIDED,
         )
 
-        order.mark_wasted()
-
         if charge_customer:
-            # 1. Stage ChargeRequestedEvent in outbox with frozen prices when customer is charged
-            if order.total_amount is None:
-                order.recalculate_total()
-            effective_total = (
-                order.total_amount if order.total_amount is not None else Decimal("0.00")
-            )
-            charge_items = _build_charge_items(order.items)
-            waiter_id = order.responsible_waiter_id or order.confirmed_by or order.created_by
-            table_id = f"MESA-{order.table_number}" if order.table_number is not None else None
-            charge_event = ChargeRequestedEvent.for_order(
-                order.public_id,
-                total_amount=effective_total,
-                items=charge_items,
-                session_id=order.dining_session_id,
-                table_id=table_id,
-                waiter_id=waiter_id,
-                status=order.status.value,
-            )
-            payload_charge = charge_event.model_dump(mode="json", by_alias=True)
-            validate_event_payload(charge_event.event_name, payload_charge)
-            self._outbox.add(charge_event)
+            order.mark_wasted()
+            self._stage_payment_request(order, ChargeRequestedEvent)
         else:
-            # 2. Stage OrderWastedEvent in outbox for pure waste (no customer charge)
-            wasted_items = _consolidate_order_items(order.items)
-            wasted_event = OrderWastedEvent.for_order(
-                order.public_id,
-                items=wasted_items,
+            order.mark_voided()
+            self._stage_order_wasted(
+                order,
                 reason="ADMINISTRATIVE",
                 motivo="administrativo",
             )
-            payload_wasted = wasted_event.model_dump(mode="json", by_alias=True)
-            validate_event_payload(wasted_event.event_name, payload_wasted)
-            self._outbox.add(wasted_event)
 
-        # 3. Save and commit transaction atomically
         self._orders.save(order)
         await self._commit_or_raise_conflict(order_id)
 
-        # 4. Push realtime notification
         await notify_order_changed(order, notifier=self._notifier)
         return order
 
@@ -687,22 +717,6 @@ class OrderService:
         Transitions the order from IN_PREPARATION to VOIDED (entire order cancelled).
         Publishes 'ordenes.comanda.mermada' with reason='KITCHEN_ERROR', motivo='error_cocina',
         and note. Zero charge is published (no CHARGE_REQUESTED event).
-
-        Roles: admin, chef.
-
-        Args:
-            order_id: Target order public UUID.
-            auth: Authenticated caller context (admin or chef).
-            note: Mandatory explanation note describing the kitchen error.
-
-        Returns:
-            The voided Order in VOIDED status.
-
-        Raises:
-            ForbiddenRoleError: If caller is not admin or chef (403).
-            NoteRequiredError: If note is empty or whitespace-only (422).
-            OrderNotFoundError: If order does not exist (404).
-            InvalidStateTransitionError: If order is not in IN_PREPARATION status (409).
         """
         self._verify_policy(
             auth,
@@ -730,25 +744,16 @@ class OrderService:
         )
 
         order.mark_voided()
-
-        # 1. Stage OrderWastedEvent in outbox (reason: KITCHEN_ERROR, no charge published)
-        wasted_items = _consolidate_order_items(order.items)
-        wasted_event = OrderWastedEvent.for_order(
-            order.public_id,
-            items=wasted_items,
+        self._stage_order_wasted(
+            order,
             reason="KITCHEN_ERROR",
             motivo="error_cocina",
             note=clean_note,
         )
-        payload_wasted = wasted_event.model_dump(mode="json", by_alias=True)
-        validate_event_payload(wasted_event.event_name, payload_wasted)
-        self._outbox.add(wasted_event)
 
-        # 2. Save and commit transaction atomically (strictly ZERO charge events staged)
         self._orders.save(order)
         await self._commit_or_raise_conflict(order_id)
 
-        # 3. Push realtime notification
         await notify_order_changed(order, notifier=self._notifier)
         return order
 
@@ -759,22 +764,10 @@ class OrderService:
     ) -> Order:
         """Request the bill for an order in DELIVERED status (RF-20, RF-21).
 
+        Requires the order to be in DELIVERED status with all non-cancelled items
+        in DELIVERED status (no pending redo items in kitchen).
         Publishes 'ordenes.cuenta.solicitada' with frozen dish prices and modifiers.
         The order remains in DELIVERED status until Payments confirms settlement.
-
-        Roles: waiter, admin (WAITER_ROLES).
-
-        Args:
-            order_id: Public UUID of target order.
-            auth: Authenticated caller context.
-
-        Returns:
-            The order aggregate representation.
-
-        Raises:
-            ForbiddenRoleError: If caller lacks waiter or admin role (403).
-            OrderNotFoundError: If order does not exist (404).
-            InvalidStateTransitionError: If order is not in DELIVERED status (409).
         """
         self._verify_policy(
             auth,
@@ -786,7 +779,7 @@ class OrderService:
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
 
-        if order.status != OrderStatus.DELIVERED:
+        if order.status != OrderStatus.DELIVERED or _has_undelivered_active_items(order.items):
             raise InvalidStateTransitionError(order.status, "REQUEST_BILL")
 
         logger.info(
@@ -796,25 +789,7 @@ class OrderService:
             auth.role,
         )
 
-        if order.total_amount is None:
-            order.recalculate_total()
-        effective_total = order.total_amount if order.total_amount is not None else Decimal("0.00")
-        charge_items = _build_charge_items(order.items)
-        waiter_id = order.responsible_waiter_id or order.confirmed_by or order.created_by
-        table_id = f"MESA-{order.table_number}" if order.table_number is not None else None
-
-        bill_event = BillRequestedEvent.for_order(
-            order.public_id,
-            total_amount=effective_total,
-            items=charge_items,
-            session_id=order.dining_session_id,
-            table_id=table_id,
-            waiter_id=waiter_id,
-            status=order.status.value,
-        )
-        payload = bill_event.model_dump(mode="json", by_alias=True)
-        validate_event_payload(bill_event.event_name, payload)
-        self._outbox.add(bill_event)
+        self._stage_payment_request(order, BillRequestedEvent)
 
         self._orders.save(order)
         await self._commit_or_raise_conflict(order_id)
