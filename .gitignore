@@ -19,6 +19,7 @@ __pycache__/
 htmlcov/
 coverage.xml
 junit.xml
+reports/
 
 # IDEs
 .idea/

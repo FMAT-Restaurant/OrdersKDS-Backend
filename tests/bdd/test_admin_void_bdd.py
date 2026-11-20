@@ -30,6 +30,8 @@ from app.repositories.orders import OrderRepository
 from app.repositories.processed_events import ProcessedEventsRepository
 from app.repositories.unit_of_work import SessionFactory, UnitOfWork
 
+pytestmark = [pytest.mark.bdd, pytest.mark.requirement("RF-26", "RF-27")]
+
 scenarios("admin_void.feature")
 
 

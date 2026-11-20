@@ -30,6 +30,11 @@ from app.repositories.orders import OrderRepository
 from app.repositories.processed_events import ProcessedEventsRepository
 from app.repositories.unit_of_work import SessionFactory, UnitOfWork
 
+pytestmark = [
+    pytest.mark.bdd,
+    pytest.mark.requirement("RF-04", "RF-18", "RF-20", "RF-21"),
+]
+
 scenarios("bill_request.feature")
 
 _EVENT_BILL_REQUESTED: Final[str] = "ordenes.cuenta.solicitada"
