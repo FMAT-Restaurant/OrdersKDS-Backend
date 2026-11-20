@@ -23,6 +23,11 @@ from app.db.session import get_session
 from app.domain.order_status import OrderStatus
 from app.main import app
 
+pytestmark = [
+    pytest.mark.bdd,
+    pytest.mark.requirement("RF-23", "RF-24", "RF-25"),
+]
+
 scenarios("cancellation.feature")
 
 

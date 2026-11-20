@@ -233,7 +233,7 @@ jobs:
       - name: Run Python contract and BDD tests
         run: |
           mkdir -p reports
-          pytest tests/contract tests/bdd --junitxml=reports/contract-bdd.xml
+          pytest tests/contract tests/bdd --junitxml=reports/contract-bdd.xml --html=reports/bdd-report.html --self-contained-html
 
       - name: Upload contract reports
         if: always()

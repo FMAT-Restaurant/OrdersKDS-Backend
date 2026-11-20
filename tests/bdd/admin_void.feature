@@ -1,5 +1,5 @@
 # language: en
-@bdd @RF-26 @RF-27
+@bdd
 Feature: Administrative Order Void (Wasted with Charge)
   As a restaurant administrator
   I want to void an order that is already in preparation
