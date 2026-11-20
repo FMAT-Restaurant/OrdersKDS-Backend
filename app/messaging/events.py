@@ -517,9 +517,13 @@ class BasePaymentRequestEvent(OrderEvent):
         status: str | None = None,
         correlation_id: UUID | None = None,
         data: dict[str, Any] | None = None,
+        attempt_key: str | int | None = None,
     ) -> Self:
         """Build the deterministic payment request event for an order."""
-        event_id = uuid5(NAMESPACE_URL, f"{cls.event_name}:{order_id}")
+        seed = f"{cls.event_name}:{order_id}"
+        if attempt_key is not None:
+            seed = f"{seed}:{attempt_key}"
+        event_id = uuid5(NAMESPACE_URL, seed)
         items_list = items or []
         effective_total = total_amount if total_amount is not None else Decimal("0.00")
         effective_status = status if status is not None else cls.default_status

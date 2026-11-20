@@ -55,7 +55,10 @@ class BillingStub:
         """React to regular bill requested event (DELIVERED orders)."""
         order_id = str(payload.get("orderId", ""))
         session_id = payload.get("sessionId")
-        total_amount = payload.get("totalAmount") or payload.get("montoTotal") or 100.0
+        raw_total = payload.get("totalAmount")
+        if raw_total is None:
+            raw_total = payload.get("montoTotal")
+        total_amount = raw_total if raw_total is not None else 100.0
 
         logger.info("BillingStub: received bill.requested for order %s", order_id)
         if not self.auto_pay:

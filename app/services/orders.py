@@ -102,8 +102,13 @@ def _has_other_active_items(items: list[OrderItem], excluded_item_id: UUID) -> b
 
 
 def _has_undelivered_active_items(items: list[OrderItem]) -> bool:
-    """Return True if any non-cancelled item has not yet reached DELIVERED status."""
-    return any(item.status not in (ItemStatus.DELIVERED, ItemStatus.CANCELLED) for item in items)
+    """Return True if any non-cancelled item is not DELIVERED or if all items are cancelled."""
+    if not items:
+        return False
+    active_items = [item for item in items if item.status != ItemStatus.CANCELLED]
+    if not active_items:
+        return True
+    return any(item.status != ItemStatus.DELIVERED for item in active_items)
 
 
 def _consolidate_order_items(items: list[OrderItem]) -> list[OrderCreatedItem]:
@@ -459,7 +464,7 @@ class OrderService:
         validate_event_payload(event.event_name, payload)
         self._outbox.add(event)
 
-        # 3. Transition handling (RESERVED -> REJECTED; DELIVERED -> cancel item & keep DELIVERED)
+        # 3. Transition handling (RESERVED -> REJECTED; DELIVERED -> cancel item or VOIDED)
         if order.status == OrderStatus.RESERVED:
             rejection_details = self._build_kitchen_rejection_details(
                 order=order,
@@ -473,6 +478,8 @@ class OrderService:
         else:
             target_item.mark_cancelled()
             order.recalculate_total()
+            if not _has_other_active_items(order.items, target_item.public_id):
+                order.mark_voided()
 
         self._orders.save(order)
         await self._commit_or_raise_conflict(order_id)
@@ -600,10 +607,12 @@ class OrderService:
         await notify_order_changed(order, notifier=self._notifier)
         return order
 
-    def _stage_payment_request(
+    async def _stage_payment_request(
         self,
         order: Order,
         event_cls: type[ChargeRequestedEvent | BillRequestedEvent],
+        *,
+        attempt_key: str | int | None = None,
     ) -> None:
         """Stage a charge or bill request event with frozen item prices into the outbox."""
         if order.total_amount is None:
@@ -620,10 +629,12 @@ class OrderService:
             table_id=table_id,
             waiter_id=waiter_id,
             status=order.status.value,
+            attempt_key=attempt_key,
         )
         payload = payment_event.model_dump(mode="json", by_alias=True)
         validate_event_payload(payment_event.event_name, payload)
-        self._outbox.add(payment_event)
+        if not await self._outbox.exists(payment_event.event_id):
+            self._outbox.add(payment_event)
 
     def _stage_order_wasted(
         self,
@@ -687,7 +698,7 @@ class OrderService:
 
         if charge_customer:
             order.mark_wasted()
-            self._stage_payment_request(order, ChargeRequestedEvent)
+            await self._stage_payment_request(order, ChargeRequestedEvent)
         else:
             order.mark_voided()
             self._stage_order_wasted(
@@ -785,7 +796,15 @@ class OrderService:
             auth.role,
         )
 
-        self._stage_payment_request(order, BillRequestedEvent)
+        if order.total_amount is None:
+            order.recalculate_total()
+        active_count = sum(1 for item in order.items if item.status != ItemStatus.CANCELLED)
+        bill_attempt_key = f"v{order.version or 1}:{order.total_amount}:{active_count}"
+        await self._stage_payment_request(
+            order,
+            BillRequestedEvent,
+            attempt_key=bill_attempt_key,
+        )
 
         self._orders.save(order)
         await self._commit_or_raise_conflict(order_id)

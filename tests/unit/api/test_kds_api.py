@@ -932,6 +932,44 @@ def test_kitchen_reject_redo_item_on_delivered_order_success(
     assert len(spy_notifier.notified_orders) == 1
 
 
+def test_kitchen_reject_last_active_redo_item_on_delivered_order_transitions_to_voided(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+) -> None:
+    """Rejecting the sole active redo item in a DELIVERED order moves it to VOIDED."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=4,
+        status=OrderStatus.DELIVERED,
+    )
+    sole_redo_item = OrderItem(
+        public_id=uuid4(),
+        dish_id="dish-sole",
+        name="Plato Único",
+        quantity=1,
+        unit_price=Decimal("95.00"),
+        status=ItemStatus.PENDING,
+    )
+    order.items.append(sole_redo_item)
+    order.recalculate_total()
+    test_db[order.public_id] = order
+
+    resp = client.patch(
+        f"/orders/{order.public_id}/items/{sole_redo_item.public_id}/kitchen-reject",
+        headers=auth_headers("chef"),
+        json={"reason": "Se agotó el ingrediente para reponer el único platillo"},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "VOIDED"
+    assert Decimal(str(data["totalAmount"])) == Decimal("0.00")
+    assert data["items"][0]["status"] == "CANCELLED"
+    assert test_db[order.public_id].status == OrderStatus.VOIDED
+
+
 def test_kitchen_reject_delivered_item_on_delivered_order_raises_409(
     client: TestClient,
     auth_headers: Callable[[str], dict[str, str]],
