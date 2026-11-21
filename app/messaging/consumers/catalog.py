@@ -157,6 +157,7 @@ class CatalogConsumer:
         if event_name in (
             EventName.MENU_SOURCE_DELETED,
             EventName.INVENTORY_RECIPE_NOT_AVAILABLE,
+            EventName.INVENTORY_RECIPE_INCOMPLETE,
         ):
             return await self._repository.upsert(dish_id, available=False, **common)
         if event_name in (
