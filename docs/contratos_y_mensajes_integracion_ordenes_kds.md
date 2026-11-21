@@ -1,7 +1,7 @@
 # Contratos y Mensajes de Integración: Órdenes & KDS con Inventario y Menú
 
-> **Versión:** 1.2.0  
-> **Fecha:** 19 de Noviembre de 2026  
+> **Versión:** 1.3.0  
+> **Fecha:** 20 de Noviembre de 2026  
 > **Estado:** Actualizado y Contrastado contra Implementación Real (`Inventory-Backend`, `Menu-Backend`, `orders-backend`, `orders-frontend`)  
 > **Microservicios involucrados:**
 > - **Órdenes & KDS** (`orders-backend`, `orders-frontend`)
@@ -37,13 +37,17 @@ Tras la reunión sostenida entre los líderes de equipo de **Menú (Tony)**, **I
      - En **Mesero (`OrderTicketWidget`)**: Se notifica al mesero que cocina no confirmó a tiempo, permitiéndole: (a) reintentar confirmación, (b) modificar platillos en el borrador local (pudiendo vaciar/sustituir los platillos en la UI antes de reemplazar la lista vía `PATCH /orders/{orderId}/items`), o (c) cancelar y crear una nueva orden limpiamente.
 5. **Nomenclatura Microfrontend:**
    - La vista del mesero integrada en Menú utiliza el término **"Orden"** (`entityLabel="orden"`), mientras KDS mantiene **"Comanda"**, soportando eventos DOM bilingües (`fmat:orden:*` y `fmat:comanda:*`) y propagando `sourceId`, `offerId` y `unitPrice` de extremo a extremo.
-6. **Estrategia de Exchanges y Routing Keys Duales (Alineado a CloudAMQP `tsaxufiv`):**
-   - **Órdenes (`ordenes.topic`)** publica con routing keys primarias en español y routing keys duales en inglés para `Inventory-Backend` (`ordenes.order.created`, `ordenes.order.cancelled`, `ordenes.order.expired`, `ordenes.order.served`, `ordenes.order.in_preparation`, `ordenes.dish.rejected`, `ordenes.order.wasted`, `ordenes.dish.prepared`).
-   - El worker `InboundConsumerWorker` (`orders.inventory.inbound`) declara y escucha los cuatro topic exchanges reales del broker (`tsaxufiv`): `inventory.topic` (`inventory.reservation.*`, `inventory.recipe.*`, `inventory.source.*`, `inventario.stock.*`), `menu.topic` (`menu.#`), `sala.events` (`sala.#`, `dining.#`, configurable vía `RABBITMQ_FLOOR_EXCHANGE`) y `ordenes.topic` (`inventory.reservation.*`, `inventario.stock.*`, `pagos.#`, `payments.#`, `pago.#`, `sala.#`, `dining.#`, `menu.*`).
-7. **Seguridad PBAC (`AccessPolicy` con fallback RBAC) y Enrutamiento Kong Dual (6 Módulos Auth):**
+6. **Estrategia de Exchanges, Routing Keys Duales y `correlationId` (Alineado a CloudAMQP `tsaxufiv`):**
+   - **Órdenes (`ordenes.topic`)** publica con routing keys primarias en español y routing keys duales en inglés para `Inventory-Backend` (`ordenes.order.created`, `ordenes.order.cancelled`, `ordenes.order.expired`, `ordenes.order.served`, `ordenes.order.in_preparation`, `ordenes.dish.rejected`, `ordenes.dish.redo`, `ordenes.order.wasted`, `ordenes.dish.prepared`).
+   - **Garantía de `correlationId` no nulo:** Todos los eventos que heredan de `OrderEvent` y toda publicación en `EventPublisher.publish` aseguran `correlationId` no nulo tanto en el cuerpo JSON como en la propiedad AMQP `correlation_id` (tomando `orderId` o `eventId` como fallback cuando no exista otro identificador de correlación explícito).
+   - El worker `InboundConsumerWorker` (`orders.inventory.inbound`) declara y escucha los cuatro topic exchanges reales del broker (`tsaxufiv`): `inventory.topic` (`inventory.reservation.*`, `inventory.redo.*`, `inventory.recipe.*`, `inventory.source.*`, `inventario.stock.*`), `menu.topic` (`menu.#`), `sala.events` (`sala.#`, `dining.#`, configurable vía `RABBITMQ_FLOOR_EXCHANGE`) y `ordenes.topic` (`inventory.reservation.*`, `inventory.redo.*`, `inventario.stock.*`, `pagos.#`, `payments.#`, `pago.#`, `sala.#`, `dining.#`, `menu.*`).
+7. **Flujo de Rehechuras con Inventario (Opción 1A — Handler Dedicado Corto):**
+   - Al solicitar la rehechura de un platillo ya entregado (`PATCH /orders/{orderId}/items/{itemId}/redo`), `orders-backend` valida primero disponibilidad en la proyección caché de Redis (`422 DISH_UNAVAILABLE` si el platillo/oferta está bloqueado), pasa el ítem `DELIVERED -> PENDING` preservando su orden en `DELIVERED`, guarda la nota previa y encola `DishRedoRequestedEvent` (`ordenes.platillo.rehecho` / `ordenes.dish.redo`) con `redoId`, `itemId`, `offerId`, `plateId`, `sourceId`, `quantity` y motivo.
+   - `Inventory-Backend` valida existencias reales y descuenta por FEFO usando `orderId` como referencia, respondiendo `inventory.redo.confirmed` (ACK informativo) o `inventory.redo.rejected` (compensación automática en `orders-backend`: regresa el ítem `PENDING -> DELIVERED`, restaura la nota previa, guarda el motivo bajo `rejectionDetails.redoRejection` y notifica por WebSocket a Mesero y KDS).
+8. **Seguridad PBAC (`AccessPolicy` con fallback RBAC) y Enrutamiento Kong Dual (6 Módulos Auth):**
    - Todos los endpoints REST de `/orders`, `/kds` y los canales WebSocket `/ws/kds` y `/ws/waiter` están expuestos bajo `/api/v1/orders` (puerto `8082`, consumido por `ordenesApp:5177`) y `/api/v1/kitchen` (puerto `8086`, consumido por `cocinaApp:5179`), manteniendo también `/api/v1` y rutas raíz para compatibilidad interna.
    - `require_access` y `authorize_websocket(..., policy=...)` evalúan políticas PBAC (`orders:*` / `kitchen:*`) leyendo headers inyectados por Kong (`x-user-id`, `x-staff-id`, `x-user-roles`, `x-user-role`, `x-user-permissions`, `x-user-type`) y claims JWT (`user_id`/`sub`, `roles`/`role`, `permissions`, `staffId`, `userType`), incluyendo `CHEF_MASTER` → `chef`, acceso administrativo cuando `userType`/`x-user-type` es `ADMINISTRADOR`/`ADMIN` y fallback por rol para tokens de desarrollo sin lista de `permissions`.
-8. **Sincronización WebSocket Cross-Process (Redis Pub/Sub Bridge):**
+9. **Sincronización WebSocket Cross-Process (Redis Pub/Sub Bridge):**
    - Los eventos asíncronos procesados en el worker (`app/workers/run_all.py`) —como confirmaciones/rechazos de inventario o expiraciones— publican mensajes en el canal Redis Pub/Sub `orders:realtime:events` (`RedisRealtimeBridge`), y el proceso API (`app/main.py`) los reenvía en tiempo real mediante `RealtimeChannelRouter` hacia los clientes WebSocket `/ws/kds` y `/ws/waiter`.
 
 ---
@@ -349,7 +353,7 @@ Todos los eventos outbound se publican en el Topic Exchange de Órdenes: **`orde
 
 ### 3.7. `OrderExpiredEvent` (Orden Expirada por Timeout de Saga o TTL en KDS)
 
-- **Acción desencadenante:** El temporizador de saga backend detecta que Inventario no respondió en 60 segundos (`CREATED`), o en KDS/Reserva transcurre el TTL de 15 minutos (`RESERVED`) sin inicio de preparación.
+- **Acción desencadenante:** El temporizador de saga backend (`SAGA_TIMEOUT_SECONDS`, `120` segundos por defecto en staging/local; `60` si no se sobreescribe en configuración base) detecta que Inventario no respondió mientras la orden sigue en `CREATED`, o en KDS/Reserva transcurre el TTL de 15 minutos (`RESERVED`) sin inicio de preparación.
 - **Routing Keys emitidas (con `RABBITMQ_DUAL_ROUTING=true`):**
   - `ordenes.orden.expirada`
   - `ordenes.order.cancelled` *(Para liberación automática de reserva en `Inventory-Backend`)*
@@ -391,12 +395,66 @@ Todos los eventos outbound se publican en el Topic Exchange de Órdenes: **`orde
 {
   "eventId": "d1a2b3c4-0006-5000-8000-666677778888",
   "orderId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+  "correlationId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
   "itemId": "77aacc11-0001-4000-8000-999900001111",
   "offerId": "offer-hamburguesa-doble-01",
   "plateId": "source-hamburguesa-receta-01",
   "sourceId": "source-hamburguesa-receta-01",
   "quantity": 2,
   "isRedo": false
+}
+```
+
+---
+
+### 3.9. `DishRedoRequestedEvent` (Solicitud de Rehechura para Validación y Consumo FEFO)
+
+- **Flujo REST y acción desencadenante:**
+  1. En `OrderTicketWidget`, el mesero solicita rehacer un platillo de una orden en estado `DELIVERED` enviando `PATCH /orders/{orderId}/items/{itemId}/redo` con `{ "note": "..." }` obligatorio.
+  2. `OrderService.redo_order_item` valida primero la disponibilidad del platillo (`dishId`/`offerId`) en Redis (`422 DISH_UNAVAILABLE` si fue dado de baja o agotado).
+  3. Si está disponible, guarda la nota original, devuelve el ítem `DELIVERED -> PENDING` manteniendo la orden en `DELIVERED`, y encola `DishRedoRequestedEvent` en Outbox.
+- **Routing Keys emitidas (con `RABBITMQ_DUAL_ROUTING=true`):**
+  - `ordenes.platillo.rehecho`
+  - `ordenes.dish.redo` *(Alias en inglés consumido por el handler dedicado de `Inventory-Backend`)*
+- **Destinatarios:** **Inventario** (validación de stock neto real y consumo FEFO directo referenciado por `orderId`) y **KDS** (vía WebSocket mientras se procesa).
+
+#### Schema JSON del Payload (`contracts/events/ordenes.platillo.rehecho.v1.json`):
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DishRedoRequestedEvent",
+  "type": "object",
+  "required": ["eventId", "redoId", "orderId", "itemId", "offerId", "quantity", "reason"],
+  "properties": {
+    "eventId": { "type": "string", "minLength": 1 },
+    "redoId": { "type": "string", "minLength": 1 },
+    "orderId": { "type": "string", "minLength": 1 },
+    "correlationId": { "type": ["string", "null"] },
+    "itemId": { "type": "string", "minLength": 1 },
+    "offerId": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "plateId": { "type": "string", "maxLength": 100 },
+    "sourceId": { "type": "string", "maxLength": 100 },
+    "quantity": { "type": "integer", "minimum": 1 },
+    "reason": { "type": "string", "minLength": 1 },
+    "motivo": { "type": "string" }
+  }
+}
+```
+
+#### Ejemplo de Mensaje Real (`ordenes.platillo.rehecho` / `ordenes.dish.redo`):
+```json
+{
+  "eventId": "d3f18c7b-5b5a-4d1c-9e84-0c1d9e7c1111",
+  "redoId": "8f294a10-2e31-4c9a-9c12-1e2f3a4b5555",
+  "orderId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+  "correlationId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+  "itemId": "77aacc11-0001-4000-8000-999900001111",
+  "offerId": "offer-hamburguesa-doble-01",
+  "plateId": "source-hamburguesa-receta-01",
+  "sourceId": "source-hamburguesa-receta-01",
+  "quantity": 1,
+  "reason": "Platillo frío",
+  "motivo": "Platillo frío"
 }
 ```
 
@@ -459,9 +517,10 @@ Todos los eventos outbound se publican en el Topic Exchange de Órdenes: **`orde
   - `inventario.stock.insuficiente` *(patrón `inventario.stock.*` en `inventory.topic`)*
   - `inventory.stock.insufficient` *(legacy alias)*
 - **Efecto en Órdenes:**
-  - Transiciona la orden a `REJECTED`.
-  - Almacena `rejectionDetails` con los ingredientes faltantes (`faltantes` / `missingIngredients`) y los platillos afectados (`rejectedItems`).
-  - Notifica en tiempo real por WebSocket a `OrderTicketWidget` para que el mesero visualice el modal de ingredientes faltantes y ajuste o elimine platillos.
+  - Si llega un rechazo de protocolo con `errorCode` en `ALREADY_SERVED`, `RESERVATION_NOT_FOUND` o `RESERVATION_NOT_ACTIVE`, se registra en logs y se ignora sin marcar la orden como `REJECTED`.
+  - Si llega un evento tardío sobre una orden en estado `EXPIRED`, `CANCELLED`, `IN_PREPARATION`, `DELIVERED`, `PAID`, `VOIDED` o `WASTED`, se ignora de forma segura sin enviarlo al DLQ.
+  - Si la orden está en `CREATED` o `RESERVED`, transiciona a `REJECTED`, almacena `rejectionDetails` (aceptando cantidades enteras o fraccionarias en `kg`/`L`) y notifica por WebSocket.
+  - Si la orden ya está en `REJECTED` (caso doble emisión: `inventory.reservation.rejected` crudo seguido de `inventario.stock.insuficiente` enriquecido), **enriquece `order.rejection_details`** y re-notifica al frontend en lugar de enviarlo a DLQ.
 
 #### Schema JSON del Mensaje Esperado:
 ```json
@@ -542,9 +601,10 @@ Todos los eventos outbound se publican en el Topic Exchange de Órdenes: **`orde
     - `menu.source.created` / `menu.source.updated` / `menu.source.deleted` *(recetas / fuentes físicas identificadas por `sourceId`)*
     - `menu.offer.created` / `menu.offer.updated` / `menu.oferta.creada` / `menu.oferta.actualizada` *(ofertas comerciales identificadas por `offerId` / `data.id`)*
     - `menu.catalog.updated` / `menu.catalogo.actualizado` / `menu.platillo.disponibilidad_actualizada` / `menu.platillo.precio_actualizado` / `menu.platillo.estado_actualizado`
-  - **Inventario (`inventory.topic` y `ordenes.topic`, patrones `inventory.reservation.*`, `inventory.recipe.*`, `inventory.source.*`, `inventario.stock.*`):**
+  - **Inventario (`inventory.topic` y `ordenes.topic`, patrones `inventory.reservation.*`, `inventory.redo.*`, `inventory.recipe.*`, `inventory.source.*`, `inventario.stock.*`):**
     - `inventory.recipe.availability-changed` *(con `plateId`/`sourceId` e `isAvailable`)*
     - `inventory.recipe.not-available` *(marca disponibilidad `false` para el `plateId`/`sourceId` afectado)*
+    - `inventory.recipe.incomplete` *(marca disponibilidad `false` para la receta con insumos faltantes/inexistentes sin enviar el evento a DLQ)*
     - `inventory.source.availability.updated` *(contrato AsyncAPI de Inventario hacia Menú/Órdenes con `sourceId` e `isAvailable`)*
   - **Sala (`sala.events` vía `RABBITMQ_FLOOR_EXCHANGE` y `ordenes.topic`, patrones `sala.#`, `dining.#`) y Pagos (`ordenes.topic`, patrones `pagos.#`, `payments.#`, `pago.#`):**
     - Sincronización de sesiones de mesa (`dining.*`, `sala.*`) y confirmación/cierre de pagos (`pagos.*`, `payments.*`).
@@ -583,6 +643,52 @@ Todos los eventos outbound se publican en el Topic Exchange de Órdenes: **`orde
       "station": "plancha"
     }
   ]
+}
+```
+
+---
+
+### 4.4. Eventos de Ciclo de Vida de Reserva (`inventory.reservation.expired`, `consumed`, `released`)
+
+- **Routing Keys escuchadas:**
+  - `inventory.reservation.expired` *(transiciona órdenes elegibles `CREATED` / `RESERVED` a `EXPIRED`, deduplicado con UUID5 específico para evitar colisión si Inventario reutiliza `OrderCreatedEvent.eventId`, y notifica vía WebSocket)*.
+  - `inventory.reservation.consumed`, `inventory.reservation.released` y `inventory.reservation.cancelled` *(confirmaciones informativas validadas con `ReservationLifecycleAckMessage` y registradas en log sin provocar DLQ)*.
+
+---
+
+### 4.5. Respuestas de Rehechura (`inventory.redo.confirmed` / `inventory.redo.rejected`)
+
+- **Emisor:** **Inventario** (`Inventory-Backend`, exchange `inventory.topic`).
+- **Routing Keys escuchadas (`InboundConsumerWorker`):**
+  - `inventory.redo.confirmed` *(confirmación informativa tras descuento FEFO exitoso; validada con `RedoConfirmedMessage` y registrada en log sin alterar el flujo de KDS)*.
+  - `inventory.redo.rejected` *(compensación asíncrona cuando no hay stock o receta válida; atendida por `handle_redo_rejected`)*.
+- **Efecto en Órdenes ante `inventory.redo.rejected`:**
+  1. De forma idempotente (`processed_events`), revierte el platillo afectado de `PENDING -> DELIVERED` conservando la orden en `DELIVERED`.
+  2. Restaura la nota original previa a la solicitud de rehechura.
+  3. Registra `rejectionDetails.redoRejection` (`itemId`, `itemName`, `redoId`, `reason`, `missingIngredients`) para informar en `OrderTicketWidget` (`RedoRejectionBanner`).
+  4. Emite `item_status_changed` y `order_status_changed` por WebSocket para retirar el ítem de KDS y alertar al mesero.
+
+#### Ejemplo de `inventory.redo.rejected`:
+```json
+{
+  "eventId": "d3f18c7b-5b5a-4d1c-9e84-0c1d9e7c1111",
+  "redoId": "8f294a10-2e31-4c9a-9c12-1e2f3a4b5555",
+  "orderId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+  "itemId": "77aacc11-0001-4000-8000-999900001111",
+  "correlationId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+  "status": "rejected",
+  "errorCode": "INSUFFICIENT_STOCK",
+  "reason": "Stock insuficiente para rehechura",
+  "missingIngredients": ["Pan brioche"],
+  "items": [
+    {
+      "itemId": "6aff319efe2972550cae2a6a",
+      "itemName": "Pan brioche",
+      "requestedQuantity": 1,
+      "availableStock": 0
+    }
+  ],
+  "timestamp": "2026-11-21T03:25:00.000Z"
 }
 ```
 
@@ -681,19 +787,20 @@ stateDiagram-v2
     CREATED --> RESERVED: inventario.stock.reservado (Stock confirmado)
     CREATED --> REJECTED: inventario.stock.insuficiente (Faltan insumos)
     CREATED --> CANCELLED: Mesero cancela orden (ordenes.orden.cancelada)
-    CREATED --> EXPIRED: Timeout de saga 60s (ordenes.orden.expirada)
+    CREATED --> EXPIRED: Timeout de saga 60s-120s o inventory.reservation.expired (ordenes.orden.expirada)
     
     REJECTED --> CREATED: Mesero modifica platillos y reenvía
     REJECTED --> CANCELLED: Mesero descarta orden
     
     RESERVED --> IN_PREPARATION: Cocinero inicia preparación en KDS (ordenes.orden.en_preparacion / ordenes.order.served / ordenes.order.in_preparation)
     RESERVED --> REJECTED: Cocinero rechaza por insumos en KDS (ordenes.platillo.rechazado_cocina / ordenes.dish.rejected)
-    RESERVED --> EXPIRED: TTL 15 min -> Pestaña Caducados (10 min de gracia visual; ordenes.orden.expirada / ordenes.order.cancelled / ordenes.order.expired)
+    RESERVED --> EXPIRED: TTL 15 min -> Pestaña Caducados (10 min de gracia visual; ordenes.orden.expirada / ordenes.order.cancelled / ordenes.order.expired / inventory.reservation.expired)
     RESERVED --> CANCELLED: Mesero cancela orden antes de cocción (ordenes.orden.cancelada / ordenes.order.cancelled)
     
     IN_PREPARATION --> DELIVERED: Cocina finaliza y entrega platillos
     IN_PREPARATION --> WASTED: Chef anula comanda por merma (ordenes.comanda.mermada)
     
+    DELIVERED --> DELIVERED: Rehechura (ordenes.platillo.rehecho -> inventory.redo.confirmed / inventory.redo.rejected)
     DELIVERED --> PAID: Pagos confirma transacción (pagos.pago.completado)
 ```
 
