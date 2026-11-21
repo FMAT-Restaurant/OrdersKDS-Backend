@@ -34,7 +34,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, synonym
 
 from app.db.base import Base
 from app.domain.constants import MAX_CATALOG_ID_LENGTH, MAX_NOTE_LENGTH
-from app.domain.errors import ShiftClosedError
+from app.domain.errors import InvalidStateTransitionError, ShiftClosedError
 from app.domain.order_status import (
     ItemStatus,
     OrderStatus,
@@ -218,6 +218,82 @@ class Order(Base):
         ensure_transition_allowed(self.status, OrderStatus.CANCELLED)
         self.status = OrderStatus.CANCELLED
 
+    def save_pre_redo_note(self, item: OrderItem) -> None:
+        """Persist pre-redo item notes in order metadata for later restoration."""
+        details: dict[str, object] = (
+            dict(self.rejection_details) if isinstance(self.rejection_details, dict) else {}
+        )
+        raw_map = details.get("redoOriginalNotes")
+        redo_map: dict[str, str | None] = (
+            {str(k): (str(v) if v is not None else None) for k, v in raw_map.items()}
+            if isinstance(raw_map, dict)
+            else {}
+        )
+        item_key = str(item.public_id)
+        if item_key not in redo_map and not getattr(item, "_has_pre_redo_notes", False):
+            redo_map[item_key] = item.notes
+        details["redoOriginalNotes"] = redo_map
+        self.rejection_details = details
+
+    def restore_pre_redo_note(self, item: OrderItem) -> None:
+        """Restore pre-redo item notes once a redo finishes or is compensated."""
+        details: dict[str, object] = (
+            dict(self.rejection_details) if isinstance(self.rejection_details, dict) else {}
+        )
+        raw_map = details.get("redoOriginalNotes")
+        item_key = str(item.public_id)
+        if isinstance(raw_map, dict) and item_key in raw_map:
+            redo_map: dict[str, object] = dict(raw_map)
+            raw_original = redo_map.pop(item_key)
+            original_note = str(raw_original) if raw_original is not None else None
+            item.restore_notes_after_redo(fallback_original=original_note, has_fallback=True)
+            if redo_map:
+                details["redoOriginalNotes"] = redo_map
+            else:
+                details.pop("redoOriginalNotes", None)
+            self.rejection_details = details or None
+            return
+        if getattr(item, "_has_pre_redo_notes", False):
+            item.restore_notes_after_redo()
+
+    def record_redo_rejection(
+        self,
+        *,
+        item: OrderItem,
+        reason: str | None,
+        missing_ingredients: list[str],
+        redo_id: UUID | None = None,
+    ) -> None:
+        """Store asynchronous redo rejection metadata without leaving DELIVERED status."""
+        details: dict[str, object] = (
+            dict(self.rejection_details) if isinstance(self.rejection_details, dict) else {}
+        )
+        details["redoRejection"] = {
+            "source": "inventory_redo",
+            "itemId": str(item.public_id),
+            "itemName": item.name,
+            "redoId": str(redo_id) if redo_id else None,
+            "reason": reason or "Stock insuficiente para rehechura",
+            "missingIngredients": list(missing_ingredients),
+        }
+        self.rejection_details = details
+
+    def clear_redo_rejection(self, item_id: UUID | None = None) -> None:
+        """Remove stored redo rejection metadata globally or for one matching item."""
+        if (
+            not isinstance(self.rejection_details, dict)
+            or "redoRejection" not in self.rejection_details
+        ):
+            return
+        details = dict(self.rejection_details)
+        raw_redo = details.get("redoRejection")
+        if item_id is not None and isinstance(raw_redo, dict):
+            recorded_item_id = raw_redo.get("itemId")
+            if recorded_item_id and str(recorded_item_id) != str(item_id):
+                return
+        details.pop("redoRejection", None)
+        self.rejection_details = details or None
+
 
 class OrderItem(Base):
     """Single line of an order."""
@@ -292,6 +368,12 @@ class OrderItem(Base):
         """Transition item to CANCELLED."""
         ensure_item_transition_allowed(self.status, ItemStatus.CANCELLED)
         self.status = ItemStatus.CANCELLED
+
+    def revert_redo_to_delivered(self) -> None:
+        """Compensate a rejected redo by returning a PENDING item back to DELIVERED."""
+        if self.status != ItemStatus.PENDING:
+            raise InvalidStateTransitionError(self.status, ItemStatus.DELIVERED)
+        self.status = ItemStatus.DELIVERED
 
 
 class Outbox(Base):
