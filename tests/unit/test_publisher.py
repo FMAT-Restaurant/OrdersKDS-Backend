@@ -6,14 +6,30 @@ Satisfies: RNF-01, RNF-13, RF-10, RF-19, OP-10
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import aio_pika
 import pytest
 
-from app.messaging.events import EventName, OrderCreatedEvent
-from app.messaging.publisher import EventPublisher, EventPublishError
+from app.messaging.events import (
+    BillRequestedEvent,
+    ChargeRequestedEvent,
+    DishPreparedEvent,
+    DishRedoRequestedEvent,
+    EventName,
+    KitchenDishRejectedEvent,
+    OrderCancelledEvent,
+    OrderConfirmedEvent,
+    OrderCreatedEvent,
+    OrderCreatedItem,
+    OrderEvent,
+    OrderExpiredEvent,
+    OrderInPreparationEvent,
+    OrderWastedEvent,
+)
+from app.messaging.publisher import EventPublisher, EventPublishError, _resolve_correlation_id
 
 
 @pytest.mark.unit
@@ -266,3 +282,136 @@ async def test_publish_with_dual_routing_emits_secondary_routing_key() -> None:
     assert calls[1].kwargs["routing_key"] == "ordenes.order.created"
     dual_body = json.loads(calls[1].kwargs["message"].body.decode("utf-8"))
     assert "items" in dual_body
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("RNF-01", "RNF-13")
+def test_order_event_defaults_correlation_id_to_order_id_and_preserves_explicit() -> None:
+    order_id = uuid4()
+    explicit_corr = uuid4()
+
+    default_event = OrderCreatedEvent.for_order(order_id)
+    assert default_event.correlation_id == order_id
+    assert default_event.model_dump(mode="json", by_alias=True)["correlationId"] == str(order_id)
+
+    explicit_event = OrderCreatedEvent.for_order(order_id, correlation_id=explicit_corr)
+    assert explicit_event.correlation_id == explicit_corr
+    assert explicit_event.model_dump(mode="json", by_alias=True)["correlationId"] == str(
+        explicit_corr
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("RNF-01", "RNF-13")
+@pytest.mark.asyncio
+async def test_publish_populates_non_null_correlation_id_from_payload_or_event_id() -> None:
+    mock_exchange = AsyncMock()
+    publisher = EventPublisher(
+        url="amqp://user:pass@localhost:5672/",
+        exchange_name="test.topic",
+        vhost="/",
+        dual_routing=True,
+    )
+    publisher._exchange = mock_exchange
+    publisher._connection = MagicMock(is_closed=False)
+    publisher._channel = MagicMock(is_closed=False)
+
+    order_id = uuid4()
+    event_id = uuid4()
+    legacy_payload = {
+        "eventId": str(event_id),
+        "orderId": str(order_id),
+        "correlationId": None,
+        "items": [{"offerId": "OFFER-BURGER-01", "quantity": 1}],
+    }
+
+    await publisher.publish(
+        event_type=EventName.ORDER_CREATED,
+        payload=legacy_payload,
+        event_id=event_id,
+        correlation_id=None,
+    )
+
+    assert mock_exchange.publish.await_count == 2
+    for call in mock_exchange.publish.await_args_list:
+        msg = call.kwargs["message"]
+        body = json.loads(msg.body.decode("utf-8"))
+        assert msg.correlation_id == str(order_id)
+        assert body["correlationId"] == str(order_id)
+
+    # Preserve explicit payload correlationId when correlation_id param is None
+    mock_exchange.publish.reset_mock()
+    explicit_corr = uuid4()
+    explicit_payload = {
+        "eventId": str(event_id),
+        "orderId": str(order_id),
+        "correlationId": str(explicit_corr),
+        "items": [{"offerId": "OFFER-BURGER-01", "quantity": 1}],
+    }
+    await publisher.publish(
+        event_type=EventName.ORDER_CREATED,
+        payload=explicit_payload,
+        event_id=event_id,
+        correlation_id=None,
+    )
+    explicit_msg = mock_exchange.publish.await_args_list[0].kwargs["message"]
+    explicit_body = json.loads(explicit_msg.body.decode("utf-8"))
+    assert explicit_msg.correlation_id == str(explicit_corr)
+    assert explicit_body["correlationId"] == str(explicit_corr)
+
+    # Helper fallback to event_id when neither correlationId nor orderId is present
+    fallback_event_id = uuid4()
+    assert (
+        _resolve_correlation_id({"correlationId": None, "orderId": "  "}, fallback_event_id, None)
+        == str(fallback_event_id)
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("RNF-01", "RNF-13")
+def test_all_outbound_order_events_populate_non_null_correlation_id() -> None:
+    order_id = uuid4()
+    item_id = uuid4()
+    created_item = OrderCreatedItem(
+        offerId="OFFER-BURGER-01",
+        plateId="PLATE-BURGER-01",
+        sourceId="PLATE-BURGER-01",
+        quantity=1,
+    )
+    events: list[OrderEvent] = [
+        OrderCreatedEvent.for_order(order_id, items=[created_item]),
+        OrderConfirmedEvent.for_order(order_id),
+        OrderInPreparationEvent.for_order(order_id, items=[created_item]),
+        KitchenDishRejectedEvent.for_item(
+            order_id,
+            item_id,
+            offer_id="OFFER-BURGER-01",
+            quantity=1,
+            reason="Sin pan",
+        ),
+        DishRedoRequestedEvent.for_item(
+            order_id,
+            item_id,
+            offer_id="OFFER-BURGER-01",
+            quantity=1,
+            reason="Platillo frío",
+        ),
+        DishPreparedEvent.for_item(order_id, item_id, offer_id="OFFER-BURGER-01", quantity=1),
+        OrderExpiredEvent.for_order(order_id, elapsed_seconds=120, items=[created_item]),
+        OrderCancelledEvent.for_order(order_id, items=[created_item]),
+        OrderWastedEvent.for_order(order_id, items=[created_item]),
+        ChargeRequestedEvent.for_order(order_id, total_amount=Decimal("165.00")),
+        BillRequestedEvent.for_order(order_id, total_amount=Decimal("165.00")),
+    ]
+
+    for event in events:
+        assert event.correlation_id == order_id
+        serialized = event.model_dump(mode="json", by_alias=True)
+        assert serialized["correlationId"] == str(order_id)
+
+    explicit_corr = uuid4()
+    explicit_event = OrderConfirmedEvent.for_order(order_id, correlation_id=explicit_corr)
+    assert explicit_event.correlation_id == explicit_corr
+    assert explicit_event.model_dump(mode="json", by_alias=True)["correlationId"] == str(
+        explicit_corr
+    )
