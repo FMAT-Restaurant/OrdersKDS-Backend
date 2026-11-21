@@ -54,6 +54,7 @@ _ALLOWED_TRANSITIONS: dict[OrderStatus, frozenset[OrderStatus]] = {
             OrderStatus.IN_PREPARATION,
             OrderStatus.REJECTED,
             OrderStatus.CANCELLED,
+            OrderStatus.EXPIRED,
         }
     ),
     OrderStatus.REJECTED: frozenset(
