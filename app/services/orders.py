@@ -47,6 +47,7 @@ from app.messaging.events import (
     ChargeRequestedEvent,
     ChargeRequestedItem,
     DishPreparedEvent,
+    DishRedoRequestedEvent,
     KitchenDishRejectedEvent,
     OrderCancelledEvent,
     OrderCreatedEvent,
@@ -294,6 +295,7 @@ class OrderService:
             )
             if is_redo:
                 target_item.mark_delivered()
+                order.clear_redo_rejection(target_item.public_id)
                 self._restore_pre_redo_note(order, target_item)
 
         delivered_now = self._sync_delivery_if_all_ready(order)
@@ -305,6 +307,34 @@ class OrderService:
             await notify_order_changed(order, notifier=self._notifier)
         return order
 
+    async def _validate_redo_catalog_availability(self, item: OrderItem) -> None:
+        """Verify catalog cache still allows ordering the dish/offer before staging a redo."""
+        if self._catalog_repo is None:
+            return
+        if item.dish_id:
+            await self._catalog_repo.validate_dish_available(item.dish_id)
+        offer_id = getattr(item, "offer_id", None)
+        if offer_id and offer_id != item.dish_id:
+            await self._catalog_repo.validate_dish_available(offer_id)
+
+    def _stage_dish_redo_requested(self, order: Order, item: OrderItem, reason: str) -> None:
+        """Stage DishRedoRequestedEvent in outbox for Inventory validation and FEFO consumption."""
+        raw_offer_id = getattr(item, "offer_id", None)
+        effective_plate_id = item.dish_id or raw_offer_id or str(item.public_id)
+        effective_offer_id = raw_offer_id or effective_plate_id
+        redo_event = DishRedoRequestedEvent.for_item(
+            order.public_id,
+            item.public_id,
+            offer_id=effective_offer_id,
+            plate_id=effective_plate_id,
+            source_id=effective_plate_id,
+            quantity=item.quantity,
+            reason=reason,
+        )
+        payload = redo_event.model_dump(mode="json", by_alias=True)
+        validate_event_payload(redo_event.event_name, payload)
+        self._outbox.add(redo_event)
+
     async def redo_order_item(
         self,
         order_id: UUID,
@@ -313,7 +343,7 @@ class OrderService:
         *,
         note: str | None,
     ) -> Order:
-        """Return one delivered item to PENDING without changing its order (RF-22, OP-12)."""
+        """Return one delivered item to PENDING and request Inventory FEFO check (RF-22, OP-12)."""
         self._verify_policy(auth, ITEM_REDO, "Role or permission not allowed for redoing item.")
         normalized_note = note.strip() if note is not None else ""
         if not normalized_note:
@@ -329,8 +359,12 @@ class OrderService:
         if order.status != OrderStatus.DELIVERED:
             raise InvalidStateTransitionError(order.status, OrderStatus.DELIVERED)
 
+        await self._validate_redo_catalog_availability(target_item)
+        order.clear_redo_rejection(target_item.public_id)
         self._save_pre_redo_note(order, target_item)
         target_item.mark_pending_for_redo(normalized_note)
+        self._stage_dish_redo_requested(order, target_item, normalized_note)
+
         self._orders.save(order)
         await self._commit_or_raise_conflict(order_id)
         await notify_item_changed(order, target_item, notifier=self._notifier)
@@ -859,42 +893,11 @@ class OrderService:
 
     def _save_pre_redo_note(self, order: Order, item: OrderItem) -> None:
         """Persist pre-redo notes in order metadata so completion restores them cleanly."""
-        details: dict[str, object] = (
-            dict(order.rejection_details) if isinstance(order.rejection_details, dict) else {}
-        )
-        raw_map = details.get("redoOriginalNotes")
-        redo_map: dict[str, str | None] = (
-            {str(k): (str(v) if v is not None else None) for k, v in raw_map.items()}
-            if isinstance(raw_map, dict)
-            else {}
-        )
-        item_key = str(item.public_id)
-        if item_key not in redo_map and not getattr(item, "_has_pre_redo_notes", False):
-            redo_map[item_key] = item.notes
-        details["redoOriginalNotes"] = redo_map
-        order.rejection_details = details
+        order.save_pre_redo_note(item)
 
     def _restore_pre_redo_note(self, order: Order, item: OrderItem) -> None:
         """Restore pre-redo preparation notes once kitchen completes a redone item."""
-        details: dict[str, object] = (
-            dict(order.rejection_details) if isinstance(order.rejection_details, dict) else {}
-        )
-        raw_map = details.get("redoOriginalNotes")
-        item_key = str(item.public_id)
-        if isinstance(raw_map, dict) and item_key in raw_map:
-            redo_map: dict[str, object] = dict(raw_map)
-            raw_original = redo_map.pop(item_key)
-            original_note = str(raw_original) if raw_original is not None else None
-            item.restore_notes_after_redo(fallback_original=original_note, has_fallback=True)
-            if redo_map:
-                details["redoOriginalNotes"] = redo_map
-                order.rejection_details = details
-            else:
-                details.pop("redoOriginalNotes", None)
-                order.rejection_details = details or None
-            return
-        if getattr(item, "_has_pre_redo_notes", False):
-            item.restore_notes_after_redo()
+        order.restore_pre_redo_note(item)
 
     @staticmethod
     def _find_order_item(order: Order, target_id: UUID) -> OrderItem:

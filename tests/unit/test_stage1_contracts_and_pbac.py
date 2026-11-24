@@ -28,6 +28,7 @@ from app.messaging.consumers.base import EventConsumerDispatcher, InMemoryDLQRou
 from app.messaging.consumers.catalog import CatalogConsumer
 from app.messaging.events import (
     DishPreparedEvent,
+    DishRedoRequestedEvent,
     EventName,
     KitchenDishRejectedEvent,
     OrderCreatedItem,
@@ -103,6 +104,18 @@ async def test_publisher_emits_dual_routing_keys_for_stage1_events() -> None:
                 reason="Sin pollo",
             ),
             ["ordenes.platillo.rechazado_cocina", "ordenes.dish.rejected"],
+        ),
+        (
+            EventName.DISH_REDO_REQUESTED,
+            DishRedoRequestedEvent.for_item(
+                order_id,
+                item_id,
+                offer_id="offer-commercial-99",
+                plate_id="recipe-physical-01",
+                quantity=1,
+                reason="Platillo frío",
+            ),
+            ["ordenes.platillo.rehecho", "ordenes.dish.redo"],
         ),
         (
             EventName.ORDER_WASTED,
@@ -206,6 +219,12 @@ async def test_publisher_enriches_inventory_items_prioritizing_plate_and_source_
             EventName.INVENTORY_RECIPE_NOT_AVAILABLE,
             {"sourceId": "recipe-tamal-03", "name": "Tamal Verde"},
             "catalog:platillo:recipe-tamal-03",
+            "false",
+        ),
+        (
+            EventName.INVENTORY_RECIPE_INCOMPLETE,
+            {"plateId": "recipe-tamal-04", "name": "Tamal Rojo", "missingItemIds": ["ins-1"]},
+            "catalog:platillo:recipe-tamal-04",
             "false",
         ),
     ],

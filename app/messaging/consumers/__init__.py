@@ -10,6 +10,8 @@ from app.messaging.consumers.base import (
 from app.messaging.consumers.catalog import CatalogConsumer
 from app.messaging.consumers.dining_session import handle_dining_session_created
 from app.messaging.consumers.payment_completed import handle_payment_completed
+from app.messaging.consumers.redo_rejected import handle_redo_rejected
+from app.messaging.consumers.reservation_expired import handle_reservation_expired
 from app.messaging.consumers.stock_insufficient import handle_stock_insufficient
 from app.messaging.consumers.stock_reserved import handle_stock_reserved
 
@@ -20,6 +22,8 @@ __all__ = [
     "InMemoryDLQRouter",
     "handle_dining_session_created",
     "handle_payment_completed",
+    "handle_redo_rejected",
+    "handle_reservation_expired",
     "handle_stock_insufficient",
     "handle_stock_reserved",
 ]
