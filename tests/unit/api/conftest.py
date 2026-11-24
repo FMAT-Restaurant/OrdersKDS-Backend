@@ -6,6 +6,7 @@ Provides in-memory session, catalog validator double, and notification spies.
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from decimal import Decimal
 from typing import Any, Final, cast
 from uuid import UUID
 
@@ -26,10 +27,15 @@ EMPTY_MODIFIERS: Final[list[str]] = []
 
 
 class FakeCatalogValidator(CatalogValidatorProtocol):
-    """Catalog validator double allowing custom dish availability rules."""
+    """Catalog validator double allowing custom dish availability and price rules."""
 
-    def __init__(self, unavailable_ids: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        unavailable_ids: set[str] | None = None,
+        prices: dict[str, Decimal] | None = None,
+    ) -> None:
         self.unavailable_ids: set[str] = set(unavailable_ids or ())
+        self.prices: dict[str, Decimal] = dict(prices or ())
 
     async def validate_dish_available(self, dish_id: str) -> None:
         if dish_id in self.unavailable_ids:
@@ -43,6 +49,13 @@ class FakeCatalogValidator(CatalogValidatorProtocol):
             self.unavailable_ids.discard(dish_id)
         else:
             self.unavailable_ids.add(dish_id)
+
+    def set_price(self, dish_id: str, price: Decimal) -> None:
+        self.prices[dish_id] = price
+
+    async def get_dish_price(self, dish_id: str) -> Decimal | None:
+        price = self.prices.get(dish_id)
+        return price if price is not None and price > Decimal("0.00") else None
 
 
 class SpyOrderNotifier(OrderNotifier):

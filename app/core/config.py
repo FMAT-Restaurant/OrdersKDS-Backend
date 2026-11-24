@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import Final
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,60 @@ class CatalogReconciliationSettings:
 
 
 DEFAULT_SAGA_WATCHER_INTERVAL_SECONDS = 5.0
+
+ALLOWED_JWT_ALGORITHMS: Final[frozenset[str]] = frozenset(
+    {"HS256", "HS384", "HS512", "RS256", "ES256"}
+)
+DEFAULT_JWT_ALGORITHMS: Final[tuple[str, ...]] = ("HS256", "HS384", "HS512", "RS256", "ES256")
+_TRUTHY_ENV_VALUES: Final[frozenset[str]] = frozenset({"1", "true", "yes", "on"})
+
+
+@dataclass(frozen=True)
+class AuthSettings:
+    """Authentication and gateway perimeter configuration.
+
+    Attributes:
+        jwt_secret: Shared HMAC secret for ``HS256``/``HS384``/``HS512`` tokens.
+        jwt_public_key: PEM public key for ``RS256``/``ES256`` tokens.
+        jwt_algorithms: Explicit allowlist of permitted signing algorithms.
+        trust_gateway_headers: When True, requests without a Bearer token may rely
+            on perimeter ``X-User-*`` headers (optionally guarded by ``gateway_shared_secret``).
+        gateway_shared_secret: Optional shared secret expected in ``X-Gateway-Secret``
+            when trusting perimeter ``X-User-*`` headers without a Bearer token.
+    """
+
+    jwt_secret: str | None
+    jwt_public_key: str | None
+    jwt_algorithms: tuple[str, ...]
+    trust_gateway_headers: bool = False
+    gateway_shared_secret: str | None = None
+
+
+def _parse_jwt_algorithms(raw: str | None) -> tuple[str, ...]:
+    """Parse configured JWT algorithms strictly intersecting the safe allowlist."""
+    if not raw or not raw.strip():
+        return DEFAULT_JWT_ALGORITHMS
+    parsed = tuple(
+        alg
+        for item in raw.split(",")
+        if (alg := item.strip().upper()) and alg in ALLOWED_JWT_ALGORITHMS
+    )
+    return parsed
+
+
+def get_auth_settings() -> AuthSettings:
+    """Load JWT verification and gateway-header trust settings from environment."""
+    raw_secret = os.getenv("JWT_SECRET", "").strip()
+    raw_public_key = os.getenv("JWT_PUBLIC_KEY", "").replace("\\n", "\n").strip()
+    raw_gateway_secret = os.getenv("GATEWAY_SHARED_SECRET", "").strip()
+    raw_trust_gateway = os.getenv("TRUST_GATEWAY_HEADERS", "false").strip().lower()
+    return AuthSettings(
+        jwt_secret=raw_secret or None,
+        jwt_public_key=raw_public_key or None,
+        jwt_algorithms=_parse_jwt_algorithms(os.getenv("JWT_ALGORITHMS")),
+        trust_gateway_headers=raw_trust_gateway in _TRUTHY_ENV_VALUES,
+        gateway_shared_secret=raw_gateway_secret or None,
+    )
 
 
 @dataclass(frozen=True)

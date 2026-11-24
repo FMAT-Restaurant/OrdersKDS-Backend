@@ -12,11 +12,10 @@ Authentication is handled by the Auth microservice; this backend only reads
 This script exists solely to let developers call the local API without running
 the full Auth service.
 
-The signing key (``--secret``) is irrelevant for the backend: the API Gateway verifies
-the signature in real environments and ``app/api/dependencies/auth.py`` only decodes the
-claims without checking it (ADR-0011).  The key matters only if you put a Gateway or
-another verifier in front of the API locally; in that case it must match that verifier's
-key.  In production the API Gateway holds the real key; this script is never used there.
+The signing key (``--secret``) defaults to ``JWT_SECRET`` from ``.env`` / environment
+variables (falling back to a local-dev-only key when unset) because the backend
+cryptographically verifies incoming JWT signatures. In production the Identity/Gateway
+holds the real signing keys; this script is never used there.
 
 Usage:
     python scripts/dev_token.py --role waiter
@@ -45,15 +44,21 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # ---------------------------------------------------------------------------
 # Allowed roles match the Auth microservice contract (GUIDELINES §2.4).
 # ---------------------------------------------------------------------------
 _VALID_ROLES: frozenset[str] = frozenset({"waiter", "kitchen", "chef", "admin"})
 
-# Default signing secret for local development ONLY.
-# Override it with the DEV_JWT_SECRET environment variable or --secret.
-# The fallback must never be used in any environment beyond localhost.
-_DEFAULT_DEV_SECRET = os.environ.get("DEV_JWT_SECRET", "dev-secret-change-me")
+# Default signing key for local development ONLY (reads JWT_SECRET from .env first).
+_DEFAULT_DEV_SECRET = (
+    os.environ.get("JWT_SECRET")
+    or os.environ.get("DEV_JWT_SECRET")
+    or "local-dev-only-jwt-signing-key-32b"  # NOSONAR — local dev script fallback only
+)
 
 # Default token lifetime in seconds (1 hour is enough for a dev session).
 _DEFAULT_TTL_SECONDS = 3600

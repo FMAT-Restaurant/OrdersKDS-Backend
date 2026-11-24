@@ -9,8 +9,6 @@ Satisfies: RF-01..RF-35, RF-39, RNF-03, RNF-09
 
 from __future__ import annotations
 
-import base64
-import json
 from collections.abc import AsyncGenerator, Generator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -18,6 +16,7 @@ from decimal import Decimal
 from typing import cast
 from uuid import UUID, uuid4
 
+import jwt
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,25 +33,22 @@ from app.services.catalog import DefaultCatalogValidator, get_catalog_validator
 from app.services.notifications import OrderNotifier
 from app.services.orders import OrderService, get_order_service
 from app.services.shifts import ShiftService, get_shift_service
-
-
-def _jwt_segment(payload: dict[str, str | int]) -> str:
-    serialized = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    return base64.urlsafe_b64encode(serialized).rstrip(b"=").decode("ascii")
+from tests.conftest import TEST_JWT_SECRET
 
 
 def auth_header(role: str = "waiter", user_id: UUID | None = None) -> dict[str, str]:
-    """Build a synthetic Bearer JWT header with matching gateway claims."""
-    header = _jwt_segment({"alg": "HS256", "typ": "JWT"})
+    """Build a signed Bearer JWT header matching gateway verification."""
     caller_uuid = user_id or uuid4()
-    claims = _jwt_segment(
+    token = jwt.encode(
         {
             "user_id": str(caller_uuid),
             "role": role,
             "exp": int(datetime.now(UTC).timestamp()) + 300,
-        }
+        },
+        TEST_JWT_SECRET,
+        algorithm="HS256",
     )
-    return {"Authorization": f"Bearer {header}.{claims}.c2ln"}
+    return {"Authorization": f"Bearer {token}"}
 
 
 class DummyNotifier(OrderNotifier):

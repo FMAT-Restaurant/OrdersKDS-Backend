@@ -7,10 +7,7 @@ Covers: AT-04
 from __future__ import annotations
 
 import asyncio
-import base64
-import json
 from collections.abc import AsyncGenerator, Generator
-from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, cast
 from uuid import UUID, uuid4
@@ -29,27 +26,11 @@ from app.messaging.events import PaymentCompletedMessage
 from app.repositories.orders import OrderRepository
 from app.repositories.processed_events import ProcessedEventsRepository
 from app.repositories.unit_of_work import SessionFactory, UnitOfWork
+from tests.bdd._support import auth_header as _auth_header
 
 pytestmark = [pytest.mark.bdd, pytest.mark.requirement("RF-26", "RF-27")]
 
 scenarios("admin_void.feature")
-
-
-def _jwt_segment(payload: dict[str, str | int]) -> str:
-    serialized = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    return base64.urlsafe_b64encode(serialized).rstrip(b"=").decode("ascii")
-
-
-def _auth_header(role: str = "admin") -> dict[str, str]:
-    header = _jwt_segment({"alg": "HS256", "typ": "JWT"})
-    claims = _jwt_segment(
-        {
-            "user_id": str(uuid4()),
-            "role": role,
-            "exp": int(datetime.now(UTC).timestamp()) + 300,
-        }
-    )
-    return {"Authorization": f"Bearer {header}.{claims}.c2ln"}
 
 
 class BddSessionDouble:

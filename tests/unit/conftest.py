@@ -15,9 +15,9 @@ from app.db.models import Order, Outbox, Shift
 from app.domain.order_status import OrderStatus
 from app.domain.shift import ShiftStatus
 from app.main import app
+from tests.conftest import TEST_JWT_SECRET
 
-# Any key works: the service never verifies signatures (ADR-0011).
-_TEST_SIGNING_KEY = "unit-test-key-not-a-secret-0123456789"
+_TEST_SIGNING_KEY = TEST_JWT_SECRET
 
 TokenFactory = Callable[..., str]
 
