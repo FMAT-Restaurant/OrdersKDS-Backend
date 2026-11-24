@@ -8,19 +8,22 @@ Documentación básica para el equipo. Explica cómo funciona Docker **en tu má
 
 ## 1. ¿Para qué usamos Docker?
 
-El microservicio necesita tres servicios externos que **no se instalan en tu computadora**; corren dentro de contenedores:
+El microservicio necesita tres servicios externos que **no se instalan en tu computadora** y, opcionalmente en modo full-Docker (`docker-compose.ci.yml`), tres contenedores de aplicación construidos desde el `Dockerfile`:
 
-| Servicio | Imagen | Contenedor | Puerto en tu máquina | Para qué sirve |
+| Servicio Compose | Imagen | Contenedor | Puerto en host | Para qué sirve |
 |---|---|---|---|---|
-| PostgreSQL 16 | `postgres:16-alpine` | `ordenes-postgres` | `5432` | Base de datos principal y tabla *outbox* |
-| Redis 7 | `redis:7-alpine` | `ordenes-redis` | `6379` | Vista local de catálogo y mesas |
-| RabbitMQ 3 | `rabbitmq:3-management-alpine` | `ordenes-rabbitmq` | `5672` (AMQP) y `15672` (panel web) | Broker de eventos |
+| `postgres` | `postgres:16-alpine` | `ordenes-postgres` | `${POSTGRES_PORT:-5432}:5432` | Base de datos principal y tabla *outbox* |
+| `redis` | `redis:7-alpine` | `ordenes-redis` | `6379:6379` | Vista local de catálogo y puente WebSocket |
+| `rabbitmq` | `rabbitmq:3-management-alpine` | `ordenes-rabbitmq` | `5672:5672` (AMQP), `15672:15672` (UI) | Broker de eventos |
+| `api` *(Modo B)* | `orders-backend-api` | `ordenes-api-ci` | `8000:8000` | API FastAPI REST + WebSockets |
+| `workers` *(Modo B)* | `orders-backend-workers` | `ordenes-workers-ci` | — | Outbox, Saga Watcher y Consumer RabbitMQ |
+| `stubs` *(Modo B)* | `orders-backend-stubs` | `ordenes-stubs-ci` | — | Stubs de Inventario y Pagos en RabbitMQ |
 
 Ventajas: todos usamos **las mismas versiones**, no se "ensucia" el sistema operativo, no hay choque con otros programas y todo se puede borrar y recrear en segundos.
 
-> **No instales PostgreSQL, Redis ni RabbitMQ directamente en tu sistema.** Solo necesitas Docker Desktop (y, opcionalmente, un cliente visual como pgAdmin o DBeaver).
+> **No instales PostgreSQL, Redis ni RabbitMQ directamente en tu sistema.** Solo necesitas Docker Desktop (y, si ya existe un PostgreSQL local en `5432`, define `POSTGRES_PORT=5433` en `.env`).
 
-La API (`uvicorn`) y los *workers* **no** corren en Docker durante el desarrollo: se ejecutan directamente en tu máquina para tener recarga automática (`--reload`).
+Durante el desarrollo normal (Modo A), la API (`uvicorn`) y los *workers* corren directamente en tu `.venv` local para tener recarga automática (`--reload`); si quieres correr los 6 contenedores juntos (Modo B), consulta §7.4 y [QUICKSTART.md §8](../QUICKSTART.md).
 
 ---
 
@@ -138,7 +141,7 @@ En la pestaña **Containers** aparecen `ordenes-postgres`, `ordenes-redis` y `or
 
 El workflow `.github/workflows/ci.yml` incluye el job `build-and-push`, que construye la imagen de la API y la publica en **GitHub Container Registry** (`ghcr.io`) con la etiqueta de rama y el SHA del commit. Un *push* a `develop` publica el candidato de staging; un *push* a `main` publica el release.
 
-### 7.3 Ambiente compartido en la nube — TASK-38 (Sprint 5)
+### 7.3 Ambiente compartido en la nube — TASK-38 (ya implementado)
 
 El ambiente compartido se hospeda en una VM Linux administrada por el equipo,
 con Docker Engine y firewall restringido. La configuración reproducible,
@@ -146,10 +149,8 @@ los roles de PostgreSQL, el procedimiento de migraciones, el túnel de
 DBeaver/pgAdmin y el smoke están en [STAGING.md](STAGING.md).
 
 La imagen de staging es `ghcr.io/fmat-restaurant/orderskds-backend:develop`.
-El archivo `docker-compose.staging.yml` usa únicamente variables del archivo
-privado `.env.staging`; nunca contiene credenciales. Mientras no se provisionen
-la VM y los GitHub Environments `staging`/`production`, se debe trabajar con
-los contenedores locales y no publicar una URL ficticia.
+El archivo [`docker-compose.staging.yml`](../docker-compose.staging.yml) usa únicamente variables del archivo
+privado `.env.staging` (plantilla en [`.env.staging.example`](../.env.staging.example)); nunca contiene credenciales.
 
 | Ambiente | Dónde corre | Quién lo usa |
 |---|---|---|
@@ -158,23 +159,59 @@ los contenedores locales y no publicar una URL ficticia.
 | Staging compartido | VM Linux con Docker, definida en [STAGING.md](STAGING.md) | Todo el equipo y otros microservicios |
 | Versión final | Imagen publicada desde `main` | El sistema liberado |
 
-### 7.4 Usar contenedores de otros equipos
+### 7.4 Imágenes de la aplicación (`Dockerfile`) y stack completo de 6 contenedores (`docker-compose.ci.yml`)
 
-Cuando exista su imagen publicada en un registro, se puede agregar a un compose local con una línea `image: ghcr.io/<org>/<servicio>:latest`; `docker compose up -d` la descargará. Hasta entonces, las pruebas se hacen contra los *stubs* de contrato (TASK-33).
+Si deseas levantar **todo el backend dentro de contenedores Docker** (API + *workers* + *stubs* + infraestructura, sin usar `uvicorn` local):
+
+1. El [`Dockerfile`](../Dockerfile) parte de `python:3.12-slim`, instala [`requirements/runtime.txt`](../requirements/runtime.txt) (que ya incluye `websockets==15.0.1` para `/ws/kds` y `/ws/waiter`) y copia `app/`, `alembic.ini`, `contracts/events/` y `ops/staging/staging-smoke.py` (no copia `scripts/`).
+2. [`docker-compose.ci.yml`](../docker-compose.ci.yml) extiende `docker-compose.yml` creando 3 imágenes (`orders-backend-api`, `orders-backend-workers`, `orders-backend-stubs`) y levantando los **6 contenedores**: `ordenes-postgres`, `ordenes-redis`, `ordenes-rabbitmq`, `ordenes-api-ci`, `ordenes-workers-ci` y `ordenes-stubs-ci`.
+3. El `healthcheck` de `api` usa Python estándar (`python -c "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health')"`), por lo que **no requiere `curl`** dentro de `python:3.12-slim` para pasar a `healthy` y desbloquear el arranque de `workers`.
+
+```powershell
+# Levantar los 6 contenedores con variables internas de la red Docker
+$env:DATABASE_URL="postgresql+asyncpg://ordenes:ordenes@postgres:5432/ordenes"
+$env:REDIS_URL="redis://redis:6379/0"
+$env:RABBITMQ_URL="amqp://ordenes:ordenes@rabbitmq:5672/"
+$env:SAGA_TIMEOUT_SECONDS="60"
+# Si tienes PostgreSQL local en 5432:
+# $env:POSTGRES_PORT="5433"
+
+docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.ci.yml ps
+
+# Aplicar migraciones dentro del contenedor de la API
+docker exec ordenes-api-ci alembic upgrade head
+
+# Cargar datos demo (UUIDv4 aleatorios) desde tu .venv en el host (Dockerfile no copia scripts/)
+.\.venv\Scripts\Activate.ps1
+python scripts/seed_demo.py --reset
+```
+
+Para probar flujos con **RabbitMQ real** (automáticos con `stubs` o publicando mensajes JSON manuales desde `http://localhost:15672`), sigue [QUICKSTART.md §8 — Paso 6](../QUICKSTART.md).
+
+### 7.5 Usar contenedores de otros equipos
+
+Cuando exista su imagen publicada en un registro, se puede agregar a un compose local con una línea `image: ghcr.io/<org>/<servicio>:latest`; `docker compose up -d` la descargará. Hasta entonces, las pruebas se hacen contra `ordenes-stubs-ci` / los *stubs* de contrato (TASK-33).
 
 ---
 
 ## 8. Resumen rápido
 
 ```powershell
-# Primera vez / cada día que lo necesites (desde orders-backend)
+# Opción A: Infraestructura en Docker + API/workers locales (recomendado para desarrollo)
 docker compose up -d postgres redis rabbitmq
 docker compose ps
 alembic upgrade head
+python scripts/seed_demo.py --reset
+
+# Opción B: Todos los 6 contenedores (ver §7.4 y QUICKSTART.md §8)
+docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build
+docker exec ordenes-api-ci alembic upgrade head
+python scripts/seed_demo.py --reset
 
 # Apagar al terminar (conserva datos)
-docker compose stop
+docker compose -f docker-compose.yml -f docker-compose.ci.yml stop
 
 # Empezar de cero (BORRA datos locales)
-docker compose down -v
+docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v
 ```

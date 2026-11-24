@@ -13,7 +13,7 @@
 # condition so that it starts only after infrastructure is ready.  This avoids
 # race conditions that would make integration tests flaky.
 #
-# Environment variables are injected from GitHub Secrets (see QUICKSTART.md §2)
+# Environment variables are injected from GitHub Secrets (see QUICKSTART.md §1 and §8)
 # and do NOT appear as literal values in this file.
 
 services:
@@ -30,7 +30,7 @@ services:
       RABBITMQ_URL: ${RABBITMQ_URL}
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-ordenes.topic}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
-      SAGA_TIMEOUT_SECONDS: ${SAGA_TIMEOUT_SECONDS}
+      SAGA_TIMEOUT_SECONDS: ${SAGA_TIMEOUT_SECONDS:-60}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "8000:8000"
@@ -54,6 +54,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: ordenes-workers-ci
+    restart: on-failure
     command: ["python", "-m", "app.workers.run_all"]
     environment:
       DATABASE_URL: ${DATABASE_URL}
@@ -61,7 +62,7 @@ services:
       RABBITMQ_URL: ${RABBITMQ_URL}
       RABBITMQ_EXCHANGE: ${RABBITMQ_EXCHANGE:-ordenes.topic}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST:-/}
-      SAGA_TIMEOUT_SECONDS: ${SAGA_TIMEOUT_SECONDS}
+      SAGA_TIMEOUT_SECONDS: ${SAGA_TIMEOUT_SECONDS:-60}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       api:
@@ -73,6 +74,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: ordenes-stubs-ci
+    restart: on-failure
     command: ["python", "-m", "app.stubs.runner"]
     environment:
       RABBITMQ_URL: ${RABBITMQ_URL}

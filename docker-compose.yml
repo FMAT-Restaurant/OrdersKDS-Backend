@@ -25,15 +25,15 @@ services:
     container_name: ordenes-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ordenes
-      POSTGRES_PASSWORD: ordenes
-      POSTGRES_DB: ordenes
+      POSTGRES_USER: ${POSTGRES_USER:-ordenes}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ordenes}  # NOSONAR — intentional local-dev default
+      POSTGRES_DB: ${POSTGRES_DB:-ordenes}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ordenes -d ordenes"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ordenes} -d ${POSTGRES_DB:-ordenes}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -58,15 +58,15 @@ services:
     container_name: ordenes-rabbitmq
     restart: unless-stopped
     environment:
-      RABBITMQ_DEFAULT_USER: ordenes
-      RABBITMQ_DEFAULT_PASS: ordenes
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-ordenes}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-ordenes}  # NOSONAR — intentional local-dev default
     ports:
       - "5672:5672"    # AMQP
       - "15672:15672"  # Management UI — http://localhost:15672
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
       interval: 10s
       timeout: 10s
       retries: 10
