@@ -88,7 +88,7 @@ def test_valid_hmac_algorithms_verify_successfully(algorithm: str) -> None:
 
 
 def test_wrong_hmac_secret_and_missing_key_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
-    wrong_secret_token = _signed_token(secret="wrong-key-of-sufficient-length-32bytes")
+    wrong_secret_token = _signed_token(secret=f"{TEST_JWT_SECRET}-mismatch")
     with pytest.raises(UnauthenticatedError):
         resolve_auth_context(f"Bearer {wrong_secret_token}")
 
