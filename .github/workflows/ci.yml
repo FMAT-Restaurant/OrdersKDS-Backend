@@ -298,6 +298,16 @@ jobs:
           alembic upgrade head
           python scripts/seed_demo.py --reset
 
+      - name: Generate ephemeral k6 JWT signing material
+        shell: bash
+        run: |
+          K6_SECRET=$(python -c "import secrets; print(secrets.token_hex(32))")
+          echo "::add-mask::$K6_SECRET"
+          {
+            echo "JWT_SECRET=$K6_SECRET"
+            echo "K6_DEV_JWT_SIGNING_MATERIAL=$K6_SECRET"
+          } >> "$GITHUB_ENV"
+
       - name: Start FastAPI for k6 smoke
         shell: bash
         run: |

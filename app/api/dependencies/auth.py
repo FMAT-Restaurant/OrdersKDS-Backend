@@ -1,25 +1,25 @@
-"""Authentication context and access guards built from the gateway identity.
+"""Authentication context, cryptographic JWT verification, and access guards.
 
-The API Gateway verifies the JWT signature (ADR-0011). This module only *reads* the identity
-it forwards, in this order of preference:
+Every ``Authorization: Bearer`` token (header, query parameter, or WebSocket subprotocol)
+is cryptographically verified using :func:`app.core.config.get_auth_settings` against an
+explicit allowlist of signing algorithms (``HS256``/``HS384``/``HS512`` with ``JWT_SECRET``,
+or ``RS256``/``ES256`` with ``JWT_PUBLIC_KEY``).
 
-1. the headers Kong's ``auth-perimeter`` plugin injects once the token is verified
-   (``X-User-Id``, ``X-User-Roles``, ``X-User-Permissions``, ``X-Staff-Id``);
-2. the claims of the ``Authorization: Bearer`` token (``user_id``/``sub``, ``roles``/``role``,
-   ``permissions``) for local development and direct calls without the gateway.
-
-The identity never comes from the request body (RF-15) and no signing key is configured in
-this service. Because the gateway is the trust boundary, this service must only be reachable
-through it in shared environments (the same assumption ADR-0011 already makes for the JWT).
+When a verified Bearer token is present, its claims are authoritative and gateway role or
+permission headers (``X-User-Roles``, ``X-User-Permissions``, ``X-User-Type``) can never
+escalate privileges. Perimeter ``X-User-*`` headers without a Bearer token are only
+accepted when ``TRUST_GATEWAY_HEADERS=true`` (and, if configured, ``X-Gateway-Secret``
+matches ``GATEWAY_SHARED_SECRET``).
 
 Authorization is PBAC first with a role fallback, see :mod:`app.domain.access`.
 
-Satisfies: RNF-03, RF-15 (Guidelines §5.7)
+Satisfies: RNF-03, RF-15, SEC-03 (Guidelines §5.7)
 """
 
 from __future__ import annotations
 
 import base64
+import hmac
 import json
 import logging
 import time
@@ -27,10 +27,13 @@ from collections.abc import Callable, Collection, Iterable, Mapping
 from typing import Annotated, Any, Final
 from urllib.parse import parse_qs
 
+import jwt
 from fastapi import Depends, WebSocket
+from jwt import InvalidTokenError
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import HTTPConnection
 
+from app.core.config import AuthSettings, get_auth_settings
 from app.core.error_codes import ErrorCode
 from app.domain.access import WILDCARD_PERMISSION, AccessPolicy
 from app.domain.errors import ForbiddenRoleError, UnauthenticatedError
@@ -55,7 +58,10 @@ HEADER_USER_ROLES: Final = "x-user-roles"
 HEADER_USER_ROLE: Final = "x-user-role"  # singular spelling used by the shared integration guide
 HEADER_USER_PERMISSIONS: Final = "x-user-permissions"
 HEADER_USER_TYPE: Final = "x-user-type"
+HEADER_GATEWAY_SECRET: Final = "x-gateway-secret"  # noqa: S105 - HTTP header name
 
+_SYMMETRIC_ALGORITHMS: Final = frozenset({"HS256", "HS384", "HS512"})
+_ASYMMETRIC_ALGORITHMS: Final = frozenset({"RS256", "ES256"})
 _ADMIN_USER_TYPES: Final = frozenset({"ADMIN", "ADMINISTRADOR"})
 _BEARER_SCHEME: Final = "bearer"
 _AUTH_REQUIRED_MESSAGE: Final = "Authentication required."
@@ -145,43 +151,56 @@ def _extract_bearer_token(authorization: str | None) -> str:
     return token.strip()
 
 
-class ExpiredSignatureError(ValueError):
-    """The token has expired."""
+def _resolve_verification_key(algorithm: str, settings: AuthSettings) -> str:
+    """Select the verification key strictly matching the token algorithm family."""
+    normalized = algorithm.strip().upper()
+    if normalized == "NONE" or normalized not in settings.jwt_algorithms:
+        raise ValueError("Unsupported or disallowed JWT algorithm")
+    if normalized in _SYMMETRIC_ALGORITHMS:
+        if not settings.jwt_secret:
+            raise ValueError("JWT_SECRET is not configured for symmetric algorithm")
+        return settings.jwt_secret
+    if normalized in _ASYMMETRIC_ALGORITHMS:
+        if not settings.jwt_public_key:
+            raise ValueError("JWT_PUBLIC_KEY is not configured for asymmetric algorithm")
+        return settings.jwt_public_key
+    raise ValueError("Unsupported JWT algorithm family")
 
 
-def _urlsafe_b64decode_json(segment: str) -> dict[str, Any]:
+def _decode_jwt_header(segment: str) -> dict[str, Any]:
+    """Decode the Base64URL-encoded JOSE header without exposing jwt.get_unverified_header."""
     padded = segment + "=" * (-len(segment) % 4)
-    data = base64.urlsafe_b64decode(padded.encode("ascii"))
-    result = json.loads(data.decode("utf-8"))
-    if not isinstance(result, dict):
-        raise ValueError("JWT segment must be a JSON object")
-    return result
+    decoded = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    if not isinstance(decoded, dict):
+        raise ValueError("JWT header must be a JSON object")
+    return decoded
 
 
 def _decode_claims(token: str) -> dict[str, Any]:
-    # In accordance with ADR-0011, the API Gateway verifies the JWT signature at perimeter.
-    # This service does not hold a signing key (CONTRIBUTING) and only parses claims.
-    # Decoding the standard RFC 7519 payload avoids calling jwt.decode with verify_signature=False,
-    # resolving SonarQube S5659 while preserving defense-in-depth checks (SEC-03 and exp).
+    """Decode and cryptographically verify JWT signature, algorithm, and expiration."""
     parts = token.split(".")
-    if len(parts) != 3:
+    if len(parts) != 3 or not all(parts):
         raise UnauthenticatedError(_AUTH_REQUIRED_MESSAGE)
 
     try:
-        header = _urlsafe_b64decode_json(parts[0])
-        algorithm = str(header.get("alg", ""))
-        if algorithm.lower() == "none":  # SEC-03: unsigned tokens are never accepted
-            raise UnauthenticatedError(_AUTH_REQUIRED_MESSAGE)
+        header = _decode_jwt_header(parts[0])
+        raw_alg = header.get("alg")
+        if not isinstance(raw_alg, str) or not raw_alg.strip():
+            raise ValueError("Missing JWT algorithm header")
 
-        claims = _urlsafe_b64decode_json(parts[1])
-
-        # Defense in depth: expiration check
-        exp = claims.get("exp")
-        if exp is not None and (not isinstance(exp, (int, float)) or time.time() > exp):
-            raise ExpiredSignatureError("Token has expired.")
-
+        algorithm = raw_alg.strip().upper()
+        settings = get_auth_settings()
+        verification_key = _resolve_verification_key(algorithm, settings)
+        claims = jwt.decode(
+            token,
+            key=verification_key,
+            algorithms=[algorithm],
+            options={"verify_signature": True, "verify_exp": True, "verify_aud": False},
+        )
+        if not isinstance(claims, dict):
+            raise ValueError("JWT claims payload must be a JSON object")
         return claims
-    except Exception as exc:
+    except (InvalidTokenError, ValueError, TypeError) as exc:
         # Log only the failure class: tokens must never reach the logs (Guidelines §5.9).
         logger.info("jwt rejected", extra={"reason": type(exc).__name__})
         raise UnauthenticatedError(_AUTH_REQUIRED_MESSAGE) from exc
@@ -281,27 +300,32 @@ def _context_from_claims(claims: dict[str, Any]) -> AuthContext:
     )
 
 
-def _context_from_gateway_headers(
-    headers: Mapping[str, str], authorization: str | None
-) -> AuthContext | None:
-    """Build the identity from the headers Kong injects, or ``None`` when they are absent.
+def _verify_gateway_secret(headers: Mapping[str, str], settings: AuthSettings) -> None:
+    """Require X-Gateway-Secret when GATEWAY_SHARED_SECRET is configured."""
+    expected = settings.gateway_shared_secret
+    if not expected:
+        return
+    provided = (headers.get(HEADER_GATEWAY_SECRET) or "").strip()
+    if not provided or not hmac.compare_digest(provided, expected):
+        raise UnauthenticatedError(_AUTH_REQUIRED_MESSAGE)
 
-    The expiration is read from the forwarded token, when there is one, so that long-lived
-    WebSocket connections are still closed when the token expires.
-    """
+
+def _context_from_gateway_headers(headers: Mapping[str, str]) -> AuthContext | None:
+    """Build caller identity from perimeter headers only when explicitly trusted."""
+    settings = get_auth_settings()
+    if not settings.trust_gateway_headers:
+        return None
     user_id = (headers.get(HEADER_USER_ID) or "").strip()
     if not user_id:
         return None
+    _verify_gateway_secret(headers, settings)
     raw_permissions = headers.get(HEADER_USER_PERMISSIONS)
-    exp = None
-    if authorization:
-        exp = _expiration(_decode_claims(_extract_bearer_token(authorization)).get("exp"))
     return _build_context(
         user_id,
         _split_csv(headers.get(HEADER_USER_ROLES) or headers.get(HEADER_USER_ROLE)),
         permissions=None if raw_permissions is None else frozenset(_split_csv(raw_permissions)),
         staff_id=(headers.get(HEADER_STAFF_ID) or "").strip(),
-        exp=exp,
+        exp=None,
         user_type=headers.get(HEADER_USER_TYPE),
     )
 
@@ -317,9 +341,33 @@ def resolve_auth_context(authorization: str | None) -> AuthContext:
 
     Raises:
         UnauthenticatedError: If the token is missing, malformed, unsigned (``alg: none``),
-            expired, or lacks a valid ``user_id`` and a recognised role claim.
+            uses a disallowed algorithm, fails signature/expiration validation, or lacks a
+            valid ``user_id`` and recognised role claim.
     """
     return _context_from_claims(_decode_claims(_extract_bearer_token(authorization)))
+
+
+def _merge_verified_jwt_with_gateway_headers(
+    jwt_context: AuthContext,
+    headers: Mapping[str, str],
+) -> AuthContext:
+    """Validate optional gateway correlation without ever elevating JWT privileges."""
+    settings = get_auth_settings()
+    if not settings.trust_gateway_headers:
+        return jwt_context
+
+    gateway_user_id = (headers.get(HEADER_USER_ID) or "").strip()
+    if gateway_user_id and gateway_user_id != jwt_context.user_id:
+        logger.warning(
+            "gateway identity mismatch against verified jwt",
+            extra={"jwt_user_id": jwt_context.user_id, "gateway_user_id": gateway_user_id},
+        )
+        raise UnauthenticatedError(_AUTH_REQUIRED_MESSAGE)
+
+    gateway_staff_id = (headers.get(HEADER_STAFF_ID) or "").strip()
+    if jwt_context.staff_id is None and gateway_staff_id:
+        return jwt_context.model_copy(update={"staff_id": gateway_staff_id})
+    return jwt_context
 
 
 def _token_from_query_string(scope: object) -> str | None:
@@ -360,10 +408,14 @@ def _authorization_value(connection: HTTPConnection) -> str | None:
 def get_auth_context(connection: HTTPConnection) -> AuthContext:
     """FastAPI dependency resolving the caller of an HTTP request or WebSocket handshake."""
     authorization = _authorization_value(connection)
-    gateway_context = _context_from_gateway_headers(connection.headers, authorization)
+    if authorization:
+        jwt_context = resolve_auth_context(authorization)
+        return _merge_verified_jwt_with_gateway_headers(jwt_context, connection.headers)
+
+    gateway_context = _context_from_gateway_headers(connection.headers)
     if gateway_context is not None:
         return gateway_context
-    return resolve_auth_context(authorization)
+    raise UnauthenticatedError(_AUTH_REQUIRED_MESSAGE)
 
 
 def ensure_role_allowed(context: AuthContext, allowed_roles: frozenset[Role]) -> None:

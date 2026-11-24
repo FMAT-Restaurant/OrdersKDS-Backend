@@ -26,6 +26,7 @@ from app.core.config import (
     get_redis_url,
     get_saga_timeout_settings,
 )
+from app.core.logging import configure_structured_logging
 from app.messaging.consumers.base import EventConsumerDispatcher
 from app.messaging.consumers.catalog import CatalogConsumer
 from app.messaging.publisher import EventPublisher
@@ -38,11 +39,7 @@ from app.workers.outbox_worker import OutboxWorker
 from app.workers.saga_timeout_watcher import SagaTimeoutWatcher
 
 load_dotenv()
-
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO"),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+configure_structured_logging(service="orders-worker", level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("app.workers")
 
 

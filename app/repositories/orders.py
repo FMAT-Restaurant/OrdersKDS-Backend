@@ -10,6 +10,7 @@ Satisfies: RF-24, RNF-09, OP-11
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import Select, and_, func, or_, select
@@ -22,7 +23,26 @@ from app.domain.errors import OrderNotFoundError, VersionConflictError
 from app.domain.order_status import ItemStatus, OrderStatus, ensure_transition_allowed
 
 
-def build_kds_queue_query(view: str = "active") -> Select[Order]:
+def _apply_pagination[SelectT: Select[Any]](
+    query: SelectT,
+    *,
+    limit: int | None = None,
+    offset: int = 0,
+) -> SelectT:
+    """Apply SQL OFFSET and LIMIT clauses when pagination bounds are provided."""
+    if offset > 0:
+        query = query.offset(offset)
+    if limit is not None:
+        query = query.limit(limit)
+    return query
+
+
+def build_kds_queue_query(
+    view: str = "active",
+    *,
+    limit: int | None = None,
+    offset: int = 0,
+) -> Select[Order]:
     """Build SQLAlchemy query for KDS preparation queue (TASK-12, OP-11).
 
     Discards orders in PAID status.
@@ -51,11 +71,12 @@ def build_kds_queue_query(view: str = "active") -> Select[Order]:
             Order.in_preparation_at.isnot(None),
         )
 
-    return query.order_by(
+    ordered = query.order_by(
         func.coalesce(Order.in_preparation_at, Order.stock_reserved_at, Order.created_at).asc(),
         Order.created_at.asc(),
         Order.public_id.asc(),
     )
+    return _apply_pagination(ordered, limit=limit, offset=offset)
 
 
 class OrderRepository:
@@ -150,12 +171,16 @@ class OrderRepository:
         *,
         status: OrderStatus | None = None,
         dining_session_id: UUID | None = None,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[Order]:
         """List orders optionally filtered by OrderStatus enum or dining session (RF-18).
 
         Args:
             status: Optional OrderStatus enum filter.
             dining_session_id: Optional dining session filter.
+            limit: Maximum number of rows to return when paginating.
+            offset: Number of leading rows to skip.
 
         Returns:
             List of matching Order aggregate roots.
@@ -165,7 +190,11 @@ class OrderRepository:
             query = query.where(Order.status == status)
         if dining_session_id is not None:
             query = query.where(Order.dining_session_id == dining_session_id)
-        query = query.order_by(Order.created_at.desc(), Order.public_id.desc())
+        query = _apply_pagination(
+            query.order_by(Order.created_at.desc(), Order.public_id.desc()),
+            limit=limit,
+            offset=offset,
+        )
         result = await self._session.scalars(query)
         return list(result.unique().all())
 
@@ -176,13 +205,19 @@ class OrderRepository:
             select(Order).where(Order.dining_session_id == session_uuid)
         )
 
-    async def get_kds_queue(self, view: str = "active") -> list[Order]:
+    async def get_kds_queue(
+        self,
+        view: str = "active",
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[Order]:
         """Fetch orders for KDS queue matching view and elapsed time.
 
         Orders by COALESCE(in_preparation_at, stock_reserved_at, created_at) ASC,
         then created_at ASC, then order_id (public_id) ASC.
         """
-        query = build_kds_queue_query(view=view)
+        query = build_kds_queue_query(view=view, limit=limit, offset=offset)
         result = await self._session.scalars(query)
         orders = list(result.unique().all())
         min_dt = datetime.min.replace(tzinfo=UTC)

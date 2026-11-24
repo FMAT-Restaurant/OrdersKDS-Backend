@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logging import get_correlation_id
 from app.db.models import Outbox
 from app.messaging.events import OrderEvent
 
@@ -20,11 +21,14 @@ class OutboxRepository:
 
     def add(self, event: OrderEvent) -> Outbox:
         """Stage an event without committing the surrounding unit of work."""
+        resolved_correlation_id = event.correlation_id or get_correlation_id() or event.order_id
+        payload = event.model_dump(mode="json", by_alias=True)
+        payload["correlationId"] = str(resolved_correlation_id)
         row = Outbox(
             event_id=event.event_id,
             event_type=str(event.event_name),
-            payload=event.model_dump(mode="json", by_alias=True),
-            correlation_id=event.correlation_id,
+            payload=payload,
+            correlation_id=resolved_correlation_id,
         )
         self._session.add(row)
         return row

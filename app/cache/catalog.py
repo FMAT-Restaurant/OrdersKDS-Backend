@@ -6,7 +6,7 @@ import logging
 import unicodedata
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol, cast
 from uuid import UUID
 
@@ -120,6 +120,19 @@ class CatalogRepository:
     async def get(self, dish_id: UUID | str) -> dict[str, str]:
         values = await self._redis.hgetall(self.key(dish_id))
         return {_decode(key): _decode(value) for key, value in values.items()}
+
+    async def get_price(self, dish_id: UUID | str) -> Decimal | None:
+        """Return the positive authoritative catalog price for ``dish_id`` if present."""
+        values = await self.get(dish_id)
+        raw_price = values.get("price")
+        if raw_price is None or not raw_price.strip():
+            return None
+        try:
+            parsed = Decimal(raw_price.strip())
+        except InvalidOperation:
+            logger.warning("Ignoring invalid catalog price for %s: %r", dish_id, raw_price)
+            return None
+        return parsed if parsed > Decimal("0.00") else None
 
     async def validate_dish_available(self, dish_id: str) -> None:
         """Raise the domain error when the projected item is unavailable."""

@@ -28,6 +28,7 @@ from app.main import app
 from app.realtime.notifier import notify_item_changed, notify_order_changed
 from app.realtime.router import realtime_router
 from app.services.catalog import register_catalog_mock
+from tests.conftest import TEST_JWT_SECRET
 from tests.unit.conftest import FakeAsyncSession
 
 pytestmark = [
@@ -35,7 +36,7 @@ pytestmark = [
     pytest.mark.requirement("IT-17", "SEC-09", "RNF-03", "RNF-04", "RF-18"),
 ]
 
-_TEST_KEY = "test-key-not-a-secret-0123456789-32bytes"
+_TEST_KEY = TEST_JWT_SECRET
 
 
 def _create_token(

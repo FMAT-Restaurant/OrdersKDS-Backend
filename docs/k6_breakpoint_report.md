@@ -37,7 +37,8 @@
 | Validación estática y de opciones (`k6 inspect`) | 7 escenarios (`smoke`, `load`, `stress`, `spike`, `soak`, `websocket-fanout`, `stock-race`) | Aprobado (k6 v2.3.0) | 7/7 escenarios validados con 0 errores de sintaxis, opciones e importaciones |
 | Suite contractual Python (`tests/unit/test_k6_suite.py`) | Estructura, permisos PBAC, catálogo `PLATE-*`, rutas FastAPI, reglas Sonar/Gitleaks | Aprobado (12/12) | Cobertura de `app/db/session.py` y contratos HTTP/WS/PBAC verificados |
 | Gate CI (`PT-08` `k6-smoke`) | 10 VUs · 30 s contra FastAPI (`--workers 2`) + PostgreSQL 16 + Redis 7 | Aprobado en CI (`2,604` reqs · `84.62 req/s`) | `avg = 44.77 ms`, **`p(95) = 64.78 ms` (< `100 ms`)**, `0.000 %` fallos (`5xx = 0.000 %`), `100.00 %` checks (`372` iteraciones) |
-| Corrida `PT-03` (300/600 VUs) en Staging | `uvicorn --workers 4` + PostgreSQL + Redis + RabbitMQ + Workers | Pendiente de ejecución en ambiente Staging | Redis no activo localmente (`6379` cerrado); registrar VU exacto de inflexión al correr en Staging |
+| Verificación local (`PT-01` `load.js` · `DEF-E5-021`) | 50 VUs · 60 s contra FastAPI (`--workers 4 --no-access-log`) + PG 16 (`20261124_perf_indexes`) + Redis 7 | Aprobado (`7,692` reqs · `127.02 req/s`) | `p(50) = 10.73 ms`, `avg = 25.21 ms`, **`p(95) = 73.75 ms` (< `500 ms` y < `200 ms`)**, `p(99) = 354.33 ms`, `0.000 %` fallos (`5xx = 0.000 %`), `100.00 %` checks |
+| Corrida `PT-03` (300/600 VUs) en Staging | `uvicorn --workers 4` + PostgreSQL + Redis + RabbitMQ + Workers | Pendiente de ejecución en ambiente Staging | Registrar VU exacto de inflexión al correr contra el clúster completo de Staging |
 
 ### Plantilla de captura en Staging (300 VUs / 600 VUs)
 
@@ -64,8 +65,8 @@
      - `app/services/orders.py` (`confirm_order`) y `app/services/shifts.py` (`ensure_shift_open_for_orders(for_update=False)`) eliminan el bloqueo exclusivo innecesario sobre la fila activa de `shifts` durante confirmaciones concurrentes.
      - `app/messaging/validator.py` (`get_validator`) cachea los validadores JSON Schema compilados para evitar reconstrucción en CPU por cada evento de confirmación.
      - `app/api/routers/orders.py` (`update_order_items`) deduplica y valida los IDs de catálogo en Redis de manera concurrente (`asyncio.gather`) antes de reescribir ítems.
-3. **Lectura de cola KDS (`GET /kds/queue`) y filtrado en memoria:**
-   - `app/api/routers/kds.py` filtra estaciones y consulta información de catálogo por ítem; bajo cientos de órdenes activas conviene monitorear tiempo de consulta en PostgreSQL (`orders(status, created_at)`) y cardinalidad de ítems activos.
+3. **Lectura de cola KDS (`GET /kds/queue`) y listado (`GET /orders`):**
+   - `app/api/routers/kds.py` y `app/api/routers/orders.py` incorporan paginación SQL (`limit`/`offset`, por defecto `100`) en `OrderRepository.list_orders` / `build_kds_queue_query`, respaldada por los índices compuestos de la migración `20261124_perf_indexes` (`ix_orders_status_in_prep_created`, `ix_orders_created_at_public_id`, `ix_order_items_order_id_status`), reduciendo `PT-01` (50 VUs) a **`p(95) = 73.75 ms`** con 4 workers Uvicorn (`--no-access-log` delegando el log JSON al middleware ASGI `CorrelationIdMiddleware`).
 4. **Cola Outbox y RabbitMQ:**
    - Ráfagas sostenidas de `POST /orders/{orderId}/confirm` generan filas en `outbox`; si el batch (`OUTBOX_BATCH_SIZE=100` cada `OUTBOX_POLL_INTERVAL_SECONDS=1`) queda atrás a 600 VUs, aumentará el tiempo de transición `CREATED -> RESERVED` en `PT-07` (`stock_race_pending_timeout`).
 

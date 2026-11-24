@@ -37,6 +37,7 @@ from app.services.catalog import get_catalog_info_mock, normalize_station_name
 from app.services.orders import OrderService, get_order_service
 
 logger = logging.getLogger(__name__)
+_MAX_STATION_FILTER_SCAN = 500
 
 router = APIRouter(
     tags=["kds"],
@@ -121,6 +122,14 @@ async def get_kds_queue(
         str,
         Query(pattern="^(active|delivered)$", description="active or delivered view."),
     ] = "active",
+    limit: Annotated[
+        int,
+        Query(ge=1, le=500, description="Maximum number of orders to return."),
+    ] = 100,
+    offset: Annotated[
+        int,
+        Query(ge=0, description="Number of matching orders to skip."),
+    ] = 0,
     session: Annotated[AsyncSession, Depends(get_session)] = None,  # type: ignore[assignment]
 ) -> list[OrderResponse]:
     """Retrieve orders for the KDS display.
@@ -130,25 +139,34 @@ async def get_kds_queue(
     Args:
         station: Optional query param to filter items by station.
         view: 'active' (default) or 'delivered'.
+        limit: Maximum number of orders to return.
+        offset: Number of matching orders to skip.
         session: Active database session.
 
     Returns:
-        List of OrderResponse objects with normalized station filtering applied in memory.
+        List of OrderResponse objects ordered by elapsed preparation time.
     """
     repo = OrderRepository(session)
-    orders = await repo.get_kds_queue(view=view)
-
     normalized_target_station = (
         normalize_station_name(station) if station and station.strip() else None
     )
 
+    if normalized_target_station is None:
+        orders = await repo.get_kds_queue(view=view, limit=limit, offset=offset)
+        return [
+            OrderResponse.from_model(order, items=valid_items)
+            for order in orders
+            if (valid_items := _filter_order_items(order, None))
+        ]
+
+    orders = await repo.get_kds_queue(view=view, limit=_MAX_STATION_FILTER_SCAN, offset=0)
     queue: list[OrderResponse] = []
     for order in orders:
         valid_items = _filter_order_items(order, normalized_target_station)
         if valid_items:
             queue.append(OrderResponse.from_model(order, items=valid_items))
 
-    return queue
+    return queue[offset : offset + limit]
 
 
 @router.patch(

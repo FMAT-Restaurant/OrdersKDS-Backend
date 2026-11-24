@@ -53,6 +53,7 @@ from app.domain.access import (
     VOID_KITCHEN_ERROR,
 )
 from app.domain.errors import (
+    InvalidOrderItemError,
     InvalidStateTransitionError,
     NoteRequiredError,
     OrderNotFoundError,
@@ -104,6 +105,14 @@ async def list_orders(
     dining_session_id: Annotated[
         UUID | None, Query(alias="diningSessionId", description="Filter by dining session UUID.")
     ] = None,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=500, description="Maximum number of orders to return."),
+    ] = 100,
+    offset: Annotated[
+        int,
+        Query(ge=0, description="Number of leading orders to skip."),
+    ] = 0,
 ) -> list[OrderResponse]:
     """List orders optionally filtered by OrderStatus or dining session (RF-18).
 
@@ -112,12 +121,19 @@ async def list_orders(
         session: Active database session.
         status: Optional OrderStatus filter.
         dining_session_id: Optional dining session filter.
+        limit: Maximum number of orders to return.
+        offset: Number of leading orders to skip.
 
     Returns:
         List of matching Order representations.
     """
     repo = OrderRepository(session)
-    orders = await repo.list_orders(status=status, dining_session_id=dining_session_id)
+    orders = await repo.list_orders(
+        status=status,
+        dining_session_id=dining_session_id,
+        limit=limit,
+        offset=offset,
+    )
     return [OrderResponse.from_model(order) for order in orders]
 
 
@@ -280,44 +296,93 @@ def _resolve_effective_item_ids(
 def _resolve_effective_unit_price(
     item_input: OrderItemInput,
     matched_original: OrderItem | None,
+    catalog_price: Decimal | None = None,
 ) -> Decimal:
-    """Freeze item unit price using matched original item price when omitted."""
-    if item_input.unit_price <= Decimal("0.00") and matched_original is not None:
+    """Resolve authoritative unit price, prioritizing catalog price over client input."""
+    if catalog_price is not None and catalog_price > Decimal("0.00"):
+        if item_input.unit_price > Decimal("0.00") and item_input.unit_price != catalog_price:
+            logger.warning(
+                "Client unitPrice %s overridden by authoritative catalog price %s for dish '%s'",
+                item_input.unit_price,
+                catalog_price,
+                item_input.offer_id or item_input.dish_id or item_input.name,
+            )
+        return catalog_price
+    if (
+        item_input.unit_price <= Decimal("0.00")
+        and matched_original is not None
+        and matched_original.unit_price > Decimal("0.00")
+    ):
         return matched_original.unit_price
-    return item_input.unit_price
+    if item_input.unit_price > Decimal("0.00"):
+        return item_input.unit_price
+    raise InvalidOrderItemError()
 
 
-def _resolve_replacement_specs(
+def _collect_unique_catalog_ids(
+    item_entries: Sequence[tuple[OrderItemInput, OrderItem | None, str, str]],
+) -> list[str]:
+    """Collect unique dish and offer identifiers preserving declaration order."""
+    ordered_ids: list[str] = []
+    for _, _, dish_id, offer_id in item_entries:
+        ordered_ids.append(dish_id)
+        if offer_id != dish_id:
+            ordered_ids.append(offer_id)
+    return list(dict.fromkeys(ordered_ids))
+
+
+def _resolve_replacement_entries(
     payload_items: Sequence[OrderItemInput],
     original_items: Sequence[OrderItem],
-) -> list[tuple[OrderItemInput, str, str, Decimal]]:
-    """Resolve physical dish IDs, offer IDs, and frozen prices for replacement items."""
-    specs: list[tuple[OrderItemInput, str, str, Decimal]] = []
+) -> list[tuple[OrderItemInput, OrderItem | None, str, str]]:
+    """Pair each incoming item payload with its matched original item and catalog IDs."""
+    entries: list[tuple[OrderItemInput, OrderItem | None, str, str]] = []
     for item_input in payload_items:
         matched_original = _find_matching_original_item(original_items, item_input)
         effective_dish_id, effective_offer_id = _resolve_effective_item_ids(
             item_input,
             matched_original,
         )
-        effective_price = _resolve_effective_unit_price(item_input, matched_original)
-        specs.append((item_input, effective_dish_id, effective_offer_id, effective_price))
-    return specs
+        entries.append((item_input, matched_original, effective_dish_id, effective_offer_id))
+    return entries
 
 
-async def _validate_catalog_ids(
-    specs: Sequence[tuple[OrderItemInput, str, str, Decimal]],
+async def _validate_and_fetch_catalog_prices(
+    entries: Sequence[tuple[OrderItemInput, OrderItem | None, str, str]],
     catalog_validator: CatalogValidatorProtocol,
-) -> None:
-    """Validate unique catalog identifiers concurrently in declaration order."""
-    ordered_ids: list[str] = []
-    for _, dish_id, offer_id, _ in specs:
-        ordered_ids.append(dish_id)
-        if offer_id != dish_id:
-            ordered_ids.append(offer_id)
-    unique_ids = list(dict.fromkeys(ordered_ids))
+) -> dict[str, Decimal]:
+    """Validate dish availability and load authoritative prices concurrently."""
+    unique_ids = _collect_unique_catalog_ids(entries)
     await asyncio.gather(
         *(catalog_validator.validate_dish_available(catalog_id) for catalog_id in unique_ids)
     )
+    fetched = await asyncio.gather(
+        *(catalog_validator.get_dish_price(catalog_id) for catalog_id in unique_ids)
+    )
+    return {
+        catalog_id: price
+        for catalog_id, price in zip(unique_ids, fetched, strict=True)
+        if price is not None
+    }
+
+
+def _resolve_replacement_specs(
+    entries: Sequence[tuple[OrderItemInput, OrderItem | None, str, str]],
+    catalog_prices: dict[str, Decimal],
+) -> list[tuple[OrderItemInput, str, str, Decimal]]:
+    """Build validated item specifications with server-side frozen prices."""
+    specs: list[tuple[OrderItemInput, str, str, Decimal]] = []
+    for item_input, matched_original, effective_dish_id, effective_offer_id in entries:
+        authoritative_price = catalog_prices.get(effective_offer_id) or catalog_prices.get(
+            effective_dish_id
+        )
+        effective_price = _resolve_effective_unit_price(
+            item_input,
+            matched_original,
+            catalog_price=authoritative_price,
+        )
+        specs.append((item_input, effective_dish_id, effective_offer_id, effective_price))
+    return specs
 
 
 def _build_order_item_from_spec(
@@ -381,8 +446,9 @@ async def update_order_items(
 
     # Preserve original item information for price and dish_id fallbacks
     original_items = list(order.items)
-    specs = _resolve_replacement_specs(payload.items, original_items)
-    await _validate_catalog_ids(specs, catalog_validator)
+    entries = _resolve_replacement_entries(payload.items, original_items)
+    catalog_prices = await _validate_and_fetch_catalog_prices(entries, catalog_validator)
+    specs = _resolve_replacement_specs(entries, catalog_prices)
 
     order.items.clear()
     new_items = [_build_order_item_from_spec(spec) for spec in specs]

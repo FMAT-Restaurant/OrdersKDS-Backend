@@ -15,9 +15,9 @@ from app.db.models import Order, Outbox, Shift
 from app.domain.order_status import OrderStatus
 from app.domain.shift import ShiftStatus
 from app.main import app
+from tests.conftest import TEST_JWT_SECRET
 
-# Any key works: the service never verifies signatures (ADR-0011).
-_TEST_SIGNING_KEY = "unit-test-key-not-a-secret-0123456789"
+_TEST_SIGNING_KEY = TEST_JWT_SECRET
 
 TokenFactory = Callable[..., str]
 
@@ -73,6 +73,11 @@ class FakeAsyncSession:
             ),
             reverse=True,
         )
+        offset_val = getattr(getattr(statement, "_offset_clause", None), "value", None)
+        limit_val = getattr(getattr(statement, "_limit_clause", None), "value", None)
+        start = offset_val if isinstance(offset_val, int) and offset_val > 0 else 0
+        end = start + limit_val if isinstance(limit_val, int) and limit_val >= 0 else None
+        orders = orders[start:end]
 
         class _Result:
             def unique(self) -> _Result:

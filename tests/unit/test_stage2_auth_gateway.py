@@ -35,10 +35,13 @@ def test_health_endpoints_return_ok(client: TestClient, path: str) -> None:
     assert response.json() == {"status": "ok"}
 
 
-def test_kitchen_prefix_mounts_kds_queue_and_enforces_pbac(client: TestClient) -> None:
+def test_kitchen_prefix_mounts_kds_queue_and_enforces_pbac(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     unauthenticated = client.get("/api/v1/kitchen/kds/queue")
     assert unauthenticated.status_code == 401
 
+    monkeypatch.setenv("TRUST_GATEWAY_HEADERS", "true")
     fake_session = FakeAsyncSession()
 
     async def _override_session() -> AsyncGenerator[FakeAsyncSession, None]:
@@ -61,7 +64,10 @@ def test_kitchen_prefix_mounts_kds_queue_and_enforces_pbac(client: TestClient) -
 
 
 @pytest.mark.parametrize("user_type", [b"ADMIN", b"ADMINISTRADOR"])
-def test_gateway_headers_resolve_admin_from_user_type_without_roles(user_type: bytes) -> None:
+def test_gateway_headers_resolve_admin_from_user_type_without_roles(
+    user_type: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TRUST_GATEWAY_HEADERS", "true")
     request = Request(
         {
             "type": "http",
@@ -79,7 +85,10 @@ def test_gateway_headers_resolve_admin_from_user_type_without_roles(user_type: b
     assert Role.ADMIN in context.effective_roles
 
 
-def test_gateway_headers_resolve_admin_from_wildcard_permission_without_roles() -> None:
+def test_gateway_headers_resolve_admin_from_wildcard_permission_without_roles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TRUST_GATEWAY_HEADERS", "true")
     request = Request(
         {
             "type": "http",
@@ -111,7 +120,9 @@ def test_jwt_claims_resolve_admin_from_user_type_without_roles(
 @pytest.mark.parametrize("spoofed_user_type", [b"ADMIN", b"ADMINISTRADOR"])
 def test_spoofed_user_type_header_does_not_escalate_non_admin_gateway_identity(
     spoofed_user_type: bytes,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("TRUST_GATEWAY_HEADERS", "true")
     waiter_request = Request(
         {
             "type": "http",
@@ -171,7 +182,9 @@ def test_pbac_role_inference_when_raw_role_is_unrecognized(
     make_token: TokenFactory,
     permission: str,
     expected_role: Role,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("TRUST_GATEWAY_HEADERS", "true")
     token = make_token(user_id="pbac-user-1", role="SUPERVISOR", permissions=[permission])
     jwt_context = resolve_auth_context(f"Bearer {token}")
     assert jwt_context.role is expected_role
