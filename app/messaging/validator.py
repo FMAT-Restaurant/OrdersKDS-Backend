@@ -28,6 +28,7 @@ _SCHEMA_ALIASES: dict[str, str] = {
     "ordenes.order.in_preparation": "ordenes.orden.en_preparacion",
     "ordenes.order.served": "ordenes.orden.en_preparacion",
     "ordenes.dish.rejected": "ordenes.platillo.rechazado_cocina",
+    "ordenes.dish.redo": "ordenes.platillo.rehecho",
     "ordenes.order.wasted": "ordenes.comanda.mermada",
     "ordenes.dish.prepared": "ordenes.platillo.preparado",
     "inventory.reservation.confirmed": "inventario.stock.reservado",

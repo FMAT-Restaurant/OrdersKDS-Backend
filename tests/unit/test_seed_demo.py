@@ -210,14 +210,30 @@ def test_demo_catalog_matches_inventory_test_data() -> None:
 
 
 def test_build_demo_orders_aligns_ids_totals_and_frontend_uuids() -> None:
-    orders = seed_demo._build_demo_orders(datetime.now(UTC))
-    by_id = {order.public_id: order for order in orders}
+    now = datetime.now(UTC)
+    orders_first = seed_demo._build_demo_orders(now)
+    orders_second = seed_demo._build_demo_orders(now)
+    assert len(orders_first) == 8
 
-    assert len(orders) == 8
+    first_ids = {order.public_id for order in orders_first}
+    second_ids = {order.public_id for order in orders_second}
+    assert len(first_ids) == 8
+    assert len(second_ids) == 8
+    assert first_ids.isdisjoint(second_ids)
+    assert first_ids.isdisjoint(set(_FRONTEND_SEED_ORDER_IDS))
+
+    first_item_ids = {item.public_id for order in orders_first for item in order.items}
+    second_item_ids = {item.public_id for order in orders_second for item in order.items}
+    assert first_item_ids.isdisjoint(second_item_ids)
+
+    fixed_orders = seed_demo._build_demo_orders(now, fixed_ids=True)
+    by_id = {order.public_id: order for order in fixed_orders}
+
+    assert len(fixed_orders) == 8
     for expected_id in _FRONTEND_SEED_ORDER_IDS:
         assert expected_id in by_id
 
-    for order in orders:
+    for order in orders_first:
         assert len(order.items) >= 1
         expected_total = Decimal("0.00")
         for item in order.items:
@@ -257,6 +273,7 @@ async def test_seed_redis_catalog_reset_clears_legacy_and_upserts_plates(
         initial_hashes={
             "catalog:platillo:dish-tacos": {"available": "true"},
             "catalog:platillo:dish-agotado": {"available": "false"},
+            "catalog:platillo:OFFER-BURGER-01": {"available": "false"},
         }
     )
 
@@ -270,11 +287,17 @@ async def test_seed_redis_catalog_reset_clears_legacy_and_upserts_plates(
     assert "catalog:platillo:dish-tacos" in fake_redis.hashes
     assert fake_redis.deleted_keys == []
     assert "catalog:platillo:PLATE-BURGER-01" in fake_redis.hashes
+    assert fake_redis.hashes["catalog:platillo:OFFER-BURGER-01"]["available"] == "true"
     assert fake_redis.close_count == 1
 
+    fake_redis.hashes["catalog:platillo:OFFER-QUES-01"] = {"available": "false"}
     await seed_demo._seed_redis_catalog(reset=True)
     assert "catalog:platillo:dish-tacos" not in fake_redis.hashes
     assert "catalog:platillo:dish-agotado" not in fake_redis.hashes
+    assert "catalog:platillo:OFFER-BURGER-01" in fake_redis.deleted_keys
+    assert "catalog:platillo:OFFER-QUES-01" in fake_redis.deleted_keys
+    assert fake_redis.hashes["catalog:platillo:OFFER-BURGER-01"]["available"] == "true"
+    assert fake_redis.hashes["catalog:platillo:OFFER-QUES-01"]["available"] == "true"
     assert "catalog:platillo:PLATE-SIM-0001" in fake_redis.hashes
     assert fake_redis.hashes["catalog:platillo:PLATE-AGOTADO-01"]["available"] == "false"
     assert fake_redis.close_count == 2
@@ -335,6 +358,8 @@ async def test_seed_demo_data_reset_and_idempotency(monkeypatch: pytest.MonkeyPa
     )
     assert folios == [1, 2, 3, 4, 5, 6, 7, 8]
     assert all(order.shift_id == active_shift.id for order in session.orders.values())
+    first_run_order_ids = set(session.orders.keys())
+    assert len(first_run_order_ids) == 8
     assert engine.disposed is True
 
     engine.disposed = False
@@ -343,6 +368,20 @@ async def test_seed_demo_data_reset_and_idempotency(monkeypatch: pytest.MonkeyPa
     assert shift_second == 1
     assert active_shift.last_order_folio == 8
     assert len(session.shifts) == 1
+
+    # Re-running with --reset regenerates completely distinct UUIDs (and thus correlationIds)
+    inserted_third, shift_third = await seed_demo.seed_demo_data(reset=True)
+    assert inserted_third == 8
+    assert shift_third == 1
+    third_run_order_ids = set(session.orders.keys())
+    assert len(third_run_order_ids) == 8
+    assert first_run_order_ids.isdisjoint(third_run_order_ids)
+
+    # Optional --fixed-ids keeps legacy deterministic UUIDs when explicitly requested
+    inserted_fixed, _ = await seed_demo.seed_demo_data(reset=True, fixed_ids=True)
+    assert inserted_fixed == 8
+    for expected_id in _FRONTEND_SEED_ORDER_IDS:
+        assert expected_id in session.orders
 
 
 @pytest.mark.asyncio
@@ -394,20 +433,28 @@ def test_parse_args_and_main(monkeypatch: pytest.MonkeyPatch) -> None:
     default_args = seed_demo._parse_args([])
     assert default_args.reset is False
     assert default_args.catalog_only is False
+    assert default_args.fixed_ids is False
 
-    custom_args = seed_demo._parse_args(["--reset", "--catalog-only"])
+    custom_args = seed_demo._parse_args(["--reset", "--catalog-only", "--fixed-ids"])
     assert custom_args.reset is True
     assert custom_args.catalog_only is True
+    assert custom_args.fixed_ids is True
 
     called: dict[str, bool] = {}
 
-    async def _fake_seed(*, reset: bool = False, catalog_only: bool = False) -> tuple[int, int]:
+    async def _fake_seed(
+        *,
+        reset: bool = False,
+        catalog_only: bool = False,
+        fixed_ids: bool = False,
+    ) -> tuple[int, int]:
         called["reset"] = reset
         called["catalog_only"] = catalog_only
+        called["fixed_ids"] = fixed_ids
         return 0, 1
 
     monkeypatch.setattr(seed_demo, "seed_demo_data", _fake_seed)
     monkeypatch.setattr(seed_demo, "_parse_args", lambda: custom_args)
 
     seed_demo.main()
-    assert called == {"reset": True, "catalog_only": True}
+    assert called == {"reset": True, "catalog_only": True, "fixed_ids": True}

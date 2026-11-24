@@ -15,8 +15,10 @@ from app.db.models import Order, OrderItem
 from app.db.session import get_session
 from app.domain.order_status import ItemStatus, OrderStatus
 from app.main import app
+from app.services.catalog import get_catalog_validator
 from app.services.notifications import OrderNotifier
 from app.services.orders import OrderService, get_order_service
+from tests.unit.api.conftest import FakeCatalogValidator
 from tests.unit.conftest import FakeAsyncSession
 
 pytestmark = [pytest.mark.unit, pytest.mark.requirement("RF-22", "OP-12")]
@@ -50,18 +52,26 @@ def spy_notifier() -> SpyOrderNotifier:
     return SpyOrderNotifier()
 
 
+@pytest.fixture
+def fake_catalog() -> FakeCatalogValidator:
+    return FakeCatalogValidator()
+
+
 @pytest.fixture(autouse=True)
 def override_dependencies(
     fake_session: FakeAsyncSession,
+    fake_catalog: FakeCatalogValidator,
     spy_notifier: SpyOrderNotifier,
 ) -> Any:
     async def _get_test_session() -> AsyncGenerator[FakeAsyncSession, None]:
         yield fake_session
 
     app.dependency_overrides[get_session] = _get_test_session
+    app.dependency_overrides[get_catalog_validator] = lambda: fake_catalog
     app.dependency_overrides[get_order_service] = lambda: OrderService(
         session=cast(AsyncSession, fake_session),
         notifier=spy_notifier,
+        catalog_repo=fake_catalog,
     )
     yield
     app.dependency_overrides.clear()
@@ -124,8 +134,43 @@ def test_redo_item_preserves_order_and_pushes_pending_item(
     assert item.status == ItemStatus.PENDING
     assert item.notes == note
     assert fake_session.committed is True
-    assert len(fake_session.outbox_rows) == 0
+    assert len(fake_session.outbox_rows) == 1
+    outbox_row = fake_session.outbox_rows[0]
+    assert outbox_row.event_type == "ordenes.platillo.rehecho"
+    assert outbox_row.payload["orderId"] == str(order.public_id)
+    assert outbox_row.payload["itemId"] == str(item.public_id)
+    assert outbox_row.payload["plateId"] == "dish-redo"
+    assert outbox_row.payload["sourceId"] == "dish-redo"
+    assert outbox_row.payload["offerId"] == "dish-redo"
+    assert outbox_row.payload["quantity"] == 2
+    assert outbox_row.payload["reason"] == note
+    assert outbox_row.payload["correlationId"] == str(order.public_id)
+    assert outbox_row.payload["redoId"]
     assert spy_notifier.notified_items == [(order, item)]
+
+
+def test_redo_rejects_with_422_dish_unavailable_when_catalog_blocks_dish(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_catalog: FakeCatalogValidator,
+    fake_session: FakeAsyncSession,
+) -> None:
+    order = _delivered_order()
+    item = order.items[0]
+    test_db[order.public_id] = order
+    fake_catalog.unavailable_ids.add("dish-redo")
+
+    response = client.patch(
+        f"/orders/{order.public_id}/items/{item.public_id}/redo",
+        headers=auth_headers("waiter"),
+        json={"note": "Salió frío"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "DISH_UNAVAILABLE"
+    assert item.status == ItemStatus.DELIVERED
+    assert fake_session.outbox_rows == []
 
 
 def test_redo_item_ready_emits_quantity_and_redo_flag(

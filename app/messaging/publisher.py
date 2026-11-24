@@ -29,6 +29,7 @@ _DUAL_ROUTING_KEY_MAP: dict[str, tuple[str, ...]] = {
     "ordenes.orden.expirada": ("ordenes.order.cancelled", "ordenes.order.expired"),
     "ordenes.orden.en_preparacion": ("ordenes.order.served", "ordenes.order.in_preparation"),
     "ordenes.platillo.rechazado_cocina": ("ordenes.dish.rejected",),
+    "ordenes.platillo.rehecho": ("ordenes.dish.redo",),
     "ordenes.comanda.mermada": ("ordenes.order.wasted",),
     "ordenes.platillo.preparado": ("ordenes.dish.prepared",),
 }
@@ -64,6 +65,21 @@ def _enrich_payload_for_inventory(payload: Mapping[str, object]) -> dict[str, ob
         if field_name in enriched:
             enriched[field_name] = _enrich_item_list(enriched.get(field_name))
     return enriched
+
+
+def _resolve_correlation_id(
+    payload: Mapping[str, object],
+    event_id: UUID,
+    correlation_id: UUID | None,
+) -> str:
+    """Resolve a non-empty correlation identifier from explicit arg, payload, or event id."""
+    if correlation_id is not None:
+        return str(correlation_id)
+    for key in ("correlationId", "orderId"):
+        raw = payload.get(key)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    return str(event_id)
 
 
 class EventPublishError(RuntimeError):
@@ -178,18 +194,23 @@ class EventPublisher:
             EventContractError: If payload violates JSON schema.
             EventPublishError: If publish or confirmation fails.
         """
-        validate_event_payload(event_type=event_type, payload=payload)
+        resolved_correlation_id = _resolve_correlation_id(payload, event_id, correlation_id)
+        effective_payload = dict(payload)
+        if effective_payload.get("correlationId") is None:
+            effective_payload["correlationId"] = resolved_correlation_id
+
+        validate_event_payload(event_type=event_type, payload=effective_payload)
 
         if not self.is_connected or self._exchange is None:
             await self.connect()
 
         assert self._exchange is not None
         message = aio_pika.Message(
-            body=json.dumps(dict(payload)).encode("utf-8"),
+            body=json.dumps(effective_payload).encode("utf-8"),
             delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
             content_type="application/json",
             message_id=str(event_id),
-            correlation_id=str(correlation_id) if correlation_id is not None else None,
+            correlation_id=resolved_correlation_id,
         )
 
         try:
@@ -199,7 +220,7 @@ class EventPublisher:
                 mandatory=mandatory,
             )
             if self._dual_routing:
-                dual_payload = _enrich_payload_for_inventory(payload)
+                dual_payload = _enrich_payload_for_inventory(effective_payload)
                 dual_body = json.dumps(dual_payload).encode("utf-8")
                 for dual_rk in _DUAL_ROUTING_KEY_MAP.get(event_type, ()):
                     dual_msg = aio_pika.Message(
@@ -207,7 +228,7 @@ class EventPublisher:
                         delivery_mode=message.delivery_mode,
                         content_type=message.content_type,
                         message_id=str(event_id),
-                        correlation_id=str(correlation_id) if correlation_id is not None else None,
+                        correlation_id=resolved_correlation_id,
                     )
                     await self._exchange.publish(
                         message=dual_msg,

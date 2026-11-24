@@ -107,6 +107,7 @@ class CatalogDishSpec:
     category: str
     station: str
     preparation_time_text: str
+    offer_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +145,7 @@ class _SeedOrderSpec:
 DEMO_CATALOG: tuple[CatalogDishSpec, ...] = (
     CatalogDishSpec(
         dish_id=PLATE_BURGER_ID,
+        offer_id=OFFER_BURGER_ID,
         price=PRICE_BURGER,
         available=True,
         category="Platos Fuertes",
@@ -152,6 +154,7 @@ DEMO_CATALOG: tuple[CatalogDishSpec, ...] = (
     ),
     CatalogDishSpec(
         dish_id=PLATE_QUES_ID,
+        offer_id=OFFER_QUES_ID,
         price=PRICE_QUES,
         available=True,
         category="Entradas",
@@ -160,6 +163,7 @@ DEMO_CATALOG: tuple[CatalogDishSpec, ...] = (
     ),
     CatalogDishSpec(
         dish_id=PLATE_CESAR_ID,
+        offer_id=OFFER_CESAR_ID,
         price=PRICE_CESAR,
         available=True,
         category="Entradas",
@@ -168,6 +172,7 @@ DEMO_CATALOG: tuple[CatalogDishSpec, ...] = (
     ),
     CatalogDishSpec(
         dish_id=PLATE_SIM_ID,
+        offer_id=OFFER_SIM_ID,
         price=PRICE_SIM,
         available=True,
         category="Especialidades",
@@ -462,11 +467,16 @@ def _ago(now: datetime, minutes: int | None) -> datetime | None:
     return now - timedelta(minutes=minutes) if minutes is not None else None
 
 
-def _build_order_from_spec(spec: _SeedOrderSpec, now: datetime) -> Order:
+def _build_order_from_spec(
+    spec: _SeedOrderSpec,
+    now: datetime,
+    *,
+    fixed_ids: bool = False,
+) -> Order:
     """Materialize one ORM Order aggregate with its OrderItems from a seed spec."""
     items = [
         OrderItem(
-            public_id=item.public_id,
+            public_id=item.public_id if fixed_ids else uuid4(),
             dish_id=item.dish_id,
             offer_id=item.offer_id,
             name=item.name,
@@ -479,7 +489,7 @@ def _build_order_from_spec(spec: _SeedOrderSpec, now: datetime) -> Order:
         for item in spec.items
     ]
     order = Order(
-        public_id=spec.public_id,
+        public_id=spec.public_id if fixed_ids else uuid4(),
         table_number=spec.table_number,
         is_takeaway=spec.is_takeaway,
         dining_session_id=DEFAULT_DINING_SESSION_ID,
@@ -498,15 +508,20 @@ def _build_order_from_spec(spec: _SeedOrderSpec, now: datetime) -> Order:
     return order
 
 
-def _build_demo_orders(now: datetime) -> list[Order]:
-    """Create deterministic demo Order aggregates aligned to Inventory TEST_DATA.md."""
-    return [_build_order_from_spec(spec, now) for spec in _SEED_ORDER_SPECS]
+def _build_demo_orders(now: datetime, *, fixed_ids: bool = False) -> list[Order]:
+    """Create demo Order aggregates aligned to Inventory TEST_DATA.md."""
+    return [_build_order_from_spec(spec, now, fixed_ids=fixed_ids) for spec in _SEED_ORDER_SPECS]
 
 
-def _build_demo_shift(now: datetime, *, shift_number: int = 1) -> Shift:
+def _build_demo_shift(
+    now: datetime,
+    *,
+    shift_number: int = 1,
+    fixed_ids: bool = False,
+) -> Shift:
     """Create an OPEN operational shift for seeded per-shift folio allocation."""
     return Shift(
-        public_id=DEMO_SHIFT_ID if shift_number == 1 else uuid4(),
+        public_id=DEMO_SHIFT_ID if (fixed_ids and shift_number == 1) else uuid4(),
         shift_number=shift_number,
         status=ShiftStatus.OPEN,
         last_order_folio=0,
@@ -523,22 +538,29 @@ async def _seed_redis_catalog(*, reset: bool = False) -> None:
     try:
         catalog_repo = CatalogRepository(RedisHashAdapter(redis))
         if reset:
+            offer_ids = tuple(dish.offer_id for dish in DEMO_CATALOG if dish.offer_id is not None)
             keys_to_delete = [
                 catalog_repo.key(dish_id)
-                for dish_id in (*LEGACY_REDIS_DISH_IDS, *(dish.dish_id for dish in DEMO_CATALOG))
+                for dish_id in (
+                    *LEGACY_REDIS_DISH_IDS,
+                    *(dish.dish_id for dish in DEMO_CATALOG),
+                    *offer_ids,
+                )
             ]
             if keys_to_delete:
                 await redis.delete(*keys_to_delete)
 
         for dish in DEMO_CATALOG:
-            await catalog_repo.upsert(
-                dish.dish_id,
-                price=dish.price,
-                available=dish.available,
-                category=dish.category,
-                station=dish.station,
-                preparation_time_text=dish.preparation_time_text,
-            )
+            target_ids = (dish.dish_id, dish.offer_id) if dish.offer_id else (dish.dish_id,)
+            for catalog_id in target_ids:
+                await catalog_repo.upsert(
+                    catalog_id,
+                    price=dish.price,
+                    available=dish.available,
+                    category=dish.category,
+                    station=dish.station,
+                    preparation_time_text=dish.preparation_time_text,
+                )
     finally:
         await redis.aclose()
 
@@ -553,7 +575,12 @@ async def _reset_database(session: AsyncSession) -> None:
     await session.commit()
 
 
-async def _resolve_target_shift(session: AsyncSession, now: datetime) -> Shift:
+async def _resolve_target_shift(
+    session: AsyncSession,
+    now: datetime,
+    *,
+    fixed_ids: bool = False,
+) -> Shift:
     """Return the active OPEN shift or create and flush the next shift."""
     shift_repo = ShiftRepository(session)
     active = await shift_repo.get_active_shift()
@@ -561,7 +588,7 @@ async def _resolve_target_shift(session: AsyncSession, now: datetime) -> Shift:
         return active
     latest = await shift_repo.get_latest_shift()
     next_number = (latest.shift_number + 1) if latest is not None else 1
-    shift = _build_demo_shift(now, shift_number=next_number)
+    shift = _build_demo_shift(now, shift_number=next_number, fixed_ids=fixed_ids)
     shift_repo.save(shift)
     await session.flush()
     return shift
@@ -571,24 +598,34 @@ async def _insert_demo_orders(
     session: AsyncSession,
     shift: Shift,
     now: datetime,
-) -> int:
-    """Insert missing demo orders, assigning per-shift folios cleanly."""
-    inserted = 0
-    for order in _build_demo_orders(now):
-        existing = await session.scalar(select(Order).where(Order.public_id == order.public_id))
-        if existing is None:
-            order.shift_id = shift.id
-            order.shift_folio = shift.allocate_next_folio()
-            session.add(order)
-            inserted += 1
+    *,
+    fixed_ids: bool = False,
+) -> list[tuple[Order, str]]:
+    """Insert demo orders cleanly, generating unique UUIDv4 IDs unless fixed_ids is True."""
+    if not fixed_ids and (shift.last_order_folio or 0) > 0:
+        return []
+
+    inserted_orders: list[tuple[Order, str]] = []
+    orders = _build_demo_orders(now, fixed_ids=fixed_ids)
+    for order, spec in zip(orders, _SEED_ORDER_SPECS, strict=True):
+        if fixed_ids:
+            existing = await session.scalar(
+                select(Order).where(Order.public_id == order.public_id)
+            )
+            if existing is not None:
+                continue
+        order.shift_id = shift.id
+        order.shift_folio = shift.allocate_next_folio()
+        session.add(order)
+        inserted_orders.append((order, spec.summary_note))
     shift_repo = ShiftRepository(session)
     shift_repo.save(shift)
-    return inserted
+    return inserted_orders
 
 
 def _print_seed_summary(
     *,
-    inserted: int,
+    inserted_orders: list[tuple[Order, str]],
     shift: Shift,
     catalog_only: bool,
 ) -> None:
@@ -604,19 +641,30 @@ def _print_seed_summary(
         return
 
     print(
-        f"[OK] PostgreSQL seeded ({inserted} new orders inserted; "
-        "pass --reset to wipe & recreate cleanly)."
+        f"[OK] PostgreSQL seeded ({len(inserted_orders)} new orders inserted; "
+        "pass --reset to wipe & regenerate fresh unique UUIDs)."
     )
+    if not inserted_orders:
+        print("Active shift already contains demo orders (pass --reset to regenerate fresh IDs).")
+        return
+
     print("\nDemo Orders Summary (aligned to Inventory TEST_DATA.md):")
-    for folio, spec in enumerate(_SEED_ORDER_SPECS, start=1):
-        location = "Para llevar" if spec.is_takeaway else f"Mesa {spec.table_number:<2}"
+    for order, summary_note in inserted_orders:
+        location = "Para llevar" if order.is_takeaway else f"Mesa {order.table_number:<2}"
+        folio = order.shift_folio or "-"
         print(
-            f"  #{folio} {spec.status.value:<14} | OrderId: {spec.public_id} | "
-            f"{location} | {spec.summary_note}"
+            f"  #{folio} {order.status.value:<14} | OrderId: {order.public_id} | "
+            f"{location} | {summary_note}"
         )
+    print("Note: Outbound events default correlationId to each unique OrderId when confirmed.")
 
 
-async def seed_demo_data(*, reset: bool = False, catalog_only: bool = False) -> tuple[int, int]:
+async def seed_demo_data(
+    *,
+    reset: bool = False,
+    catalog_only: bool = False,
+    fixed_ids: bool = False,
+) -> tuple[int, int]:
     """Insert Inventory-aligned catalog entries in Redis and shift/orders in PostgreSQL."""
     load_dotenv()
     await _seed_redis_catalog(reset=reset)
@@ -633,15 +681,23 @@ async def seed_demo_data(*, reset: bool = False, catalog_only: bool = False) -> 
             if reset:
                 await _reset_database(session)
 
-            shift = await _resolve_target_shift(session, now)
-            inserted = 0 if catalog_only else await _insert_demo_orders(session, shift, now)
+            shift = await _resolve_target_shift(session, now, fixed_ids=fixed_ids)
+            inserted_orders = (
+                []
+                if catalog_only
+                else await _insert_demo_orders(session, shift, now, fixed_ids=fixed_ids)
+            )
             shift_number = shift.shift_number
             await session.commit()
     finally:
         await get_engine().dispose()
 
-    _print_seed_summary(inserted=inserted, shift=shift, catalog_only=catalog_only)
-    return inserted, shift_number
+    _print_seed_summary(
+        inserted_orders=inserted_orders,
+        shift=shift,
+        catalog_only=catalog_only,
+    )
+    return len(inserted_orders), shift_number
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -664,13 +720,24 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Seed Redis catalog and ensure an active Shift exists without demo orders.",
     )
+    parser.add_argument(
+        "--fixed-ids",
+        action="store_true",
+        help="Use deterministic legacy UUIDs instead of generating fresh unique UUIDv4 values.",
+    )
     return parser.parse_args(argv)
 
 
 def main() -> None:
     """CLI entrypoint for seeding demo data."""
     args = _parse_args()
-    asyncio.run(seed_demo_data(reset=args.reset, catalog_only=args.catalog_only))
+    asyncio.run(
+        seed_demo_data(
+            reset=args.reset,
+            catalog_only=args.catalog_only,
+            fixed_ids=args.fixed_ids,
+        )
+    )
 
 
 if __name__ == "__main__":

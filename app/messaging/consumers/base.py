@@ -14,18 +14,24 @@ import logging
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.messaging.consumers.catalog import CatalogConsumer
 from app.messaging.consumers.dining_session import handle_dining_session_created
 from app.messaging.consumers.payment_completed import handle_payment_completed
+from app.messaging.consumers.redo_rejected import handle_redo_rejected
+from app.messaging.consumers.reservation_expired import handle_reservation_expired
 from app.messaging.consumers.stock_insufficient import handle_stock_insufficient
 from app.messaging.consumers.stock_reserved import handle_stock_reserved
 from app.messaging.events import (
     DiningSessionCreatedMessage,
     EventName,
     PaymentCompletedMessage,
+    RedoConfirmedMessage,
+    RedoRejectedMessage,
+    ReservationExpiredMessage,
+    ReservationLifecycleAckMessage,
     StockInsufficientMessage,
     StockReservedMessage,
 )
@@ -94,6 +100,73 @@ def _parse_payload(raw_message: object) -> tuple[dict[str, Any] | None, str | No
     return None, f"Unsupported payload type: {type(raw_message)}"
 
 
+_STATUS_TO_EVENT: dict[str, EventName] = {
+    "confirmed": EventName.STOCK_RESERVED,
+    "rejected": EventName.STOCK_INSUFFICIENT,
+    "expired": EventName.INVENTORY_RESERVATION_EXPIRED,
+    "consumed": EventName.INVENTORY_RESERVATION_CONSUMED,
+    "released": EventName.INVENTORY_RESERVATION_RELEASED,
+    "cancelled": EventName.INVENTORY_RESERVATION_RELEASED,
+}
+
+_RESERVATION_ACK_KEYS: tuple[str, ...] = (
+    EventName.INVENTORY_RESERVATION_CONSUMED,
+    EventName.INVENTORY_RESERVATION_RELEASED,
+    "reservation.consumed",
+    "reservation_consumed",
+    "reservation.consumida",
+    "reservation.released",
+    "reservation_released",
+    "reservation.liberada",
+    "reservation.cancelled",
+    "reservation_cancelled",
+    "reservation.cancelada",
+)
+
+
+def _acknowledge_reservation_lifecycle(
+    target_event: str,
+    parsed_data: dict[str, Any],
+) -> bool:
+    """Validate and log informational Inventory reservation lifecycle confirmations."""
+    msg_ack = ReservationLifecycleAckMessage.model_validate(parsed_data)
+    logger.info(
+        "Acknowledged informational inventory event %s for order %s (status=%s, items=%d)",
+        target_event,
+        msg_ack.order_id,
+        msg_ack.status,
+        len(msg_ack.items),
+        extra={
+            "event_id": str(msg_ack.event_id),
+            "order_id": str(msg_ack.order_id),
+            "event_type": target_event,
+        },
+    )
+    return True
+
+
+def _acknowledge_redo_confirmed(
+    target_event: str,
+    parsed_data: dict[str, Any],
+) -> bool:
+    """Validate and log informational Inventory FEFO confirmation for a dish redo."""
+    msg_confirmed = RedoConfirmedMessage.model_validate(parsed_data)
+    logger.info(
+        "Acknowledged %s for order %s (redo_id=%s, item_id=%s, items=%d)",
+        target_event,
+        msg_confirmed.order_id,
+        msg_confirmed.redo_id,
+        msg_confirmed.item_id,
+        len(msg_confirmed.items),
+        extra={
+            "event_id": str(msg_confirmed.event_id),
+            "order_id": str(msg_confirmed.order_id),
+            "event_type": target_event,
+        },
+    )
+    return True
+
+
 def _resolve_target_event(
     parsed_data: dict[str, Any],
     queue_name: str,
@@ -107,15 +180,100 @@ def _resolve_target_event(
             return str(parsed_data[key])
     status = str(parsed_data.get("status", "")).lower()
     has_order = "orderId" in parsed_data or "order_id" in parsed_data
-    if status == "confirmed" and has_order:
-        return str(EventName.STOCK_RESERVED)
-    if status == "rejected" and has_order:
-        return str(EventName.STOCK_INSUFFICIENT)
+    has_redo = "redoId" in parsed_data or "redo_id" in parsed_data
+    if has_order and has_redo:
+        if status == "confirmed":
+            return str(EventName.INVENTORY_REDO_CONFIRMED)
+        if status == "rejected":
+            return str(EventName.INVENTORY_REDO_REJECTED)
+    if has_order and status in _STATUS_TO_EVENT:
+        return str(_STATUS_TO_EVENT[status])
     if "faltantes" in parsed_data or "missing_ingredients" in parsed_data:
         return str(EventName.STOCK_INSUFFICIENT)
     if "reservas" in parsed_data or "reservations" in parsed_data:
         return str(EventName.STOCK_RESERVED)
     return queue_name
+
+
+_REDO_CONFIRMED_KEYS: tuple[str, ...] = (
+    EventName.INVENTORY_REDO_CONFIRMED,
+    "redo.confirmed",
+    "redo_confirmed",
+    "redo.confirmada",
+)
+
+_DINING_SESSION_KEYS: tuple[str, ...] = (
+    EventName.DINING_SESSION_STARTED,
+    "dining_session_started",
+    "dining.session.started",
+    "dining.session.iniciada",
+)
+
+
+class _NotifiedConsumerHandler(Protocol):
+    async def __call__(
+        self,
+        message: Any,
+        uow: UnitOfWork,
+        notifier: OrderNotifier | None = None,
+    ) -> bool: ...
+
+
+_NOTIFIED_ROUTES: tuple[tuple[tuple[str, ...], type[BaseModel], _NotifiedConsumerHandler], ...] = (
+    (
+        (
+            EventName.INVENTORY_REDO_REJECTED,
+            "redo.rejected",
+            "redo_rejected",
+            "redo.rechazada",
+        ),
+        RedoRejectedMessage,
+        handle_redo_rejected,
+    ),
+    (
+        (
+            EventName.STOCK_RESERVED,
+            EventName.STOCK_RESERVED_EN,
+            "stock_reserved",
+            "stock.reservado",
+            "reservation.confirmed",
+            "reservation_confirmed",
+            "reservation.confirmada",
+        ),
+        StockReservedMessage,
+        handle_stock_reserved,
+    ),
+    (
+        (
+            EventName.STOCK_INSUFFICIENT,
+            EventName.STOCK_INSUFFICIENT_EN,
+            "stock_insufficient",
+            "stock.insuficiente",
+            "reservation.rejected",
+            "reservation_rejected",
+            "reservation.rechazada",
+        ),
+        StockInsufficientMessage,
+        handle_stock_insufficient,
+    ),
+    (
+        (
+            EventName.INVENTORY_RESERVATION_EXPIRED,
+            "reservation.expired",
+            "reservation_expired",
+            "reservation.expirada",
+            "reserva.expirada",
+            "stock.expirado",
+        ),
+        ReservationExpiredMessage,
+        handle_reservation_expired,
+    ),
+    (
+        (EventName.PAYMENT_COMPLETED, "payment_completed", "pago.completado"),
+        PaymentCompletedMessage,
+        handle_payment_completed,
+    ),
+)
 
 
 async def _execute_typed_handler(
@@ -127,46 +285,19 @@ async def _execute_typed_handler(
 ) -> bool:
     """Validate data against specific Pydantic model and execute domain handler."""
     target_lower = target_event.lower()
-    stock_res_keys = (
-        EventName.STOCK_RESERVED,
-        EventName.STOCK_RESERVED_EN,
-        "stock_reserved",
-        "stock.reservado",
-        "reservation.confirmed",
-        "reservation_confirmed",
-        "reservation.confirmada",
-    )
-    if any(k in target_lower for k in stock_res_keys):
-        msg_res = StockReservedMessage.model_validate(parsed_data)
-        return await handle_stock_reserved(msg_res, uow, notifier=notifier)
+    if any(k in target_lower for k in _REDO_CONFIRMED_KEYS):
+        return _acknowledge_redo_confirmed(target_event, parsed_data)
 
-    stock_ins_keys = (
-        EventName.STOCK_INSUFFICIENT,
-        EventName.STOCK_INSUFFICIENT_EN,
-        "stock_insufficient",
-        "stock.insuficiente",
-        "reservation.rejected",
-        "reservation_rejected",
-        "reservation.rechazada",
-    )
-    if any(k in target_lower for k in stock_ins_keys):
-        msg_ins = StockInsufficientMessage.model_validate(parsed_data)
-        return await handle_stock_insufficient(msg_ins, uow, notifier=notifier)
+    for keys, model_cls, handler in _NOTIFIED_ROUTES:
+        if any(k in target_lower for k in keys):
+            return await handler(model_cls.model_validate(parsed_data), uow, notifier=notifier)
 
-    payment_keys = (EventName.PAYMENT_COMPLETED, "payment_completed", "pago.completado")
-    if any(k in target_lower for k in payment_keys):
-        msg_pay = PaymentCompletedMessage.model_validate(parsed_data)
-        return await handle_payment_completed(msg_pay, uow, notifier=notifier)
+    if any(k in target_lower for k in _RESERVATION_ACK_KEYS):
+        return _acknowledge_reservation_lifecycle(target_event, parsed_data)
 
-    dining_session_keys = (
-        EventName.DINING_SESSION_STARTED,
-        "dining_session_started",
-        "dining.session.started",
-        "dining.session.iniciada",
-    )
-    if any(k in target_lower for k in dining_session_keys):
-        msg_dining_session = DiningSessionCreatedMessage.model_validate(parsed_data)
-        return await handle_dining_session_created(msg_dining_session, uow)
+    if any(k in target_lower for k in _DINING_SESSION_KEYS):
+        msg_dining = DiningSessionCreatedMessage.model_validate(parsed_data)
+        return await handle_dining_session_created(msg_dining, uow)
 
     catalog_events = tuple(
         event.value
