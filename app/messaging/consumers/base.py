@@ -167,6 +167,37 @@ def _acknowledge_redo_confirmed(
     return True
 
 
+_REDO_STATUS_TO_EVENT: dict[str, EventName] = {
+    "confirmed": EventName.INVENTORY_REDO_CONFIRMED,
+    "rejected": EventName.INVENTORY_REDO_REJECTED,
+}
+
+_PAYLOAD_FIELD_TO_EVENT: tuple[tuple[str, EventName], ...] = (
+    ("faltantes", EventName.STOCK_INSUFFICIENT),
+    ("missing_ingredients", EventName.STOCK_INSUFFICIENT),
+    ("reservas", EventName.STOCK_RESERVED),
+    ("reservations", EventName.STOCK_RESERVED),
+)
+
+_CATALOG_EVENT_NAMES: frozenset[str] = frozenset(
+    event.value
+    for event in EventName
+    if event.value.startswith(("menu.", "inventory.recipe.", "inventory.source."))
+)
+
+
+def _infer_event_from_order_status(parsed_data: dict[str, Any]) -> str | None:
+    """Infer order or redo event name from order identifier and status fields."""
+    if "orderId" not in parsed_data and "order_id" not in parsed_data:
+        return None
+    status = str(parsed_data.get("status", "")).lower()
+    has_redo = "redoId" in parsed_data or "redo_id" in parsed_data
+    if has_redo and status in _REDO_STATUS_TO_EVENT:
+        return str(_REDO_STATUS_TO_EVENT[status])
+    mapped = _STATUS_TO_EVENT.get(status)
+    return str(mapped) if mapped is not None else None
+
+
 def _resolve_target_event(
     parsed_data: dict[str, Any],
     queue_name: str,
@@ -178,20 +209,12 @@ def _resolve_target_event(
     for key in ("eventType", "event_type"):
         if key in parsed_data:
             return str(parsed_data[key])
-    status = str(parsed_data.get("status", "")).lower()
-    has_order = "orderId" in parsed_data or "order_id" in parsed_data
-    has_redo = "redoId" in parsed_data or "redo_id" in parsed_data
-    if has_order and has_redo:
-        if status == "confirmed":
-            return str(EventName.INVENTORY_REDO_CONFIRMED)
-        if status == "rejected":
-            return str(EventName.INVENTORY_REDO_REJECTED)
-    if has_order and status in _STATUS_TO_EVENT:
-        return str(_STATUS_TO_EVENT[status])
-    if "faltantes" in parsed_data or "missing_ingredients" in parsed_data:
-        return str(EventName.STOCK_INSUFFICIENT)
-    if "reservas" in parsed_data or "reservations" in parsed_data:
-        return str(EventName.STOCK_RESERVED)
+    inferred = _infer_event_from_order_status(parsed_data)
+    if inferred is not None:
+        return inferred
+    for field_name, mapped_event in _PAYLOAD_FIELD_TO_EVENT:
+        if field_name in parsed_data:
+            return str(mapped_event)
     return queue_name
 
 
@@ -299,12 +322,7 @@ async def _execute_typed_handler(
         msg_dining = DiningSessionCreatedMessage.model_validate(parsed_data)
         return await handle_dining_session_created(msg_dining, uow)
 
-    catalog_events = tuple(
-        event.value
-        for event in EventName
-        if event.value.startswith(("menu.", "inventory.recipe.", "inventory.source."))
-    )
-    if target_event in catalog_events:
+    if target_event in _CATALOG_EVENT_NAMES:
         if catalog_consumer is None:
             raise RuntimeError("Catalog consumer is required for menu and catalog events")
         return await catalog_consumer.consume(target_event, parsed_data)

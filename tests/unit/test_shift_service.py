@@ -319,3 +319,40 @@ async def test_ensure_shift_open_for_orders_branches() -> None:
     open_shift.status = ShiftStatus.CLOSED
     with pytest.raises(ShiftClosedError):
         await service.ensure_shift_open_for_orders()
+
+
+@pytest.mark.asyncio
+async def test_ensure_shift_open_for_orders_without_row_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Confirmation checks open shift status with for_update=False to avoid row locks."""
+    session = FakeAsyncSession()
+    service = ShiftService(cast(AsyncSession, session))
+    open_shift = Shift(
+        id=1,
+        public_id=uuid4(),
+        shift_number=1,
+        status=ShiftStatus.OPEN,
+        last_order_folio=2,
+    )
+    lock_flags: list[bool] = []
+
+    async def fake_active(*, for_update: bool = False) -> Shift | None:
+        lock_flags.append(for_update)
+        return open_shift if open_shift.status == ShiftStatus.OPEN else None
+
+    async def fake_latest(*, for_update: bool = False) -> Shift | None:
+        lock_flags.append(for_update)
+        return open_shift
+
+    monkeypatch.setattr(service._shifts, "get_active_shift", fake_active)
+    monkeypatch.setattr(service._shifts, "get_latest_shift", fake_latest)
+
+    active = await service.ensure_shift_open_for_orders(for_update=False)
+    assert active is open_shift
+    assert lock_flags == [False]
+
+    open_shift.status = ShiftStatus.CLOSED
+    with pytest.raises(ShiftClosedError):
+        await service.ensure_shift_open_for_orders(for_update=False)
+    assert lock_flags == [False, False, False]

@@ -84,6 +84,51 @@ def test_get_engine_and_session_factory(monkeypatch: pytest.MonkeyPatch) -> None
         assert db_session.get_session_factory() is mock_factory
 
 
+def test_get_engine_kwargs_defaults_empty() -> None:
+    with patch.dict(os.environ, {}, clear=True):
+        assert db_session.get_engine_kwargs() == {}
+
+
+def test_get_engine_kwargs_parses_pool_settings() -> None:
+    env = {
+        "DB_POOL_SIZE": "20",
+        "DB_MAX_OVERFLOW": "40",
+        "DB_POOL_TIMEOUT": "15",
+        "DB_POOL_PRE_PING": "true",
+    }
+    with patch.dict(os.environ, env, clear=True):
+        assert db_session.get_engine_kwargs() == {
+            "pool_size": 20,
+            "max_overflow": 40,
+            "pool_timeout": 15,
+            "pool_pre_ping": True,
+        }
+
+
+@pytest.mark.parametrize("raw_value", ["abc", "0", "-5"])
+def test_get_engine_kwargs_rejects_invalid_positive_ints(raw_value: str) -> None:
+    with (
+        patch.dict(os.environ, {"DB_POOL_SIZE": raw_value}, clear=True),
+        pytest.raises(RuntimeError, match="DB_POOL_SIZE"),
+    ):
+        db_session.get_engine_kwargs()
+
+
+def test_get_engine_forwards_pool_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
+    env = {"DATABASE_URL": "postgresql+asyncpg://u:p@db:5432/orders", "DB_POOL_SIZE": "25"}
+    with (
+        patch.dict(os.environ, env, clear=True),
+        patch("app.db.session.create_async_engine") as mock_create_engine,
+    ):
+        monkeypatch.setattr(db_session, "_engine", None)
+        db_session.get_engine()
+        mock_create_engine.assert_called_once_with(
+            "postgresql+asyncpg://u:p@db:5432/orders",
+            echo=False,
+            pool_size=25,
+        )
+
+
 async def test_get_session_yields_session_happy_path() -> None:
     mock_session = AsyncMock()
     mock_context = AsyncMock()

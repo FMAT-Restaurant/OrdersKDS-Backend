@@ -33,3 +33,6 @@ reports/
 
 # Lockfiles
 uv.lock
+
+# Node
+node_modules/

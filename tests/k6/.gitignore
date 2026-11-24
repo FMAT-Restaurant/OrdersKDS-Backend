@@ -1,0 +1,4 @@
+out/*.json
+out/*.html
+out/*.csv
+!out/.gitkeep
