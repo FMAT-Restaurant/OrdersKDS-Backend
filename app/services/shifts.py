@@ -71,12 +71,12 @@ class ShiftService:
             can_accept_orders=can_accept_orders,
         )
 
-    async def ensure_shift_open_for_orders(self) -> Shift | None:
-        """Return the locked open shift or None if uninitialized; raise if closed."""
-        active = await self._shifts.get_active_shift(for_update=True)
+    async def ensure_shift_open_for_orders(self, *, for_update: bool = True) -> Shift | None:
+        """Return the open shift (optionally locked) or None if uninitialized; raise if closed."""
+        active = await self._shifts.get_active_shift(for_update=for_update)
         if active is not None:
             return active
-        latest = await self._shifts.get_latest_shift(for_update=True)
+        latest = await self._shifts.get_latest_shift(for_update=for_update)
         if latest is not None:
             raise ShiftClosedError()
         return None

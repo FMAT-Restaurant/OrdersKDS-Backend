@@ -35,8 +35,8 @@
 | Verificación | Alcance | Estado | Observaciones / Evidencia |
 |---|---|---|---|
 | Validación estática y de opciones (`k6 inspect`) | 7 escenarios (`smoke`, `load`, `stress`, `spike`, `soak`, `websocket-fanout`, `stock-race`) | Aprobado (k6 v2.3.0) | 7/7 escenarios validados con 0 errores de sintaxis, opciones e importaciones |
-| Suite contractual Python (`tests/unit/test_k6_suite.py`) | Estructura, permisos PBAC, catálogo `PLATE-*`, rutas FastAPI, reglas Sonar/Gitleaks | Aprobado (11/11) | Cobertura de `app/db/session.py` y contratos HTTP/WS/PBAC verificados |
-| Gate CI (`PT-08` `k6-smoke`) | 10 VUs · 30 s contra FastAPI + PostgreSQL 16 + Redis 7 | Automatizado en `.github/workflows/ci.yml` | Exporta `smoke-summary.json` y `smoke-report.html` como artefacto |
+| Suite contractual Python (`tests/unit/test_k6_suite.py`) | Estructura, permisos PBAC, catálogo `PLATE-*`, rutas FastAPI, reglas Sonar/Gitleaks | Aprobado (12/12) | Cobertura de `app/db/session.py` y contratos HTTP/WS/PBAC verificados |
+| Gate CI (`PT-08` `k6-smoke`) | 10 VUs · 30 s contra FastAPI (`--workers 2`) + PostgreSQL 16 + Redis 7 | Aprobado en CI (`2,604` reqs · `84.62 req/s`) | `avg = 44.77 ms`, **`p(95) = 64.78 ms` (< `100 ms`)**, `0.000 %` fallos (`5xx = 0.000 %`), `100.00 %` checks (`372` iteraciones) |
 | Corrida `PT-03` (300/600 VUs) en Staging | `uvicorn --workers 4` + PostgreSQL + Redis + RabbitMQ + Workers | Pendiente de ejecución en ambiente Staging | Redis no activo localmente (`6379` cerrado); registrar VU exacto de inflexión al correr en Staging |
 
 ### Plantilla de captura en Staging (300 VUs / 600 VUs)
@@ -59,7 +59,11 @@
    - **Remediación aplicada/recomendada:** Escalar a `--workers 4` (o `2 * CPU`) con `REDIS_URL` activa para conservar broadcast WebSocket transversal entre workers mediante `RedisRealtimeBridge`.
 2. **Pool de conexiones PostgreSQL (`app/db/session.py`):**
    - Previamente usaba exclusivamente los valores por omisión de SQLAlchemy (`pool_size=5`, `max_overflow=10` = 15 conexiones máximo por worker), propenso a `QueuePool limit reached` / `TimeoutError` bajo picos de 600 VUs en escrituras (`POST /orders`, `PATCH /items`, `POST /confirm`).
-   - **Remediación implementada en `TASK-24`:** `app/db/session.py` ahora parametriza opcionalmente `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_TIMEOUT` y `DB_POOL_PRE_PING` mediante variables de entorno con validación temprana, manteniendo retrocompatibilidad total cuando no están definidas.
+   - **Remediación implementada en `TASK-24`:**
+     - `app/db/session.py` parametriza opcionalmente `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_TIMEOUT` y `DB_POOL_PRE_PING` con validación temprana.
+     - `app/services/orders.py` (`confirm_order`) y `app/services/shifts.py` (`ensure_shift_open_for_orders(for_update=False)`) eliminan el bloqueo exclusivo innecesario sobre la fila activa de `shifts` durante confirmaciones concurrentes.
+     - `app/messaging/validator.py` (`get_validator`) cachea los validadores JSON Schema compilados para evitar reconstrucción en CPU por cada evento de confirmación.
+     - `app/api/routers/orders.py` (`update_order_items`) deduplica y valida los IDs de catálogo en Redis de manera concurrente (`asyncio.gather`) antes de reescribir ítems.
 3. **Lectura de cola KDS (`GET /kds/queue`) y filtrado en memoria:**
    - `app/api/routers/kds.py` filtra estaciones y consulta información de catálogo por ítem; bajo cientos de órdenes activas conviene monitorear tiempo de consulta en PostgreSQL (`orders(status, created_at)`) y cardinalidad de ítems activos.
 4. **Cola Outbox y RabbitMQ:**

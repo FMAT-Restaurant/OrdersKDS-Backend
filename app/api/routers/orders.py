@@ -11,6 +11,7 @@ Satisfies: RF-12, RF-13, RF-14, RF-15, RF-16, RF-17, RF-18, RF-23, RF-24, RF-25,
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 from collections.abc import Sequence
@@ -286,22 +287,44 @@ def _resolve_effective_unit_price(
     return item_input.unit_price
 
 
-async def _build_replacement_order_item(
-    item_input: OrderItemInput,
+def _resolve_replacement_specs(
+    payload_items: Sequence[OrderItemInput],
     original_items: Sequence[OrderItem],
-    catalog_validator: CatalogValidatorProtocol,
-) -> OrderItem:
-    """Validate availability and construct a replacement OrderItem model."""
-    matched_original = _find_matching_original_item(original_items, item_input)
-    effective_dish_id, effective_offer_id = _resolve_effective_item_ids(
-        item_input,
-        matched_original,
-    )
-    await catalog_validator.validate_dish_available(effective_dish_id)
-    if effective_offer_id != effective_dish_id:
-        await catalog_validator.validate_dish_available(effective_offer_id)
+) -> list[tuple[OrderItemInput, str, str, Decimal]]:
+    """Resolve physical dish IDs, offer IDs, and frozen prices for replacement items."""
+    specs: list[tuple[OrderItemInput, str, str, Decimal]] = []
+    for item_input in payload_items:
+        matched_original = _find_matching_original_item(original_items, item_input)
+        effective_dish_id, effective_offer_id = _resolve_effective_item_ids(
+            item_input,
+            matched_original,
+        )
+        effective_price = _resolve_effective_unit_price(item_input, matched_original)
+        specs.append((item_input, effective_dish_id, effective_offer_id, effective_price))
+    return specs
 
-    effective_price = _resolve_effective_unit_price(item_input, matched_original)
+
+async def _validate_catalog_ids(
+    specs: Sequence[tuple[OrderItemInput, str, str, Decimal]],
+    catalog_validator: CatalogValidatorProtocol,
+) -> None:
+    """Validate unique catalog identifiers concurrently in declaration order."""
+    ordered_ids: list[str] = []
+    for _, dish_id, offer_id, _ in specs:
+        ordered_ids.append(dish_id)
+        if offer_id != dish_id:
+            ordered_ids.append(offer_id)
+    unique_ids = list(dict.fromkeys(ordered_ids))
+    await asyncio.gather(
+        *(catalog_validator.validate_dish_available(catalog_id) for catalog_id in unique_ids)
+    )
+
+
+def _build_order_item_from_spec(
+    spec: tuple[OrderItemInput, str, str, Decimal],
+) -> OrderItem:
+    """Construct an OrderItem ORM instance from a pre-validated item specification."""
+    item_input, effective_dish_id, effective_offer_id, effective_price = spec
     return OrderItem(
         public_id=uuid4(),
         dish_id=effective_dish_id,
@@ -358,11 +381,11 @@ async def update_order_items(
 
     # Preserve original item information for price and dish_id fallbacks
     original_items = list(order.items)
+    specs = _resolve_replacement_specs(payload.items, original_items)
+    await _validate_catalog_ids(specs, catalog_validator)
+
     order.items.clear()
-    new_items = [
-        await _build_replacement_order_item(item_input, original_items, catalog_validator)
-        for item_input in payload.items
-    ]
+    new_items = [_build_order_item_from_spec(spec) for spec in specs]
 
     order.items.extend(new_items)
     order.recalculate_total()

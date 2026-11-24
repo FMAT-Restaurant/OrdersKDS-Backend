@@ -8,9 +8,11 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any, cast
 
-import jsonschema
 from jsonschema.exceptions import ValidationError
+from jsonschema.protocols import Validator
+from jsonschema.validators import validator_for
 
 
 class EventContractError(RuntimeError):
@@ -19,6 +21,7 @@ class EventContractError(RuntimeError):
 
 _DEFAULT_SCHEMA_DIR = Path(__file__).resolve().parents[2] / "contracts" / "events"
 _SCHEMA_CACHE: dict[str, dict[str, object]] = {}
+_VALIDATOR_CACHE: dict[str, Validator] = {}
 
 _SCHEMA_ALIASES: dict[str, str] = {
     "ordenes.order.created": "ordenes.orden.creada",
@@ -88,6 +91,22 @@ def load_schema(event_type: str, schema_dir: Path | None = None) -> dict[str, ob
         raise EventContractError(f"Failed to read schema at {path}: {exc}") from exc
 
 
+def get_validator(event_type: str, schema_dir: Path | None = None) -> Validator:
+    """Return a cached compiled JSON Schema validator for the given event type."""
+    effective_dir = schema_dir or _DEFAULT_SCHEMA_DIR
+    cache_key = f"{effective_dir}:{event_type}"
+    cached = _VALIDATOR_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    schema = load_schema(event_type, schema_dir=schema_dir)
+    validator_cls = validator_for(schema)
+    validator_cls.check_schema(schema)
+    validator = validator_cls(schema)
+    _VALIDATOR_CACHE[cache_key] = validator
+    return validator
+
+
 def validate_event_payload(
     event_type: str,
     payload: Mapping[str, object],
@@ -103,9 +122,14 @@ def validate_event_payload(
     Raises:
         EventContractError: If the payload is invalid according to the schema.
     """
-    schema = load_schema(event_type, schema_dir=schema_dir)
+    validator = get_validator(event_type, schema_dir=schema_dir)
     try:
-        jsonschema.validate(instance=dict(payload), schema=schema)
+        instance: dict[str, Any] = (
+            cast(dict[str, Any], payload)
+            if isinstance(payload, dict)
+            else dict(cast(Mapping[str, Any], payload))
+        )
+        validator.validate(instance)
     except ValidationError as err:
         raise EventContractError(
             f"Payload failed contract validation for '{event_type}': {err.message}"

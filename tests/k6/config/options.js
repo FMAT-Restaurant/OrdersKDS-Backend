@@ -4,7 +4,10 @@ import { ENV } from './env.js';
  * Perfiles de carga compartidos (PT-01..08), mesetas de 300 VUs y picos de 600 VUs.
  */
 
+const SUMMARY_TREND_STATS = ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'];
+
 export const SMOKE_OPTIONS = {
+  summaryTrendStats: SUMMARY_TREND_STATS,
   discardResponseBodies: false,
   scenarios: {
     smoke: {
@@ -23,6 +26,7 @@ export const SMOKE_OPTIONS = {
 };
 
 export const LOAD_OPTIONS = {
+  summaryTrendStats: SUMMARY_TREND_STATS,
   discardResponseBodies: true,
   scenarios: {
     nominal_load: {
@@ -46,6 +50,7 @@ export const LOAD_OPTIONS = {
 };
 
 export const STRESS_300_TO_600_OPTIONS = {
+  summaryTrendStats: SUMMARY_TREND_STATS,
   discardResponseBodies: true,
   scenarios: {
     stepped_stress: {
@@ -78,6 +83,7 @@ export const STRESS_300_TO_600_OPTIONS = {
 };
 
 export const SPIKE_600_FROM_300_OPTIONS = {
+  summaryTrendStats: SUMMARY_TREND_STATS,
   discardResponseBodies: true,
   scenarios: {
     spike_300_to_600: {
@@ -109,6 +115,7 @@ export const SPIKE_600_FROM_300_OPTIONS = {
 };
 
 export const SOAK_OPTIONS = {
+  summaryTrendStats: SUMMARY_TREND_STATS,
   discardResponseBodies: true,
   scenarios: {
     soak_45m: {
@@ -127,6 +134,7 @@ export const SOAK_OPTIONS = {
 };
 
 export const WEBSOCKET_FANOUT_OPTIONS = {
+  summaryTrendStats: SUMMARY_TREND_STATS,
   scenarios: {
     kds_sockets: {
       executor: 'constant-vus',
@@ -165,6 +173,7 @@ export const WEBSOCKET_FANOUT_OPTIONS = {
 };
 
 export const STOCK_RACE_OPTIONS = {
+  summaryTrendStats: SUMMARY_TREND_STATS,
   scenarios: {
     concurrent_confirm: {
       executor: 'per-vu-iterations',
