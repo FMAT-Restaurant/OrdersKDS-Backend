@@ -105,6 +105,14 @@ async def list_orders(
     dining_session_id: Annotated[
         UUID | None, Query(alias="diningSessionId", description="Filter by dining session UUID.")
     ] = None,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=500, description="Maximum number of orders to return."),
+    ] = 100,
+    offset: Annotated[
+        int,
+        Query(ge=0, description="Number of leading orders to skip."),
+    ] = 0,
 ) -> list[OrderResponse]:
     """List orders optionally filtered by OrderStatus or dining session (RF-18).
 
@@ -113,12 +121,19 @@ async def list_orders(
         session: Active database session.
         status: Optional OrderStatus filter.
         dining_session_id: Optional dining session filter.
+        limit: Maximum number of orders to return.
+        offset: Number of leading orders to skip.
 
     Returns:
         List of matching Order representations.
     """
     repo = OrderRepository(session)
-    orders = await repo.list_orders(status=status, dining_session_id=dining_session_id)
+    orders = await repo.list_orders(
+        status=status,
+        dining_session_id=dining_session_id,
+        limit=limit,
+        offset=offset,
+    )
     return [OrderResponse.from_model(order) for order in orders]
 
 

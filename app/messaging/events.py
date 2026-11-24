@@ -23,6 +23,8 @@ from pydantic import (
     model_validator,
 )
 
+from app.core.logging import get_correlation_id
+
 
 def _is_string_keyed_dict(value: object) -> TypeGuard[dict[str, object]]:
     if not isinstance(value, dict):
@@ -93,9 +95,9 @@ class OrderEvent(BaseModel):
 
     @model_validator(mode="after")
     def _ensure_correlation_id(self) -> Self:
-        """Default correlationId to orderId when not explicitly propagated."""
+        """Default correlationId to active request correlation or orderId."""
         if self.correlation_id is None:
-            self.correlation_id = self.order_id
+            self.correlation_id = get_correlation_id() or self.order_id
         return self
 
     @classmethod

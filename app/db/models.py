@@ -24,6 +24,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -97,6 +98,8 @@ class Order(Base):
     __tablename__ = "orders"
     __table_args__ = (
         UniqueConstraint("shift_id", "shift_folio", name="uq_orders_shift_id_shift_folio"),
+        Index("ix_orders_status_in_prep_created", "status", "in_preparation_at", "created_at"),
+        Index("ix_orders_created_at_public_id", "created_at", "public_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -299,6 +302,7 @@ class OrderItem(Base):
     """Single line of an order."""
 
     __tablename__ = "order_items"
+    __table_args__ = (Index("ix_order_items_order_id_status", "order_id", "status"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     public_id: Mapped[UUID] = mapped_column(Uuid, default=uuid.uuid4, unique=True, nullable=False)

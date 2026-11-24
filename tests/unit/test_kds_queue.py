@@ -99,7 +99,11 @@ class FakeKdsAsyncSession:
                 o.public_id,
             )
         )
-        return FakeResult(matched)
+        offset_val = getattr(getattr(statement, "_offset_clause", None), "value", None)
+        limit_val = getattr(getattr(statement, "_limit_clause", None), "value", None)
+        start = offset_val if isinstance(offset_val, int) and offset_val > 0 else 0
+        end = start + limit_val if isinstance(limit_val, int) and limit_val >= 0 else None
+        return FakeResult(matched[start:end])
 
     async def scalar(self, statement: Any, *args: Any, **kwargs: Any) -> Any:
         params = statement.compile().params
