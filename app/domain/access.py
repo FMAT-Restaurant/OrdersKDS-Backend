@@ -25,6 +25,7 @@ from typing import Final
 from app.domain.roles import (
     ADMIN_ONLY_ROLES,
     KITCHEN_ROLES,
+    SHIFT_MANAGEMENT_ROLES,
     VOID_KITCHEN_ERROR_ROLES,
     WAITER_ROLES,
     Role,
@@ -44,6 +45,7 @@ class Permission(StrEnum):
     KITCHEN_ITEMS_REJECT = "kitchen:items:reject"
     KITCHEN_ITEMS_CANCEL = "kitchen:items:cancel"
     KITCHEN_ORDERS_VOID_ERROR = "kitchen:orders:void_error"
+    KITCHEN_SHIFTS_MANAGE = "kitchen:shifts:manage"
     # Module ``orders`` (waiter / floor)
     ORDERS_ORDERS_VIEW = "orders:orders:view"
     ORDERS_ORDERS_CREATE = "orders:orders:create"
@@ -81,6 +83,17 @@ ORDER_READY: Final = _policy(KITCHEN_ROLES, Permission.KITCHEN_ORDERS_READY)
 ITEM_REJECT: Final = _policy(KITCHEN_ROLES, Permission.KITCHEN_ITEMS_REJECT)
 ITEM_CANCEL: Final = _policy(KITCHEN_ROLES, Permission.KITCHEN_ITEMS_CANCEL)
 VOID_KITCHEN_ERROR: Final = _policy(VOID_KITCHEN_ERROR_ROLES, Permission.KITCHEN_ORDERS_VOID_ERROR)
+SHIFT_VIEW: Final = _policy(
+    WAITER_ROLES | KITCHEN_ROLES,
+    Permission.KITCHEN_QUEUES_VIEW,
+    Permission.ORDERS_ORDERS_VIEW,
+    Permission.KITCHEN_SHIFTS_MANAGE,
+)
+SHIFT_MANAGE: Final = _policy(
+    SHIFT_MANAGEMENT_ROLES,
+    Permission.KITCHEN_SHIFTS_MANAGE,
+    Permission.KITCHEN_ORDERS_VOID_ERROR,
+)
 
 # --- Orders (waiter / floor) ---------------------------------------------------------
 ORDER_LIST: Final = _policy(WAITER_ROLES, Permission.ORDERS_ORDERS_VIEW)

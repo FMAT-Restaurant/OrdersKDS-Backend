@@ -19,6 +19,7 @@ from app.messaging.events import (
     ChargeRequestedEvent,
     ChargeRequestedItem,
     DishPreparedEvent,
+    DishRedoRequestedEvent,
     EventName,
     KitchenDishRejectedEvent,
     OrderCancelledEvent,
@@ -57,7 +58,9 @@ def test_order_created_event_satisfies_contract() -> None:
     payload = event.model_dump(mode="json", by_alias=True)
 
     validate_event_payload(EventName.ORDER_CREATED, payload)
-    assert payload["items"] == [{"offerId": "dish-1", "quantity": 2}]
+    assert payload["items"] == [
+        {"offerId": "dish-1", "plateId": "dish-1", "sourceId": "dish-1", "quantity": 2}
+    ]
     assert event.items[0].plate_id == "dish-1"
 
 
@@ -73,7 +76,9 @@ def test_order_in_preparation_event_satisfies_contract() -> None:
     payload = event.model_dump(mode="json", by_alias=True)
 
     validate_event_payload(EventName.ORDER_IN_PREPARATION, payload)
-    assert payload["items"] == [{"offerId": "dish-1", "quantity": 2}]
+    assert payload["items"] == [
+        {"offerId": "dish-1", "plateId": "dish-1", "sourceId": "dish-1", "quantity": 2}
+    ]
 
 
 @pytest.mark.contract
@@ -140,7 +145,9 @@ def test_order_expired_event_satisfies_contract() -> None:
     validate_event_payload(EventName.ORDER_EXPIRED, payload)
     assert payload["reason"] == "timeout"
     assert payload["motivo"] == "timeout"
-    assert payload["items"] == [{"offerId": "dish-1", "quantity": 2}]
+    assert payload["items"] == [
+        {"offerId": "dish-1", "plateId": "dish-1", "sourceId": "dish-1", "quantity": 2}
+    ]
 
 
 @pytest.mark.contract
@@ -182,7 +189,9 @@ def test_order_cancelled_event_satisfies_contract() -> None:
     payload = event.model_dump(mode="json", by_alias=True)
 
     validate_event_payload(EventName.ORDER_CANCELLED, payload)
-    assert payload["itemsCancelados"] == [{"offerId": "dish-1", "quantity": 2}]
+    assert payload["itemsCancelados"] == [
+        {"offerId": "dish-1", "plateId": "dish-1", "sourceId": "dish-1", "quantity": 2}
+    ]
 
 
 @pytest.mark.contract
@@ -201,7 +210,9 @@ def test_order_wasted_event_satisfies_contract() -> None:
     validate_event_payload(EventName.ORDER_WASTED, payload)
     assert payload["reason"] == "ADMINISTRATIVE"
     assert payload["motivo"] == "administrativo"
-    assert payload["itemsAfectados"] == [{"offerId": "dish-1", "quantity": 2}]
+    assert payload["itemsAfectados"] == [
+        {"offerId": "dish-1", "plateId": "dish-1", "sourceId": "dish-1", "quantity": 2}
+    ]
 
 
 @pytest.mark.contract
@@ -361,3 +372,35 @@ def test_bill_requested_event_satisfies_contract() -> None:
     data_dict = cast(dict[str, Any], payload.get("data", {}))
     assert data_dict["orderId"] == str(order_id)
     assert data_dict["sessionId"] == str(session_id)
+
+
+@pytest.mark.contract
+@pytest.mark.requirement("RF-22", "RNF-13", "CT-23")
+def test_dish_redo_requested_event_satisfies_contract() -> None:
+    """Verify DishRedoRequestedEvent satisfies Spanish and English schema aliases."""
+    order_id = uuid4()
+    item_id = uuid4()
+    redo_id = uuid4()
+    event = DishRedoRequestedEvent.for_item(
+        order_id,
+        item_id,
+        redo_id=redo_id,
+        offer_id="offer-burger-01",
+        plate_id="recipe-burger-01",
+        source_id="recipe-burger-01",
+        quantity=1,
+        reason="Salió frío",
+    )
+    payload = event.model_dump(mode="json", by_alias=True)
+
+    validate_event_payload(EventName.DISH_REDO_REQUESTED, payload)
+    validate_event_payload(EventName.DISH_REDO_REQUESTED_EN, payload)
+    assert payload["redoId"] == str(redo_id)
+    assert payload["plateId"] == "recipe-burger-01"
+    assert payload["sourceId"] == "recipe-burger-01"
+    assert payload["offerId"] == "offer-burger-01"
+    assert payload["motivo"] == "Salió frío"
+
+    invalid_payload = {k: v for k, v in payload.items() if k != "redoId"}
+    with pytest.raises(EventContractError, match="failed contract validation"):
+        validate_event_payload(EventName.DISH_REDO_REQUESTED, invalid_payload)

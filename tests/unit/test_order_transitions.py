@@ -43,6 +43,7 @@ EXPECTED_VALID: dict[OrderStatus, frozenset[OrderStatus]] = {
             OrderStatus.IN_PREPARATION,
             OrderStatus.REJECTED,
             OrderStatus.CANCELLED,
+            OrderStatus.EXPIRED,
         }
     ),
     OrderStatus.REJECTED: frozenset(
@@ -58,7 +59,7 @@ EXPECTED_VALID: dict[OrderStatus, frozenset[OrderStatus]] = {
             OrderStatus.VOIDED,
         }
     ),
-    OrderStatus.DELIVERED: frozenset({OrderStatus.PAID}),
+    OrderStatus.DELIVERED: frozenset({OrderStatus.PAID, OrderStatus.VOIDED}),
     OrderStatus.WASTED: frozenset({OrderStatus.PAID}),
     OrderStatus.PAID: frozenset(),
     OrderStatus.CANCELLED: frozenset(),
@@ -86,8 +87,8 @@ INVALID_PAIRS: list[tuple[OrderStatus, OrderStatus]] = [
 def test_matrix_covers_full_10x10() -> None:
     assert len(ALL_STATUSES) == 10
     assert len(ALL_PAIRS) == 100
-    assert len(VALID_PAIRS) == 15
-    assert len(INVALID_PAIRS) == 85
+    assert len(VALID_PAIRS) == 17
+    assert len(INVALID_PAIRS) == 83
 
 
 @pytest.mark.unit

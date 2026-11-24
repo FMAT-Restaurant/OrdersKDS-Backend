@@ -19,6 +19,7 @@ __pycache__/
 htmlcov/
 coverage.xml
 junit.xml
+reports/
 
 # IDEs
 .idea/
@@ -32,3 +33,6 @@ junit.xml
 
 # Lockfiles
 uv.lock
+
+# Node
+node_modules/

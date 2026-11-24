@@ -167,6 +167,7 @@ def test_transfer_order_with_if_match_header(
         OrderStatus.REJECTED,
         OrderStatus.EXPIRED,
         OrderStatus.VOIDED,
+        OrderStatus.WASTED,
     ],
 )
 def test_transfer_order_terminal_status_rejects_409(

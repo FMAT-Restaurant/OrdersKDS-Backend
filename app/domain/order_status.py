@@ -54,6 +54,7 @@ _ALLOWED_TRANSITIONS: dict[OrderStatus, frozenset[OrderStatus]] = {
             OrderStatus.IN_PREPARATION,
             OrderStatus.REJECTED,
             OrderStatus.CANCELLED,
+            OrderStatus.EXPIRED,
         }
     ),
     OrderStatus.REJECTED: frozenset(
@@ -69,7 +70,7 @@ _ALLOWED_TRANSITIONS: dict[OrderStatus, frozenset[OrderStatus]] = {
             OrderStatus.VOIDED,
         }
     ),
-    OrderStatus.DELIVERED: frozenset({OrderStatus.PAID}),
+    OrderStatus.DELIVERED: frozenset({OrderStatus.PAID, OrderStatus.VOIDED}),
     OrderStatus.WASTED: frozenset({OrderStatus.PAID}),
     # Final states: no outgoing transitions.
     OrderStatus.PAID: frozenset(),

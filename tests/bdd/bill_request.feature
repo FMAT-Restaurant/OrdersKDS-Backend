@@ -1,5 +1,5 @@
 # language: en
-@bdd @RF-20 @RF-21 @RF-04 @RF-18
+@bdd
 Feature: Bill Request and Payment Settlement Flow
   As a restaurant waiter or administrator
   I want to request the bill for a delivered order

@@ -26,12 +26,15 @@ DEFAULT_FLOOR_EXCHANGE = "sala.events"
 DEFAULT_ORDERS_EXCHANGE = "ordenes.topic"
 INBOUND_BINDINGS: tuple[tuple[str, str], ...] = (
     (DEFAULT_INVENTORY_EXCHANGE, "inventory.reservation.*"),
+    (DEFAULT_INVENTORY_EXCHANGE, "inventory.redo.*"),
     (DEFAULT_INVENTORY_EXCHANGE, "inventory.recipe.*"),
+    (DEFAULT_INVENTORY_EXCHANGE, "inventory.source.*"),
     (DEFAULT_INVENTORY_EXCHANGE, "inventario.stock.*"),
     (DEFAULT_MENU_EXCHANGE, "menu.#"),
     (DEFAULT_FLOOR_EXCHANGE, "sala.#"),
     (DEFAULT_FLOOR_EXCHANGE, "dining.#"),
     (DEFAULT_ORDERS_EXCHANGE, "inventory.reservation.*"),
+    (DEFAULT_ORDERS_EXCHANGE, "inventory.redo.*"),
     (DEFAULT_ORDERS_EXCHANGE, "inventario.stock.*"),
     (DEFAULT_ORDERS_EXCHANGE, "pagos.#"),
     (DEFAULT_ORDERS_EXCHANGE, "payments.#"),

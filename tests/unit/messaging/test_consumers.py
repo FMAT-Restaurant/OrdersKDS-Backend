@@ -16,15 +16,27 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from app.db.models import Order
-from app.domain.order_status import OrderStatus
+from app.db.models import Order, OrderItem
+from app.domain.order_status import ItemStatus, OrderStatus
 from app.messaging.consumers.base import EventConsumerDispatcher, InMemoryDLQRouter
 from app.messaging.consumers.payment_completed import handle_payment_completed
+from app.messaging.consumers.redo_rejected import (
+    _dedup_event_id as redo_dedup_event_id,
+)
+from app.messaging.consumers.redo_rejected import (
+    handle_redo_rejected,
+)
+from app.messaging.consumers.reservation_expired import (
+    _dedup_event_id,
+    handle_reservation_expired,
+)
 from app.messaging.consumers.stock_insufficient import handle_stock_insufficient
 from app.messaging.consumers.stock_reserved import handle_stock_reserved
 from app.messaging.events import (
     EventName,
     PaymentCompletedMessage,
+    RedoRejectedMessage,
+    ReservationExpiredMessage,
     StockInsufficientMessage,
     StockReservedMessage,
 )
@@ -551,3 +563,598 @@ async def test_inventory_reservation_rejected_english_format() -> None:
     assert first_item["requestedQuantity"] == 4
     assert first_item["availableQuantity"] == 1
     assert len(notifier.notified_orders) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_inventory_reservation_expired_transitions_reserved_and_dedups_safely() -> None:
+    order_id = UUID("44444444-4444-4444-4444-444444444444")
+    shared_event_id = UUID("bb77ddcd-8d15-572c-9df5-332afbb9dc2d")
+    order = _build_order(status=OrderStatus.RESERVED, order_id=order_id)
+    uow, _, processed_repo = _build_mock_uow(order, is_duplicate=False)
+    notifier = FakeOrderNotifier()
+
+    dlq = InMemoryDLQRouter()
+    dispatcher = EventConsumerDispatcher(
+        session_factory=lambda: AsyncMock(),
+        dlq_router=dlq,
+        notifier=notifier,
+        uow_factory=lambda _: uow,
+    )
+
+    payload = {
+        "orderId": str(order_id),
+        "status": "expired",
+        "eventId": str(shared_event_id),
+        "reason": "Reserva expirada por TTL",
+        "items": [{"itemId": "6aff319efe2972550cae2a6a", "requestedQuantity": 0.15}],
+        "timestamp": "2026-11-20T15:13:42.982Z",
+    }
+
+    applied = await dispatcher.dispatch_raw(
+        raw_message=payload,
+        queue_name="orders.inventory.inbound",
+        event_type="inventory.reservation.expired",
+    )
+
+    assert applied is True
+    assert dlq.dead_letters == []
+    assert order.status is OrderStatus.EXPIRED
+    assert len(notifier.notified_orders) == 1
+    expected_dedup = _dedup_event_id(ReservationExpiredMessage.model_validate(payload))
+    assert expected_dedup != shared_event_id
+    processed_repo.add.assert_called_once_with(
+        event_id=expected_dedup,
+        order_id=order_id,
+        event_type=EventName.INVENTORY_RESERVATION_EXPIRED,
+    )
+
+    # Duplicate delivery must be ignored cleanly
+    uow_dup, order_repo_dup, proc_dup = _build_mock_uow(order, is_duplicate=True)
+    dup_applied = await handle_reservation_expired(
+        ReservationExpiredMessage.model_validate(payload),
+        uow_dup,
+        notifier=notifier,
+    )
+    assert dup_applied is False
+    order_repo_dup.get_by_public_id.assert_not_called()
+    proc_dup.add.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("initial_status", "expected_applied", "expected_status"),
+    [
+        (OrderStatus.CREATED, True, OrderStatus.EXPIRED),
+        (OrderStatus.IN_PREPARATION, False, OrderStatus.IN_PREPARATION),
+        (OrderStatus.DELIVERED, False, OrderStatus.DELIVERED),
+        (OrderStatus.CANCELLED, False, OrderStatus.CANCELLED),
+        (OrderStatus.EXPIRED, False, OrderStatus.EXPIRED),
+    ],
+)
+async def test_reservation_expired_respects_order_lifecycle(
+    initial_status: OrderStatus,
+    expected_applied: bool,
+    expected_status: OrderStatus,
+) -> None:
+    order_id = uuid4()
+    order = _build_order(status=initial_status, order_id=order_id)
+    uow, _, processed_repo = _build_mock_uow(order, is_duplicate=False)
+    notifier = FakeOrderNotifier()
+
+    msg = ReservationExpiredMessage(event_id=uuid4(), order_id=order_id, reason="TTL")
+    applied = await handle_reservation_expired(msg, uow, notifier=notifier)
+
+    assert applied is expected_applied
+    assert order.status is expected_status
+    if expected_applied:
+        assert len(notifier.notified_orders) == 1
+        processed_repo.add.assert_called_once()
+    else:
+        assert len(notifier.notified_orders) == 0
+        processed_repo.add.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_reservation_expired_missing_order_and_fractional_insufficient_stock() -> None:
+    uow_missing, _, proc_missing = _build_mock_uow(None, is_duplicate=False)
+    notifier = FakeOrderNotifier()
+    missing_applied = await handle_reservation_expired(
+        ReservationExpiredMessage(event_id=uuid4(), order_id=uuid4()),
+        uow_missing,
+        notifier=notifier,
+    )
+    assert missing_applied is False
+    proc_missing.add.assert_not_called()
+
+    # Fractional ingredient quantities in stock insufficient (kg/L)
+    order_id = uuid4()
+    order = _build_order(status=OrderStatus.CREATED, order_id=order_id)
+    uow_frac, _, _ = _build_mock_uow(order, is_duplicate=False)
+    dlq = InMemoryDLQRouter()
+    dispatcher = EventConsumerDispatcher(
+        session_factory=lambda: AsyncMock(),
+        dlq_router=dlq,
+        notifier=notifier,
+        uow_factory=lambda _: uow_frac,
+    )
+    payload = {
+        "orderId": str(order_id),
+        "status": "rejected",
+        "reason": "Stock insuficiente de harina",
+        "items": [
+            {
+                "itemId": "6aff319efe2972550cae2a6a",
+                "itemName": "Harina",
+                "requestedQuantity": 0.15,
+                "availableStock": 0.05,
+            }
+        ],
+    }
+    applied = await dispatcher.dispatch_raw(
+        raw_message=payload,
+        queue_name="orders.inventory.inbound",
+        event_type="inventory.reservation.rejected",
+    )
+    assert applied is True
+    assert dlq.dead_letters == []
+    assert order.status is OrderStatus.REJECTED
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_inventory_reservation_consumed_and_released_are_acknowledged_without_dlq(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    order_id = UUID("f2160047-b303-4009-89a0-b7e8b41b39d1")
+    order = _build_order(status=OrderStatus.IN_PREPARATION, order_id=order_id)
+    uow, order_repo, processed_repo = _build_mock_uow(order, is_duplicate=False)
+    notifier = FakeOrderNotifier()
+    dlq = InMemoryDLQRouter()
+    dispatcher = EventConsumerDispatcher(
+        session_factory=lambda: AsyncMock(),
+        dlq_router=dlq,
+        notifier=notifier,
+        uow_factory=lambda _: uow,
+    )
+
+    consumed_payload = {
+        "orderId": str(order_id),
+        "status": "consumed",
+        "eventId": "7361245f-4a71-513e-abfd-844a264b37ac",
+        "correlationId": str(order_id),
+        "reason": "Started preparation in kitchen",
+        "items": [
+            {"itemId": "6aff319efe2972550cae2a6a", "requestedQuantity": 0.15},
+            {"itemId": "6aff319efe2972550cae2a7a", "requestedQuantity": 0.13},
+        ],
+        "timestamp": "2026-11-21T03:10:05.447Z",
+    }
+
+    with caplog.at_level(logging.INFO):
+        applied = await dispatcher.dispatch_raw(
+            raw_message=consumed_payload,
+            queue_name="orders.inventory.inbound",
+            event_type="inventory.reservation.consumed",
+        )
+
+    assert applied is True
+    assert dlq.dead_letters == []
+    assert order.status is OrderStatus.IN_PREPARATION
+    order_repo.get_by_public_id.assert_not_called()
+    processed_repo.add.assert_not_called()
+    assert len(notifier.notified_orders) == 0
+    assert any("Acknowledged informational inventory event" in r.message for r in caplog.records)
+
+    # Fallback inference without explicit event_type + reservation.released/cancelled support
+    inferred_ok = await dispatcher.dispatch_raw(
+        raw_message=consumed_payload,
+        queue_name="orders.inventory.inbound",
+        event_type=None,
+    )
+    released_ok = await dispatcher.dispatch_raw(
+        raw_message={
+            "orderId": str(order_id),
+            "status": "released",
+            "eventId": str(uuid4()),
+            "correlationId": str(order_id),
+        },
+        queue_name="orders.inventory.inbound",
+        event_type="inventory.reservation.released",
+    )
+    assert inferred_ok is True
+    assert released_ok is True
+    assert dlq.dead_letters == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_inventory_redo_confirmed_is_acknowledged_without_dlq(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    order_id = uuid4()
+    item_id = uuid4()
+    redo_id = uuid4()
+    order = _build_order(status=OrderStatus.DELIVERED, order_id=order_id)
+    uow, order_repo, processed_repo = _build_mock_uow(order, is_duplicate=False)
+    notifier = FakeOrderNotifier()
+    dlq = InMemoryDLQRouter()
+    dispatcher = EventConsumerDispatcher(
+        session_factory=lambda: AsyncMock(),
+        dlq_router=dlq,
+        notifier=notifier,
+        uow_factory=lambda _: uow,
+    )
+    payload = {
+        "eventId": str(uuid4()),
+        "redoId": str(redo_id),
+        "orderId": str(order_id),
+        "itemId": str(item_id),
+        "correlationId": str(order_id),
+        "status": "confirmed",
+        "items": [{"itemId": "6aff319efe2972550cae2a6a", "consumedQuantity": 0.15}],
+        "timestamp": "2026-11-21T03:25:00.000Z",
+    }
+
+    with caplog.at_level(logging.INFO):
+        explicit_ok = await dispatcher.dispatch_raw(
+            raw_message=payload,
+            queue_name="orders.inventory.inbound",
+            event_type=EventName.INVENTORY_REDO_CONFIRMED,
+        )
+        inferred_ok = await dispatcher.dispatch_raw(
+            raw_message=payload,
+            queue_name="orders.inventory.inbound",
+            event_type=None,
+        )
+
+    assert explicit_ok is True
+    assert inferred_ok is True
+    assert dlq.dead_letters == []
+    assert order.status is OrderStatus.DELIVERED
+    order_repo.get_by_public_id.assert_not_called()
+    processed_repo.add.assert_not_called()
+    assert len(notifier.notified_orders) == 0
+    assert any("Acknowledged inventory.redo.confirmed" in r.message for r in caplog.records)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_inventory_redo_rejected_reverts_item_restores_notes_and_notifies() -> None:
+    order_id = uuid4()
+    item_id = uuid4()
+    redo_id = uuid4()
+    event_id = uuid4()
+    order = _build_order(status=OrderStatus.DELIVERED, order_id=order_id)
+    item = OrderItem(
+        public_id=item_id,
+        dish_id="PLATE-BURGER-01",
+        offer_id="OFFER-BURGER-01",
+        name="Hamburguesa Clasica",
+        quantity=1,
+        unit_price=Decimal("165.00"),
+        notes="Sin cebolla",
+        status=ItemStatus.DELIVERED,
+    )
+    order.items.append(item)
+    order.save_pre_redo_note(item)
+    item.mark_pending_for_redo("Salió fría")
+
+    uow, _, processed_repo = _build_mock_uow(order, is_duplicate=False)
+    notifier = FakeOrderNotifier()
+    dlq = InMemoryDLQRouter()
+    dispatcher = EventConsumerDispatcher(
+        session_factory=lambda: AsyncMock(),
+        dlq_router=dlq,
+        notifier=notifier,
+        uow_factory=lambda _: uow,
+    )
+
+    payload = {
+        "eventId": str(event_id),
+        "redoId": str(redo_id),
+        "orderId": str(order_id),
+        "itemId": str(item_id),
+        "correlationId": str(order_id),
+        "status": "rejected",
+        "errorCode": "INSUFFICIENT_STOCK",
+        "reason": "Sin pan brioche para rehechura",
+        "missingIngredients": ["Pan brioche"],
+        "items": [
+            {
+                "itemId": "6aff319efe2972550cae2a6a",
+                "itemName": "Pan brioche",
+                "requestedQuantity": 1,
+                "availableStock": 0,
+            }
+        ],
+    }
+
+    applied = await dispatcher.dispatch_raw(
+        raw_message=payload,
+        queue_name="orders.inventory.inbound",
+        event_type=EventName.INVENTORY_REDO_REJECTED,
+    )
+
+    assert applied is True
+    assert dlq.dead_letters == []
+    assert order.status is OrderStatus.DELIVERED
+    assert item.status is ItemStatus.DELIVERED
+    assert item.notes == "Sin cebolla"
+    assert order.rejection_details == {
+        "redoRejection": {
+            "source": "inventory_redo",
+            "itemId": str(item_id),
+            "itemName": "Hamburguesa Clasica",
+            "redoId": str(redo_id),
+            "reason": "Sin pan brioche para rehechura",
+            "missingIngredients": ["Pan brioche"],
+        }
+    }
+    assert notifier.notified_items == [(order, item)]
+    assert notifier.notified_orders == [order]
+
+    expected_msg = RedoRejectedMessage.model_validate(payload)
+    processed_repo.add.assert_called_once_with(
+        event_id=redo_dedup_event_id(expected_msg),
+        order_id=order_id,
+        event_type=EventName.INVENTORY_REDO_REJECTED,
+    )
+
+    # Duplicate delivery must be ignored without notifying again
+    uow_dup, order_repo_dup, proc_dup = _build_mock_uow(order, is_duplicate=True)
+    dup_applied = await handle_redo_rejected(expected_msg, uow_dup, notifier=notifier)
+    assert dup_applied is False
+    order_repo_dup.get_by_public_id.assert_not_called()
+    proc_dup.add.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_inventory_redo_rejected_handles_guards_and_inferred_item_resolution() -> None:
+    notifier = FakeOrderNotifier()
+
+    # 1. Missing order -> False
+    uow_missing, _, proc_missing = _build_mock_uow(None, is_duplicate=False)
+    msg_missing = RedoRejectedMessage(eventId=uuid4(), orderId=uuid4(), itemId=uuid4())
+    assert await handle_redo_rejected(msg_missing, uow_missing, notifier=notifier) is False
+    proc_missing.add.assert_not_called()
+
+    # 2. Order not in DELIVERED -> False
+    order_prep = _build_order(status=OrderStatus.IN_PREPARATION)
+    uow_prep, _, proc_prep = _build_mock_uow(order_prep, is_duplicate=False)
+    assert (
+        await handle_redo_rejected(
+            RedoRejectedMessage(eventId=uuid4(), orderId=order_prep.public_id),
+            uow_prep,
+            notifier=notifier,
+        )
+        is False
+    )
+    proc_prep.add.assert_not_called()
+
+    # 3. Multiple PENDING items without itemId -> ambiguous -> False
+    order_multi = _build_order(status=OrderStatus.DELIVERED)
+    order_multi.items.extend(
+        [
+            OrderItem(public_id=uuid4(), name="A", quantity=1, status=ItemStatus.PENDING),
+            OrderItem(public_id=uuid4(), name="B", quantity=1, status=ItemStatus.PENDING),
+        ]
+    )
+    uow_multi, _, proc_multi = _build_mock_uow(order_multi, is_duplicate=False)
+    assert (
+        await handle_redo_rejected(
+            RedoRejectedMessage(eventId=uuid4(), orderId=order_multi.public_id),
+            uow_multi,
+            notifier=notifier,
+        )
+        is False
+    )
+    proc_multi.add.assert_not_called()
+
+    # 4. Single PENDING item resolved cleanly via dispatcher inference when itemId omitted
+    order_single = _build_order(status=OrderStatus.DELIVERED)
+    sole_pending = OrderItem(
+        public_id=uuid4(),
+        name="Tacos",
+        quantity=1,
+        notes="Sin cilantro",
+        status=ItemStatus.DELIVERED,
+    )
+    sole_pending.mark_pending_for_redo("Frios")
+    order_single.items.append(sole_pending)
+    uow_single, _, _ = _build_mock_uow(order_single, is_duplicate=False)
+    dlq = InMemoryDLQRouter()
+    dispatcher = EventConsumerDispatcher(
+        session_factory=lambda: AsyncMock(),
+        dlq_router=dlq,
+        notifier=notifier,
+        uow_factory=lambda _: uow_single,
+    )
+    inferred_ok = await dispatcher.dispatch_raw(
+        raw_message={
+            "eventId": str(uuid4()),
+            "redoId": str(uuid4()),
+            "orderId": str(order_single.public_id),
+            "status": "rejected",
+            "reason": "Sin salsa",
+        },
+        queue_name="orders.inventory.inbound",
+        event_type=None,
+    )
+    assert inferred_ok is True
+    assert dlq.dead_letters == []
+    assert sole_pending.status is ItemStatus.DELIVERED
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "protocol_code",
+    ["ALREADY_SERVED", "RESERVATION_NOT_FOUND", "RESERVATION_NOT_ACTIVE"],
+)
+async def test_stock_insufficient_ignores_protocol_error_codes_without_dlq(
+    protocol_code: str,
+) -> None:
+    order_id = uuid4()
+    order = _build_order(status=OrderStatus.CREATED, order_id=order_id)
+    uow, order_repo, processed_repo = _build_mock_uow(order, is_duplicate=False)
+    notifier = FakeOrderNotifier()
+    dlq = InMemoryDLQRouter()
+    dispatcher = EventConsumerDispatcher(
+        session_factory=lambda: AsyncMock(),
+        dlq_router=dlq,
+        notifier=notifier,
+        uow_factory=lambda _: uow,
+    )
+
+    applied = await dispatcher.dispatch_raw(
+        raw_message={
+            "eventId": str(uuid4()),
+            "orderId": str(order_id),
+            "status": "rejected",
+            "errorCode": protocol_code,
+            "reason": "Out-of-order reservation notification",
+        },
+        queue_name="orders.inventory.inbound",
+        event_type="inventory.reservation.rejected",
+    )
+
+    assert applied is False
+    assert dlq.dead_letters == []
+    assert order.status is OrderStatus.CREATED
+    order_repo.get_by_public_id.assert_not_called()
+    processed_repo.add.assert_not_called()
+    assert len(notifier.notified_orders) == 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_stock_insufficient_enriches_already_rejected_order_and_ignores_redundant() -> None:
+    order_id = uuid4()
+    order = _build_order(status=OrderStatus.CREATED, order_id=order_id)
+    notifier = FakeOrderNotifier()
+    dlq = InMemoryDLQRouter()
+
+    # Step 1: raw inventory.reservation.rejected transitions CREATED -> REJECTED
+    uow_raw, _, _ = _build_mock_uow(order, is_duplicate=False)
+    dispatcher_raw = EventConsumerDispatcher(
+        session_factory=lambda: AsyncMock(),
+        dlq_router=dlq,
+        notifier=notifier,
+        uow_factory=lambda _: uow_raw,
+    )
+    first_applied = await dispatcher_raw.dispatch_raw(
+        raw_message={
+            "eventId": str(uuid4()),
+            "orderId": str(order_id),
+            "status": "rejected",
+            "reason": "Stock insuficiente",
+            "items": [
+                {
+                    "itemId": "6aff319efe2972550cae2a6a",
+                    "requestedQuantity": 2,
+                    "availableStock": 0,
+                }
+            ],
+        },
+        queue_name="orders.inventory.inbound",
+        event_type="inventory.reservation.rejected",
+    )
+    assert first_applied is True
+    assert order.status is OrderStatus.REJECTED
+
+    # Step 2: enriched inventario.stock.insuficiente arrives next -> enriches without DLQ
+    uow_enriched, _, proc_enriched = _build_mock_uow(order, is_duplicate=False)
+    dispatcher_enriched = EventConsumerDispatcher(
+        session_factory=lambda: AsyncMock(),
+        dlq_router=dlq,
+        notifier=notifier,
+        uow_factory=lambda _: uow_enriched,
+    )
+    enriched_event_id = str(uuid4())
+    second_applied = await dispatcher_enriched.dispatch_raw(
+        raw_message={
+            "eventId": enriched_event_id,
+            "orderId": str(order_id),
+            "reason": "Stock insuficiente",
+            "missingIngredients": ["Harina", "Queso"],
+            "rejectedItems": [
+                {
+                    "offerId": "OFFER-QUES-01",
+                    "itemName": "Quesadilla",
+                    "requestedQuantity": 2,
+                    "availableQuantity": 0,
+                }
+            ],
+            "reservedItems": [{"offerId": "OFFER-AGUA-01", "quantity": 1}],
+        },
+        queue_name="orders.inventory.inbound",
+        event_type="inventario.stock.insuficiente",
+    )
+    assert second_applied is True
+    assert dlq.dead_letters == []
+    assert order.status is OrderStatus.REJECTED
+    assert order.rejection_details is not None
+    assert order.rejection_details["missingIngredients"] == ["Harina", "Queso"]
+    assert len(notifier.notified_orders) == 2
+    proc_enriched.add.assert_called_once()
+
+    # Step 3: redundant uninformative rejection on already enriched REJECTED order -> False, no DLQ
+    uow_redundant, _, proc_redundant = _build_mock_uow(order, is_duplicate=False)
+    dispatcher_redundant = EventConsumerDispatcher(
+        session_factory=lambda: AsyncMock(),
+        dlq_router=dlq,
+        notifier=notifier,
+        uow_factory=lambda _: uow_redundant,
+    )
+    third_applied = await dispatcher_redundant.dispatch_raw(
+        raw_message={
+            "eventId": str(uuid4()),
+            "orderId": str(order_id),
+            "reason": "Stock insuficiente",
+            "items": [{"itemId": "6aff319efe2972550cae2a6a", "availableStock": 0}],
+        },
+        queue_name="orders.inventory.inbound",
+        event_type="inventory.reservation.rejected",
+    )
+    assert third_applied is False
+    assert dlq.dead_letters == []
+    proc_redundant.add.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "late_status",
+    [OrderStatus.IN_PREPARATION, OrderStatus.DELIVERED, OrderStatus.PAID],
+)
+async def test_stock_insufficient_ignores_late_non_rejectable_order_statuses(
+    late_status: OrderStatus,
+) -> None:
+    order_id = uuid4()
+    order = _build_order(status=late_status, order_id=order_id)
+    uow, _, proc_repo = _build_mock_uow(order, is_duplicate=False)
+    dlq = InMemoryDLQRouter()
+    dispatcher = EventConsumerDispatcher(
+        session_factory=lambda: AsyncMock(),
+        dlq_router=dlq,
+        uow_factory=lambda _: uow,
+    )
+
+    applied = await dispatcher.dispatch_raw(
+        raw_message={
+            "eventId": str(uuid4()),
+            "orderId": str(order_id),
+            "missingIngredients": ["Tomate"],
+        },
+        queue_name="orders.inventory.inbound",
+        event_type="inventario.stock.insuficiente",
+    )
+
+    assert applied is False
+    assert dlq.dead_letters == []
+    assert order.status is late_status
+    proc_repo.add.assert_not_called()

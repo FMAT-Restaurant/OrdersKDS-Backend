@@ -28,6 +28,9 @@ EXPECTED_ENDPOINTS: dict[str, set[str]] = {
     "/orders/{orderId}/items/{itemId}/cancel": {"patch"},
     "/orders/{orderId}/items/{itemId}/kitchen-reject": {"patch"},
     "/orders/{orderId}/ready": {"patch"},
+    "/shifts/current": {"get"},
+    "/shifts/open": {"post"},
+    "/shifts/current/close": {"post"},
 }
 
 

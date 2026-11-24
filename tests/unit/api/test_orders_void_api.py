@@ -152,7 +152,7 @@ def test_void_administrative_without_charge_publishes_only_wasted(
     fake_session: FakeAsyncSession,
     spy_notifier: SpyOrderNotifier,
 ) -> None:
-    """Admin void without customer charge transitions to WASTED and stages only merma event."""
+    """Admin void without customer charge transitions to VOIDED and stages only merma event."""
     order_id = uuid4()
     item_id = uuid4()
     order = Order(
@@ -180,7 +180,8 @@ def test_void_administrative_without_charge_publishes_only_wasted(
     )
 
     assert response.status_code == 200
-    assert test_db[order_id].status == OrderStatus.WASTED
+    assert response.json()["status"] == "VOIDED"
+    assert test_db[order_id].status == OrderStatus.VOIDED
 
     # Verify staged events in outbox (only merma, no charge event)
     assert len(fake_session.outbox_rows) == 1
@@ -291,7 +292,7 @@ def test_void_order_with_charge_customer_false(
     auth_headers: Callable[[str], dict[str, str]],
     test_db: dict[UUID, Order],
 ) -> None:
-    """Void order accepts chargeCustomer=false."""
+    """Void order accepts chargeCustomer=false and transitions to terminal VOIDED status."""
     order = Order(
         public_id=uuid4(),
         status=OrderStatus.IN_PREPARATION,
@@ -305,7 +306,8 @@ def test_void_order_with_charge_customer_false(
         json={"reason": "Error de captura del mesero", "chargeCustomer": False},
     )
     assert resp.status_code == 200
-    assert resp.json()["status"] == "WASTED"
+    assert resp.json()["status"] == "VOIDED"
+    assert test_db[order.public_id].status == OrderStatus.VOIDED
 
 
 def test_void_order_post_alias(

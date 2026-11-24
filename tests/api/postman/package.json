@@ -1,0 +1,7 @@
+{
+  "name": "orders-kds-postman-tests",
+  "private": true,
+  "devDependencies": {
+    "newman": "6.2.3"
+  }
+}

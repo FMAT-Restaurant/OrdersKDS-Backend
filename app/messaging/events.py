@@ -23,6 +23,8 @@ from pydantic import (
     model_validator,
 )
 
+from app.core.logging import get_correlation_id
+
 
 def _is_string_keyed_dict(value: object) -> TypeGuard[dict[str, object]]:
     if not isinstance(value, dict):
@@ -39,6 +41,8 @@ class EventName(StrEnum):
     ORDER_CONFIRMED = "ordenes.order.confirmed"
     ORDER_IN_PREPARATION = "ordenes.orden.en_preparacion"
     KITCHEN_DISH_REJECTED = "ordenes.platillo.rechazado_cocina"
+    DISH_REDO_REQUESTED = "ordenes.platillo.rehecho"
+    DISH_REDO_REQUESTED_EN = "ordenes.dish.redo"
     ORDER_CANCELLED = "ordenes.orden.cancelada"
     DISH_PREPARED = "ordenes.platillo.preparado"
     ORDER_WASTED = "ordenes.comanda.mermada"
@@ -65,8 +69,15 @@ class EventName(StrEnum):
     STOCK_INSUFFICIENT = "inventario.stock.insuficiente"
     STOCK_RESERVED_EN = "inventory.reservation.confirmed"
     STOCK_INSUFFICIENT_EN = "inventory.reservation.rejected"
+    INVENTORY_RESERVATION_EXPIRED = "inventory.reservation.expired"
+    INVENTORY_RESERVATION_CONSUMED = "inventory.reservation.consumed"
+    INVENTORY_RESERVATION_RELEASED = "inventory.reservation.released"
+    INVENTORY_REDO_CONFIRMED = "inventory.redo.confirmed"
+    INVENTORY_REDO_REJECTED = "inventory.redo.rejected"
     INVENTORY_RECIPE_AVAILABILITY_CHANGED = "inventory.recipe.availability-changed"
     INVENTORY_RECIPE_NOT_AVAILABLE = "inventory.recipe.not-available"
+    INVENTORY_RECIPE_INCOMPLETE = "inventory.recipe.incomplete"
+    INVENTORY_SOURCE_AVAILABILITY_UPDATED = "inventory.source.availability.updated"
     PAYMENT_COMPLETED = "pagos.pago.completado"
     DINING_SESSION_STARTED = "sala.dining_session.iniciada"
 
@@ -81,6 +92,13 @@ class OrderEvent(BaseModel):
     event_id: UUID = Field(alias="eventId")
     order_id: UUID = Field(alias="orderId")
     correlation_id: UUID | None = Field(default=None, alias="correlationId")
+
+    @model_validator(mode="after")
+    def _ensure_correlation_id(self) -> Self:
+        """Default correlationId to active request correlation or orderId."""
+        if self.correlation_id is None:
+            self.correlation_id = get_correlation_id() or self.order_id
+        return self
 
     @classmethod
     def for_order(
@@ -121,6 +139,16 @@ class OrderCreatedItem(BaseModel):
     recipe_source_id: str | None = Field(default=None, alias="sourceId")
     quantity: int = Field(gt=0)
 
+    @model_validator(mode="after")
+    def _populate_recipe_aliases(self) -> Self:
+        """Guarantee plateId and sourceId are always populated alongside offerId for Inventory."""
+        effective_plate = self.recipe_plate_id or self.recipe_source_id or self.offer_id
+        if self.recipe_plate_id is None:
+            self.recipe_plate_id = effective_plate
+        if self.recipe_source_id is None:
+            self.recipe_source_id = effective_plate
+        return self
+
     @property
     def plate_id(self) -> str:
         """Universal property alias preferring physical recipe plateId over commercial offerId."""
@@ -135,17 +163,6 @@ class OrderCreatedItem(BaseModel):
     def item_id(self) -> str:
         """Universal property alias for item conventions."""
         return self.recipe_plate_id or self.offer_id
-
-    @model_serializer(mode="wrap")
-    def _serialize_item(self, handler: Any) -> dict[str, Any]:
-        data = cast(dict[str, Any], handler(self))
-        if self.recipe_plate_id is None:
-            data.pop("plateId", None)
-            data.pop("recipe_plate_id", None)
-        if self.recipe_source_id is None:
-            data.pop("sourceId", None)
-            data.pop("recipe_source_id", None)
-        return data
 
 
 class OrderCreatedEvent(OrderEvent):
@@ -222,10 +239,9 @@ class OrderInPreparationEvent(OrderEvent):
         )
 
 
-class KitchenDishRejectedEvent(OrderEvent):
-    """Event emitted when kitchen rejects an item in RESERVED due to physical lack of stock."""
+class _DishItemReasonEvent(OrderEvent):
+    """Shared base for repeatable item-scoped events carrying dish IDs and reason."""
 
-    event_name: ClassVar[EventName] = EventName.KITCHEN_DISH_REJECTED
     unique_per_order: ClassVar[bool] = False
 
     item_id: UUID = Field(alias="itemId")
@@ -256,6 +272,23 @@ class KitchenDishRejectedEvent(OrderEvent):
             self.motivo = self.reason
         return self
 
+    @staticmethod
+    def _resolve_recipe_aliases(
+        *,
+        offer_id: str,
+        plate_id: str | None,
+        source_id: str | None,
+    ) -> tuple[str, str]:
+        effective_plate_id = plate_id or source_id or offer_id
+        effective_source_id = source_id or plate_id or offer_id
+        return effective_plate_id, effective_source_id
+
+
+class KitchenDishRejectedEvent(_DishItemReasonEvent):
+    """Event emitted when kitchen rejects an item in RESERVED due to physical lack of stock."""
+
+    event_name: ClassVar[EventName] = EventName.KITCHEN_DISH_REJECTED
+
     @classmethod
     def for_item(
         cls,
@@ -270,10 +303,55 @@ class KitchenDishRejectedEvent(OrderEvent):
         correlation_id: UUID | None = None,
     ) -> KitchenDishRejectedEvent:
         """Build a repeatable event for item rejected by kitchen."""
-        effective_plate_id = plate_id or source_id or offer_id
-        effective_source_id = source_id or plate_id or offer_id
+        effective_plate_id, effective_source_id = cls._resolve_recipe_aliases(
+            offer_id=offer_id,
+            plate_id=plate_id,
+            source_id=source_id,
+        )
         return cls(
             eventId=uuid4(),
+            orderId=order_id,
+            itemId=item_id,
+            offerId=offer_id,
+            plateId=effective_plate_id,
+            sourceId=effective_source_id,
+            quantity=quantity,
+            reason=reason,
+            motivo=reason,
+            correlationId=correlation_id,
+        )
+
+
+class DishRedoRequestedEvent(_DishItemReasonEvent):
+    """Event emitted when a delivered item is returned for redo (RF-22, Inventory FEFO check)."""
+
+    event_name: ClassVar[EventName] = EventName.DISH_REDO_REQUESTED
+
+    redo_id: UUID = Field(default_factory=uuid4, alias="redoId")
+
+    @classmethod
+    def for_item(
+        cls,
+        order_id: UUID,
+        item_id: UUID,
+        *,
+        offer_id: str,
+        quantity: int,
+        reason: str,
+        redo_id: UUID | None = None,
+        plate_id: str | None = None,
+        source_id: str | None = None,
+        correlation_id: UUID | None = None,
+    ) -> DishRedoRequestedEvent:
+        """Build a repeatable event requesting Inventory validation and FEFO consumption."""
+        effective_plate_id, effective_source_id = cls._resolve_recipe_aliases(
+            offer_id=offer_id,
+            plate_id=plate_id,
+            source_id=source_id,
+        )
+        return cls(
+            eventId=uuid4(),
+            redoId=redo_id or uuid4(),
             orderId=order_id,
             itemId=item_id,
             offerId=offer_id,
@@ -298,6 +376,19 @@ class DishPreparedEvent(OrderEvent):
     source_id: str | None = Field(default=None, alias="sourceId")
     quantity: int = Field(default=1, gt=0, alias="quantity")
     is_redo: bool = Field(default=False, alias="isRedo")
+
+    @model_validator(mode="after")
+    def _populate_prepared_aliases(self) -> Self:
+        """Guarantee plateId, sourceId, and offerId stay aligned when any dish ID is present."""
+        effective_plate = self.plate_id or self.source_id or self.offer_id
+        if effective_plate is not None:
+            if self.plate_id is None:
+                self.plate_id = effective_plate
+            if self.source_id is None:
+                self.source_id = effective_plate
+            if self.offer_id is None:
+                self.offer_id = effective_plate
+        return self
 
     @model_serializer(mode="wrap")
     def _serialize_prepared(self, handler: Any) -> dict[str, Any]:
@@ -504,9 +595,13 @@ class BasePaymentRequestEvent(OrderEvent):
         status: str | None = None,
         correlation_id: UUID | None = None,
         data: dict[str, Any] | None = None,
+        attempt_key: str | int | None = None,
     ) -> Self:
         """Build the deterministic payment request event for an order."""
-        event_id = uuid5(NAMESPACE_URL, f"{cls.event_name}:{order_id}")
+        seed = f"{cls.event_name}:{order_id}"
+        if attempt_key is not None:
+            seed = f"{seed}:{attempt_key}"
+        event_id = uuid5(NAMESPACE_URL, seed)
         items_list = items or []
         effective_total = total_amount if total_amount is not None else Decimal("0.00")
         effective_status = status if status is not None else cls.default_status
@@ -610,7 +705,7 @@ class RejectedItemDetail(BaseModel):
         validation_alias=AliasChoices("itemName", "item_name", "name", "nombre"),
         serialization_alias="itemName",
     )
-    requested_quantity: int | None = Field(
+    requested_quantity: int | float | None = Field(
         default=None,
         validation_alias=AliasChoices(
             "requestedQuantity",
@@ -622,7 +717,7 @@ class RejectedItemDetail(BaseModel):
         ),
         serialization_alias="requestedQuantity",
     )
-    available_quantity: int = Field(
+    available_quantity: int | float = Field(
         default=0,
         validation_alias=AliasChoices(
             "availableQuantity",
@@ -650,6 +745,10 @@ class StockInsufficientMessage(BaseModel):
         validation_alias=AliasChoices("orderId", "order_id", "id"),
     )
     correlation_id: UUID | None = Field(default=None, alias="correlationId")
+    error_code: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("errorCode", "error_code"),
+    )
     reason: str | None = Field(
         default=None,
         validation_alias=AliasChoices("reason", "motivo", "error", "mensaje"),
@@ -669,6 +768,98 @@ class StockInsufficientMessage(BaseModel):
         validation_alias=AliasChoices(
             "reservedItems", "reserved_items", "itemsReservados", "reservations", "reservas"
         ),
+    )
+
+
+class ReservationExpiredMessage(BaseModel):
+    """Inbound message from Inventory signaling reservation TTL expiration."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    event_id: UUID = Field(
+        default_factory=uuid4,
+        validation_alias=AliasChoices("eventId", "event_id", "id"),
+    )
+    order_id: UUID = Field(
+        validation_alias=AliasChoices("orderId", "order_id", "id"),
+    )
+    correlation_id: UUID | None = Field(default=None, alias="correlationId")
+    reason: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("reason", "motivo", "error", "mensaje"),
+    )
+    items: list[dict[str, object]] = Field(default_factory=list)
+
+
+class ReservationLifecycleAckMessage(BaseModel):
+    """Informational inbound ack from Inventory (e.g. consumed/released reservation)."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    event_id: UUID = Field(
+        default_factory=uuid4,
+        validation_alias=AliasChoices("eventId", "event_id", "id"),
+    )
+    order_id: UUID = Field(
+        validation_alias=AliasChoices("orderId", "order_id", "id"),
+    )
+    correlation_id: UUID | None = Field(default=None, alias="correlationId")
+    status: str | None = Field(default=None)
+    reason: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("reason", "motivo", "error", "mensaje"),
+    )
+    items: list[dict[str, object]] = Field(default_factory=list)
+
+
+class _InventoryRedoMessage(BaseModel):
+    """Shared inbound fields for Inventory responses to dish redo requests."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    event_id: UUID = Field(
+        default_factory=uuid4,
+        validation_alias=AliasChoices("eventId", "event_id", "id"),
+    )
+    redo_id: UUID | None = Field(
+        default=None,
+        validation_alias=AliasChoices("redoId", "redo_id"),
+    )
+    order_id: UUID = Field(
+        validation_alias=AliasChoices("orderId", "order_id"),
+    )
+    item_id: UUID | None = Field(
+        default=None,
+        validation_alias=AliasChoices("itemId", "item_id"),
+    )
+    correlation_id: UUID | None = Field(default=None, alias="correlationId")
+    status: str | None = Field(default=None)
+    reason: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("reason", "motivo", "error", "mensaje"),
+    )
+
+
+class RedoConfirmedMessage(_InventoryRedoMessage):
+    """Informational inbound confirmation when Inventory FEFO-consumed a redone dish."""
+
+    items: list[dict[str, object]] = Field(default_factory=list)
+
+
+class RedoRejectedMessage(_InventoryRedoMessage):
+    """Inbound rejection from Inventory when a redone dish lacks stock or valid recipe."""
+
+    error_code: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("errorCode", "error_code"),
+    )
+    missing_ingredients: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("missingIngredients", "missing_ingredients", "faltantes"),
+    )
+    items: list[RejectedItemDetail] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("items", "rejectedItems", "rejected_items"),
     )
 
 

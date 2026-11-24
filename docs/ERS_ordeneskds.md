@@ -1,164 +1,127 @@
 # Especificación de Requisitos de Software (ERS)
-## Microservicio 4: Órdenes y Cocina (Orders & KDS Service)
+## Microservicio de Órdenes y Cocina (Orders & KDS Service)
 
-**Versión:** v4 — actualización sobre `Requisitos_MS4_Ordenes_Final_v3`
-**Alcance de esta versión:** (1) redefinición del ciclo de vida de estados de la orden, (2) nuevo requisito de cancelación por error de cocina sin cobro al cliente, (3) requisito opcional de preparación de platillos intermedios, (4) correcciones puntuales sobre disponibilidad de platillos y visibilidad de la comanda en el KDS, (5) resolución de dudas pendientes (autorización, alcance y cobro de las anulaciones; propiedad y vista de platillos intermedios), (6) nuevo estado "Expirada", (7) renombrado de los estados a identificadores cortos.
+**Versión:** v5 — alineada al estado actual del código fuente (`orders-backend` y `orders-frontend`)
+**Alcance de esta versión:** (1) máquina de estados completa de 10 estados de orden (`CREATED`, `RESERVED`, `IN_PREPARATION`, `DELIVERED`, `PAID`, `CANCELLED`, `REJECTED`, `WASTED`, `VOIDED`, `EXPIRED`) y 4 estados por ítem (`PENDING`, `READY`, `DELIVERED`, `CANCELLED`), (2) flujo explícito de inicio de preparación en cocina (`RESERVED → IN_PREPARATION`), (3) rechazo físico en cocina (`kitchen-reject`) y cancelación por ítem, (4) reapertura automática de órdenes rechazadas y cancelación en `CREATED`/`RESERVED`/`REJECTED`, (5) anulación administrativa con parámetro `chargeCustomer`, (6) TTL de pre-reserva en KDS (15 min + 10 min de gracia) y ventana táctil de deshacer (15 s), (7) control de acceso híbrido PBAC (`AccessPolicy` con 16 permisos) y respaldo RBAC, y (8) microfrontends duales federados (`ordenesApp:5177` y `cocinaApp:5179`).
 
 ---
 
-## 0. Historial de cambios respecto a v3
+## 0. Historial de cambios respecto a v4
 
 | # | Cambio | Tipo |
 |---|---|---|
-| 1 | Se redefine el ciclo de vida principal de la orden a 4 estados: **Creada → En preparación → Entregada → Pagada** (antes: Pendiente, En preparación, Listo, Entregado, Cerrada/Pagada, usados de forma inconsistente) | Modificado |
-| 2 | Se aclara la regla de cancelación: solo se cancela libremente en estado "Creada"; la anulación en "En preparación" es exclusiva de administrador y **no exime del cobro** | Modificado (aclaración, la regla de fondo ya existía) |
-| 3 | Se agrega el estado y requisito de **"Anulada por Error de Cocina"**: cuando la anulación en "En preparación" se debe a una falla imputable a cocina, el cliente **no** paga esa comanda/platillo | **Nuevo** |
-| 4 | Se agrega, como requisito opcional sujeto a disponibilidad de tiempo, la preparación de **platillos intermedios/pre-elaborados** con impacto en Inventario | **Nuevo (opcional)** |
-| 5 | Se aclara que la disponibilidad de un platillo (si el mesero puede o no pedirlo) la determina Catálogo y Menú a través de la vista local ya existente; el mesero nunca puede seleccionar un platillo no disponible. Se acota "Rechazada" a la condición de carrera por stock exacto entre pedidos casi simultáneos | Modificado (aclaración) |
-| 6 | Se agrega que la comanda debe desaparecer de la pantalla del KDS en cuanto pasa a estado "Pagada" | **Nuevo** |
-| 7 | Se resuelven dudas pendientes: la anulación por error de cocina la confirma un administrador **o el chef** (rol validado contra Auth); esa anulación **cancela la comanda completa**, no solo el platillo; "Mermada" se cobra **exactamente igual que una comanda entregada correctamente**; el stock de platillos intermedios es propiedad de **Inventario** (no de Catálogo); los platillos intermedios requieren una **vista nueva** para el chef | Modificado (aclaración) |
-| 8 | Se agrega el estado **"Expirada"**, para cuando Inventario no responde dentro de un tiempo límite tras `ordenes.orden.creada` | **Nuevo** |
-| 9 | Se renombran los estados a identificadores cortos por motivos de implementación: `Creada`, `EnPreparacion`, `Entregada`, `Pagada`, `Cancelada`, `Rechazada`, `Mermada`, `Anulada`, `Expirada` | Modificado (renombrado) |
+| 1 | Se incorpora el estado **`RESERVED`** entre `CREATED` e `IN_PREPARATION`: Inventario confirma reserva (`CREATED → RESERVED`) y Cocina inicia explícitamente la preparación (`RESERVED → IN_PREPARATION` mediante `PATCH /orders/{orderId}/start-preparation`) emitiendo `ordenes.orden.en_preparacion`. | Actualizado al código |
+| 2 | Se formalizan los 4 estados de ítem (`PENDING`, `READY`, `DELIVERED`, **`CANCELLED`**), incluyendo cancelación individual de ítems en `CREATED`, `RESERVED` o ítem pendiente por rehacer en `DELIVERED`. | Actualizado al código |
+| 3 | Se documenta el **rechazo físico por cocina** (`PATCH /orders/{orderId}/items/{itemId}/kitchen-reject`), que publica `ordenes.platillo.rechazado_cocina`, deshabilita el platillo en caché Redis si `availableQuantity == 0` y transiciona la orden `RESERVED` a `REJECTED` (o cancela el ítem pendiente si está en `DELIVERED`). | Nuevo en código |
+| 4 | Se documenta la **reapertura automática** `REJECTED → CREATED` al modificar ítems y la regla de cancelación libre (`CANCELLED`, evento `ordenes.orden.cancelada`) aplicable en **`CREATED`, `RESERVED` y `REJECTED`**. | Actualizado al código |
+| 5 | En anulación administrativa (`WASTED`, evento/endpoint `void`), se documenta la opción `chargeCustomer` (por defecto `true`: emite `ordenes.cobro.solicitado`; si `false`: emite `ordenes.comanda.mermada` sin cobro). | Actualizado al código |
+| 6 | Se incorporan reglas KDS implementadas: ordenamiento por `COALESCE(in_preparation_at, stock_reserved_at, created_at)`, TTL de 15 min desde `stock_reserved_at` + 10 min de ventana de gracia en pestaña **Caducados**, y ventana táctil de **Deshacer** de 15 s (400 ms anti-ghost click). | Actualizado al código |
+| 7 | Se actualiza autorización a **PBAC (`AccessPolicy`, 16 permisos `orders:*` / `kitchen:*`) + respaldo RBAC** (`MESERO`, `COCINERO`, `CHEF_MASTER`, `ADMINISTRADOR`) y doble remoto federado (`ordenesApp:5177`, `cocinaApp:5179`). | Actualizado al código |
 
 ---
 
-## 1. Ciclo de vida y estados de la orden (sección de referencia)
+## 1. Ciclo de vida y estados de la orden (referencia normativa del código)
 
-Antes de listar los requisitos funcionales, se fija aquí el vocabulario de estados que el resto del documento usa, ya que en la v3 los mismos conceptos aparecían nombrados de forma distinta en distintas secciones (`Pendiente`/`Creada`, `Listo`/`Entregado`, `Cerrada`/`Pagada`).
+> **Convención de identificadores:** el código implementa los códigos normativos en inglés (`CREATED`, `RESERVED`, `IN_PREPARATION`, `DELIVERED`, `PAID`, `CANCELLED`, `REJECTED`, `WASTED`, `VOIDED`, `EXPIRED`) para `OrderStatus`, y (`PENDING`, `READY`, `DELIVERED`, `CANCELLED`) para `ItemStatus`.
 
-### 1.1 Estados principales (ciclo de vida feliz)
+### 1.1 Estados principales (flujo operativo regular)
 
-> **Convención de nombres:** los estados se identifican con nombres cortos, sin espacios ni tildes (`Creada`, `EnPreparacion`, etc.), pensados para usarse directamente como identificadores en el código. En el texto corrido del documento se sigue usando el español natural ("en preparación") cuando se describe el concepto y no el identificador formal.
-
-| Estado | Se alcanza cuando... | Evento asociado |
+| Estado (`OrderStatus`) | Se alcanza cuando... | Evento asociado (Outbox / Broker) |
 |---|---|---|
-| **Creada** | El mesero crea la comanda (vinculada a mesa o para llevar) y agrega/edita platillos. La confirmación fija `confirmed_at`; `Creada` incluye "borrador" y "confirmada esperando stock". | — (confirmación dispara `ordenes.orden.creada` y fija `confirmed_at`) |
-| **EnPreparacion** | Inventario confirmó la reserva de insumos; la comanda entra a la cola del KDS y cocina la está elaborando. | consume `inventario.stock.reservado` |
-| **Entregada** | Cocina marcó todos los platillos como listos; el mesero la recoge y la lleva a la mesa (el sistema no registra ese paso). | — |
-| **Pagada** *(fin del ciclo de vida)* | Se confirma el pago de la cuenta. | consume `pagos.pago.completado` |
+| **CREATED** | El mesero crea la comanda (vinculada a mesa, sesión o para llevar) y edita platillos. También se alcanza al reabrir una comanda `REJECTED` modificando sus ítems. Al confirmar se fija `confirmed_at`. | Al confirmar: publica `ordenes.orden.creada` (`ordenes.order.created`) |
+| **RESERVED** | Inventario confirma la reserva de ingredientes; la comanda entra en la cola activa del KDS (pestaña Pendientes) y se registra `stock_reserved_at`. | Consume `inventario.stock.reservado` (`inventory.reservation.confirmed`); publica `ordenes.order.confirmed` |
+| **IN_PREPARATION** | Personal de cocina (o chef/admin) inicia explícitamente la preparación en cocina; se registra `in_preparation_at`. | Publica `ordenes.orden.en_preparacion` (`ordenes.order.served` / `ordenes.order.in_preparation`) para consumo FEFO en Inventario |
+| **DELIVERED** | Cocina marca todos los ítems activos como listos (`READY`), o ejecuta el despacho completo de la orden. El mesero puede solicitar cuenta o pedir rehechura (`redo`). | Por cada ítem completado: publica `ordenes.platillo.preparado` (`ordenes.dish.prepared`). Al pedir cuenta: publica `ordenes.cuenta.solicitada` |
+| **PAID** *(terminal)* | El microservicio de Pagos confirma la liquidación financiera de una orden en `DELIVERED` o `WASTED`. | Consume `pagos.pago.completado` |
 
 ### 1.2 Estados alternativos
 
-| Estado | Se alcanza cuando... | Evento asociado | ¿Se cobra al cliente? |
+| Estado (`OrderStatus`) | Se alcanza cuando... | Evento asociado | ¿Se cobra al cliente? |
 |---|---|---|---|
-| **Cancelada** | El mesero cancela la comanda mientras está en **"Creada"**. | publica `ordenes.orden.cancelada` | No — nunca hubo consumo real de insumos, solo se libera la reserva |
-| **Rechazada** | Inventario responde con stock insuficiente tras la confirmación — en la práctica, esto ocurre por una condición de carrera entre pedidos casi simultáneos del mismo platillo, ya que el platillo en sí ya pasó el filtro de disponibilidad de Catálogo y Menú (ver nota abajo). Es el paso extra de verificar si el stock exacto sigue disponible al momento de confirmar. | consume `inventario.stock.insuficiente` | No |
-| **Mermada** | Un **administrador** anula una comanda completa o platillos individuales ya en **EnPreparacion**, por una razón administrativa o de negocio ajena a la cocina (p. ej., el cliente cambia de opinión). | publica `ordenes.comanda.mermada` + `ordenes.cobro.solicitado` | **Sí** — **[MODIFICADO]** se trata y se cobra exactamente igual que una comanda entregada correctamente; los insumos se consumen de forma normal |
-| **Anulada** *(antes "Anulada por Error de Cocina")* | Un **administrador o el chef** anulan un platillo ya en **EnPreparacion** por una falla atribuible a cocina (platillo mal preparado, error de elaboración, etc.). **[MODIFICADO]** A diferencia de "Mermada", esta anulación cancela **la comanda completa de inmediato**, no solo el platillo afectado. | publica `ordenes.comanda.mermada` (los insumos ya consumidos no se liberan) — **no** publica ningún evento de cobro | **No** — el error es responsabilidad del restaurante |
-| **Expirada** *(nuevo)* | La comanda permanece en **Creada** 60 s contados desde `confirmed_at` sin que Inventario responda ni con `inventario.stock.reservado` ni con `inventario.stock.insuficiente`. Previene que una falla de Inventario la deje bloqueada indefinidamente (OP-01). | — (vencimiento de temporizador interno de 60 s desde `confirmed_at`) | No |
+| **CANCELLED** *(terminal)* | El mesero (o admin) cancela la comanda en estado `CREATED`, `RESERVED` o `REJECTED`. | Publica `ordenes.orden.cancelada` (`ordenes.order.cancelled`) | **No** — compensa y libera pre-reservas |
+| **REJECTED** | Inventario rechaza la reserva por stock insuficiente tras confirmación, **o** Cocina rechaza un platillo de una orden `RESERVED` por falta física de ingrediente. Puede reabrirse a `CREATED` editando ítems o cancelarse a `CANCELLED`. | Consume `inventario.stock.insuficiente` (`inventory.reservation.rejected`) / Publica `ordenes.platillo.rechazado_cocina` (`ordenes.dish.rejected`) | **No** |
+| **WASTED** | Un **administrador** anula administrativamente una comanda en `IN_PREPARATION`. Transiciona luego a `PAID` si recibe confirmación de pago. | Si `chargeCustomer=true`: publica `ordenes.cobro.solicitado` (con precios congelados). Si `chargeCustomer=false`: publica `ordenes.comanda.mermada` (`reason="ADMINISTRATIVE"`) | **Configurable** (`true` por defecto: sí cobra; `false`: solo registra merma) |
+| **VOIDED** *(terminal)* | Un **administrador o chef** anula una comanda completa en `IN_PREPARATION` por error atribuible a cocina con nota obligatoria (`note`). | Publica `ordenes.comanda.mermada` (`reason="KITCHEN_ERROR"`, `motivo="error_cocina"`, `note`) — **no** publica cobro | **No** — responsabilidad del restaurante |
+| **EXPIRED** *(terminal)* | Una comanda confirmada permanece en `CREATED` con `confirmed_at` vencido (por defecto 60 s de Saga Timeout) sin respuesta de Inventario. | Publica `ordenes.orden.expirada` (`ordenes.order.expired` / `ordenes.order.cancelled`) | **No** |
 
-> **[NUEVO] Nota — dos capas de validación de disponibilidad, y por qué "Rechazada" sigue siendo necesaria:** el mesero **nunca** puede llegar a intentar pedir un platillo marcado como no disponible, porque la vista local de disponibilidad (alimentada por los eventos `menu.catalogo.actualizado`/`menu.platillo.precio_actualizado` de Catálogo y Menú — ver `Comunicaciones API ordenes y KDS.md`, sección 2.2) es la que filtra qué platillos puede siquiera seleccionar en la interfaz. Sin embargo, esa disponibilidad indica "el platillo existe y está activo en el menú", no una garantía de cantidad exacta en tiempo real. Si 3 meseros piden casi al mismo tiempo el mismo platillo y el insumo solo alcanza para uno, las otras dos comandas deben terminar en "Rechazada" aunque el platillo se veía disponible al momento de pedir. Este caso ya queda resuelto por el flujo existente de la sección 8, sin necesidad de un mecanismo adicional en Órdenes: Inventario es la única fuente de verdad sobre la cantidad exacta, y debe procesar cada `ordenes.orden.creada` de forma atómica al reservar stock, de modo que solo una de las solicitudes concurrentes reciba `inventario.stock.reservado` y las demás reciban `inventario.stock.insuficiente`. **Punto a validar con Inventario:** confirmar que su mecanismo de reserva sea atómico (p. ej. un decremento condicionado a nivel de base de datos) y no una simple verificación de disponibilidad seguida de un descuento separado, ya que solo así se sostiene esta garantía bajo concurrencia.
+> **Nota de estados por ítem (`ItemStatus`):** el ciclo de vida por ítem es `PENDING → READY → DELIVERED` (transición automática de ítems `READY` a `DELIVERED` al entregar la comanda), `DELIVERED → PENDING` (al solicitar rehechura con nota obligatoria, conservando la orden en `DELIVERED` y enviando `isRedo: true` al volver a preparar) y `PENDING → CANCELLED` (cancelación individual mientras la orden esté en `CREATED`, `RESERVED` o ítem pendiente en `DELIVERED`).
 
-> **Nota de estados por ítem:** el ciclo de vida por ítem es `PENDING → READY → DELIVERED` (transición automática a `DELIVERED` en la misma transacción en que la orden pasa a `Entregada`) `→ PENDING` (rehacer). Al rehacer un platillo, la orden conserva `DELIVERED` (OP-12, propuesto), mientras que únicamente el ítem afectado pasa a `PENDING` para su reelaboración en cocina.
-
-### 1.3 Diagrama de estados (orden)
+### 1.3 Diagrama de estados (implementación real)
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Creada
-    Creada --> EnPreparacion: inventario.stock.reservado
-    Creada --> Rechazada: inventario.stock.insuficiente
-    Creada --> Cancelada: mesero cancela (solo en Creada)
-    Creada --> Expirada: Inventario no responde dentro del tiempo límite
-    EnPreparacion --> Entregada: cocina marca todos los platillos listos (mesero recoge)
-    EnPreparacion --> Mermada: admin anula (razón administrativa) — SÍ se cobra
-    EnPreparacion --> Anulada: admin o chef anulan por error de cocina — cancela la comanda completa, NO se cobra
-    Entregada --> Pagada: pagos.pago.completado
-    Mermada --> Pagada: ordenes.cobro.solicitado (se cobra igual que una entrega normal)
-    Pagada --> [*]
-    Cancelada --> [*]
-    Rechazada --> [*]
-    Anulada --> [*]
-    Expirada --> [*]
+    [*] --> CREATED
+    CREATED --> RESERVED: inventario.stock.reservado
+    CREATED --> IN_PREPARATION: inicio directo permitido en máquina de estados
+    CREATED --> REJECTED: inventario.stock.insuficiente
+    CREATED --> CANCELLED: cancelación de comanda
+    CREATED --> EXPIRED: Saga Timeout (60s desde confirmed_at)
+    RESERVED --> IN_PREPARATION: cocina inicia preparación
+    RESERVED --> REJECTED: rechazo físico de ítem en cocina
+    RESERVED --> CANCELLED: cancelación de comanda
+    REJECTED --> CREATED: modificación de ítems (reapertura de borrador)
+    REJECTED --> CANCELLED: cancelación de comanda
+    IN_PREPARATION --> DELIVERED: todos los ítems activos listos / orden lista
+    IN_PREPARATION --> WASTED: anulación administrativa (solo admin)
+    IN_PREPARATION --> VOIDED: anulación por error de cocina (admin o chef, con nota)
+    DELIVERED --> PAID: pagos.pago.completado
+    WASTED --> PAID: pagos.pago.completado
+    PAID --> [*]
+    CANCELLED --> [*]
+    VOIDED --> [*]
+    EXPIRED --> [*]
 ```
 
 ---
 
-## 2. Visualización de comandas en tiempo real
+## 2. Visualización y cola de cocina (KDS)
 
-- El sistema deberá agrupar las comandas entrantes en la pantalla de cocina según su estado actual de elaboración.
-- El sistema deberá ordenar las comandas en la pantalla de cocina según mayor tiempo en cocina primero (OP-11, propuesto; medido desde `in_preparation_at`), en lugar de prioridad por tiempo de preparación.
-- El sistema deberá ordenar cronológicamente por la hora de ingreso (y por identificador de orden) aquellas comandas que compartan el mismo tiempo en cocina.
-- **[MODIFICADO]** En la pantalla de cocina (KDS), el sistema deberá remover de la **vista principal activa** toda comanda cuyos platillos hayan transitado en su totalidad al estado **"Entregada"** (o marcada lista por cocina) para evitar saturar el flujo de preparación, trasladándola a un **apartado secundario de comandas entregadas / historial reciente**. Si una comanda entregada tiene un platillo que se solicite rehacer (retornando a pendiente), dicha comanda deberá reaparecer automáticamente en la vista principal activa. La comanda se removerá de forma **definitiva** de ambos apartados del KDS únicamente en cuanto su estado transite a **"Pagada"** — información que llega de forma asíncrona desde el microservicio de Pagos y Facturación (ver sección 6).
+- El sistema agrupa las comandas en el KDS en vistas por estado y flujo de trabajo: **Pendientes (`RESERVED`)**, **En preparación (`IN_PREPARATION`)**, **Activas**, **Para rehacer (`DELIVERED` con ítems en `PENDING`)**, **Entregadas (`DELIVERED`)** y **Caducados** (órdenes en `EXPIRED` o `RESERVED` cuyo tiempo desde `stock_reserved_at` superó el TTL de 15 minutos más 10 minutos de gracia).
+- La cola `GET /kds/queue` excluye órdenes en `PAID` y ordena por `COALESCE(in_preparation_at, stock_reserved_at, created_at)` ascendente, desempatando por `created_at` y `public_id`.
+- Cuando una orden en `DELIVERED` recibe una solicitud de rehechura de ítem (`PENDING`), vuelve a aparecer automáticamente en la cola activa del KDS (`view=active`) y la pestaña **Para rehacer** muestra la alerta prioritaria.
+- Cuando una orden pasa a `PAID` al consumir `pagos.pago.completado`, se retira definitivamente del KDS en tiempo real.
 
-## 3. Validación y cola KDS
+## 3. Detalle de tarjetas y filtrado por estación KDS
 
-- El sistema debe mostrar los detalles de los platillos, los modificadores aplicados y las notas especiales en cada tarjeta de comanda activa en la cocina, presentando la estación y el tiempo de preparación como texto de referencia (OP-09).
-- El sistema deberá mostrar el identificador de la mesa asignada de forma visible en cada tarjeta de comanda.
-- El sistema deberá mostrar un contador de tiempo (cronómetro: pendiente de decisión final; hoy opera desde la creación del pedido).
-- El sistema deberá filtrar los platillos visibles en la pantalla de cocina basándose en la estación definida en el catálogo (estación y tiempo de preparación como texto de referencia, OP-09) para direccionar los pedidos a sus estaciones de preparación correspondientes.
+- Cada tarjeta en KDS muestra folio legible (`orderNumber` secuencial o últimos 4 caracteres de `publicId`), mesa asignada o etiqueta **Para llevar**, listado de platillos con cantidades, modificadores, notas, estación y tiempo de preparación de referencia (provenientes del catálogo sincronizado).
+- El KDS incluye cronómetro y semáforo de atraso configurable (`KDS_WARNING_AFTER_SECONDS`, `KDS_LATE_AFTER_SECONDS`), además de contador regresivo de 10 minutos cuando una orden `RESERVED` excede el TTL de 15 minutos antes de pasar definitivamente a **Caducados**.
+- El sistema permite filtrar ítems por estación culinaria normalizada (`GET /kds/queue?station=...`) y segmentar las actualizaciones en tiempo real por canales WebSocket `kds:station:{station}` y `kds:all`.
 
-## 4. Control del estado de una comanda en su flujo de vida
+## 4. Control de preparación, despacho y rechazo en cocina
 
-- El sistema deberá permitir al personal de cocina marcar el estado de la preparación por ítem (platillo) como "Listo".
-- El sistema deberá publicar un evento `ordenes.platillo.preparado` al broker de mensajería cada vez que un platillo transite al estado "Listo", para que el microservicio de Inventario aplique el consumo definitivo de los insumos.
-- El sistema deberá permitir al personal de cocina marcar el estado de la preparación por comanda como "Listo".
+- **Inicio de preparación (`RESERVED → IN_PREPARATION`):** `PATCH/POST /orders/{orderId}/start-preparation` registra `in_preparation_at` y publica `ordenes.orden.en_preparacion` con los ítems activos consolidados.
+- **Marcado de ítem listo (`PATCH /orders/{orderId}/items/{itemId}/ready`):** transiciona el ítem de `PENDING` a `READY` (o `DELIVERED` si es rehechura restaurando notas previas), emite `ordenes.platillo.preparado` (`isRedo`), y si todos los ítems activos están listos transiciona la orden a `DELIVERED`.
+- **Marcado de orden completa lista (`PATCH /orders/{orderId}/ready`):** marca todos los ítems pendientes y lleva la orden a `DELIVERED`.
+- **Ventana táctil de deshacer:** en la interfaz KDS, antes de confirmar hacia el backend el marcado de ítem/orden lista, existe una ventana de gracia de **15 segundos** (`Deshacer`), además de debouncing anti-doble clic de 400 ms y soporte completo de Bump Bar (teclado).
+- **Rechazo físico en cocina (`PATCH /orders/{orderId}/items/{itemId}/kitchen-reject`):** permite rechazar un ítem en `RESERVED` (o pendiente de rehechura en `DELIVERED`) indicando `reason` y `availableQuantity`; si `availableQuantity == 0` marca el platillo no disponible en caché Redis, publica `ordenes.platillo.rechazado_cocina`, y regresa la orden `RESERVED` a `REJECTED` (con desglose `rejectedItems` / `reservedItems`) para que el mesero la ajuste.
+- **Cancelación de ítem (`PATCH /orders/{orderId}/items/{itemId}/cancel`):** cancela un ítem individual (`ItemStatus.CANCELLED`) mientras la orden está en `CREATED`, `RESERVED` o en rehechura pendiente dentro de `DELIVERED`.
 
-## 5. Gestión de comandas y apertura/cierre de pedidos
+## 5. Gestión de comandas en terminal de mesero
 
-- El sistema deberá permitir al mesero crear una nueva comanda vinculándola a una mesa específica.
-- El sistema deberá permitir al mesero crear una nueva comanda designándola explícitamente como un pedido para llevar.
-- El sistema deberá permitir al mesero agregar platillos, seleccionar modificadores e ingresar notas especiales a una comanda activa.
-- El sistema deberá registrar el identificador del usuario autenticado que crea o modifica una comanda para asegurar la trazabilidad de las acciones según los roles y permisos del personal.
-- El sistema deberá permitir al mesero transferir una comanda activa de una mesa a otra.
-- **[NUEVO]** El sistema deberá impedir que el mesero seleccione o agregue a la comanda un platillo marcado como no disponible, validando contra la vista local de disponibilidad que el microservicio mantiene sincronizada mediante eventos del microservicio de Catálogo y Menú — un mesero nunca debe poder intentar pedir un platillo inexistente o deshabilitado en el menú (ver nota en sección 1.2 sobre la condición de carrera que esto no elimina).
+- Creación de comandas para mesa o para llevar (`POST /orders`), opcionalmente vinculadas a `diningSessionId` (relación 1:N sesiones→órdenes).
+- Edición de ítems, cantidades, modificadores y notas (`PATCH /orders/{orderId}/items`) únicamente cuando la orden está en `CREATED` (sin confirmar) o en `REJECTED` (reabriéndola a `CREATED`), validando disponibilidad en Redis y congelando precios unitarios.
+- Trazabilidad mediante identidad extraída del API Gateway (`x-user-id`, `x-staff-id`, `x-user-roles`, `x-user-role`, `x-user-permissions`, `x-user-type`) o claims JWT sin verificación local de firma (ADR-0011), aplicando políticas PBAC (`AccessPolicy`, 16 permisos) y respaldo RBAC (`MESERO`, `COCINERO`, `CHEF_MASTER`, `ADMINISTRADOR` / `ADMIN`).
+- Transferencia de orden entre mesas (`PATCH /orders/{orderId}/transfer`) con bloqueo optimista por columna `version` y encabezado `If-Match` (`409 VERSION_CONFLICT` ante concurrencia).
 
-## 6. Sincronización y transición del ciclo de vida del estado de la comanda
+## 6. Sincronización en tiempo real, cobros y rehechuras
 
-- **[MODIFICADO]** El sistema deberá actualizar visualmente la interfaz cada vez que la comanda transite por los estados de su ciclo de vida principal (**Creada, EnPreparacion, Entregada, Pagada**), así como por los estados alternativos aplicables (**Cancelada, Rechazada, Mermada, Anulada, Expirada**).
-- El sistema deberá emitir notificaciones de cambio de estado para actualizar a los módulos externos interesados.
-- El sistema deberá publicar un evento asíncrono en el broker de mensajería que contenga la información íntegra del pedido (Detalle_Orden, incluyendo precios congelados fijados al confirmar, modificadores e identificadores duales: `orderId` y `sessionId`) para que el microservicio de Pagos lo consuma y procese el cobro: `ordenes.cuenta.solicitada` (`orders.bill.requested`) a solicitud de cuenta por el mesero en comanda regular, u `ordenes.cobro.solicitado` (`orders.charge.requested`) ante una orden administrativamente mermada.
-- **[MODIFICADO]** El sistema deberá actualizar el estado final de la comanda a **"Pagada"** únicamente al consumir el evento asíncrono `pagos.pago.completado` (`payments.payment.completed`) proveniente del módulo externo de Pagos. *(Antes se mencionaban dos nombres — "Cerrada" o "Pagada" — para el mismo estado final; se consolida en uno solo: "Pagada".)*
-- El sistema deberá permitir al mesero retornar un platillo de estado "Entregado" (a nivel de ítem) al estado "Pendiente", ingresando obligatoriamente una nota de texto que justifique la necesidad de rehacer la preparación en cocina.
+- WebSockets segregados (`/ws/waiter` para canales `floor` y `user:{userId}`, y `/ws/kds` para `kds:all` y `kds:station:{station}`), puente Redis Pub/Sub (`orders:realtime:events`) entre workers y proceso API, y cierre estandarizado `4401`/`4403`.
+- Solicitud de cuenta (`POST/PATCH /orders/{orderId}/request-bill`) para órdenes en `DELIVERED`, emitiendo `ordenes.cuenta.solicitada` con precios congelados e identificadores `orderId` y `sessionId`.
+- Transición a `PAID` al consumir `pagos.pago.completado` sobre órdenes en `DELIVERED` o `WASTED`.
+- Rehechura de platillo (`PATCH /orders/{orderId}/items/{itemId}/redo`) sobre órdenes en `DELIVERED` con nota obligatoria (`note`), preservando temporalmente notas previas de preparación y restaurándolas tras completar la rehechura.
 
-## 7. Cancelación y modificación de comandas activas
+## 7. Cancelación y anulaciones (Mermas)
 
-- El sistema deberá permitir al mesero modificar los platillos de una comanda únicamente si esta se encuentra en estado **"Creada"**.
-- El sistema deberá permitir al mesero cancelar una comanda completa únicamente si esta se encuentra en estado **"Creada"**.
-- El sistema deberá publicar el evento `ordenes.orden.cancelada` y transicionar la comanda al estado **"Cancelada"** al anular un pedido en estado "Creada", permitiendo al microservicio de Inventario consumir el evento para liberar las reservas de stock asociadas. En este caso no se genera ningún cobro al cliente, ya que no hubo consumo real de insumos.
-- El sistema deberá permitir **únicamente a un usuario de rol administrador** anular una comanda completa o platillos individuales que ya hayan transitado al estado **"EnPreparacion"** por una razón administrativa o de negocio no imputable a cocina (p. ej., el cliente cambia de opinión), transicionando la comanda/platillo al estado **"Mermada"**.
-- **[MODIFICADO]** El sistema deberá emitir el evento `ordenes.comanda.mermada` y publicar el evento `ordenes.cobro.solicitado` (incluyendo el Detalle_Orden) al mermar una comanda o platillo, tratando y cobrando dicha comanda **exactamente igual que una comanda entregada correctamente**: el cliente paga el total normal y los insumos se consumen de forma normal, ya que la causa de la merma no es imputable al restaurante.
+- **Cancelación libre (`PATCH/POST /orders/{orderId}/cancel`):** permitida mientras la orden esté en `CREATED`, `RESERVED` o `REJECTED`; transiciona a `CANCELLED` y publica `ordenes.orden.cancelada`.
+- **Anulación administrativa (`PATCH/POST /orders/{orderId}/void`):** restringida a `ADMIN` (`orders:orders:void_admin`) sobre órdenes en `IN_PREPARATION`; transiciona a `WASTED`. Si `chargeCustomer` es `true` (default), publica `ordenes.cobro.solicitado`; si es `false`, publica `ordenes.comanda.mermada` (`reason="ADMINISTRATIVE"`).
+- **Anulación por error de cocina (`PATCH/POST /orders/{orderId}/void-kitchen-error`):** restringida a `ADMIN` o `CHEF` (`kitchen:orders:void_error`) sobre órdenes en `IN_PREPARATION` con `note` obligatoria; transiciona toda la orden a `VOIDED` y publica `ordenes.comanda.mermada` (`reason="KITCHEN_ERROR"`, `motivo="error_cocina"`) sin emitir evento de cobro.
 
-### 7.1 Anulación por error de cocina (estado "Anulada", sin cobro al cliente)
+## 8. Saga de Inventario, Catálogo y Sala
 
-- **[MODIFICADO]** El sistema deberá permitir anular una comanda ya en estado **"EnPreparacion"** cuando la causa sea **un error atribuible al personal de cocina** (por ejemplo, un platillo mal preparado, un error de elaboración, o un incidente durante la preparación).
-- **[MODIFICADO]** El sistema deberá permitir confirmar esta anulación **únicamente a un usuario con rol administrador o con rol chef** (rol consumido y validado contra el microservicio de Auth).
-- **[MODIFICADO]** El sistema deberá cancelar **la comanda completa de inmediato** al confirmarse una anulación por error de cocina, aunque el error se origine en un solo platillo — esta causa no admite anulación parcial; la comanda transiciona al estado **"Anulada"**.
-- El sistema deberá exigir el registro de una nota de texto obligatoria que justifique la causa del error de cocina, de forma análoga a la justificación ya exigida en la sección 6 para rehacer un platillo, a fin de mantener la trazabilidad de las acciones exigida por el Requisito de la sección 5.
-- **[MODIFICADO]** El sistema deberá publicar el evento `ordenes.comanda.mermada` al transicionar una comanda a **"Anulada"**, permitiendo al microservicio de Inventario registrar la pérdida de los insumos que ya se hayan consumido por haber alcanzado al menos el estado "EnPreparacion" — dichos insumos **no** se liberan ni se recuperan.
-- **[MODIFICADO]** El sistema **no deberá** publicar ningún evento de cobro para una comanda en estado "Anulada". A diferencia de "Mermada", este flujo **no debe generar ningún cobro al cliente**, dado que la responsabilidad del error corresponde al restaurante y no al consumidor.
+- Al confirmar (`POST /orders/{orderId}/confirm`), valida ítems y registra `confirmed_at`, almacenando `ordenes.orden.creada` en el **Transactional Outbox** para su publicación al broker con confirmaciones (`publisher_confirms`) y enrutamiento dual opcional (`RABBITMQ_DUAL_ROUTING`).
+- Consumidores idempotentes (`processed_events`) procesan `inventario.stock.reservado`/`inventory.reservation.confirmed`, `inventario.stock.insuficiente`/`inventory.reservation.rejected`, `pagos.pago.completado`, `sala.dining_session.iniciada`, y eventos de catálogo de Menú/Inventario (`menu.*`, `inventory.recipe.*`), enviando mensajes malformados a DLQ.
+- El `SagaTimeoutWatcher` marca como `EXPIRED` y emite `ordenes.orden.expirada` tras `SAGA_TIMEOUT_SECONDS` (60 s por defecto operativo) desde `confirmed_at` sin confirmación ni rechazo de Inventario.
 
-## 8. Interacción inicial y validación por eventos (Saga)
+## 9. [Opcional / Fase Futura] Preparación de platillos intermedios
 
-- El sistema deberá publicar el evento `ordenes.orden.creada` en el broker de mensajería inmediatamente después de que el mesero confirme la orden en la interfaz (comanda en estado "Creada"), para solicitar la reserva de los ingredientes.
-- El sistema deberá enviar la comanda a la cola de la pantalla de cocina (KDS) y transicionarla a **"EnPreparacion"** únicamente tras consumir el evento asíncrono `inventario.stock.reservado` proveniente del microservicio de Inventario.
-- El sistema deberá actualizar el estado de la comanda a **"Rechazada"** y emitir una alerta visual en la interfaz del mesero si consume el evento asíncrono `inventario.stock.insuficiente` (ver sección 1.2 — este es el mecanismo que resuelve la condición de carrera entre pedidos casi simultáneos del mismo platillo).
-- **[NUEVO]** El sistema deberá transicionar la comanda al estado **"Expirada"** si, transcurridos 60 s contados desde `confirmed_at` (OP-01), Inventario no ha respondido a `ordenes.orden.creada` ni con `inventario.stock.reservado` ni con `inventario.stock.insuficiente` — esto evita que una comanda quede bloqueada indefinidamente en "Creada" ante una falla de Inventario.
-
----
-
-## 9. [Opcional / Fase Futura] Preparación de platillos intermedios (pre-elaborados)
-
-> **Estado actual post-ADR-0011 (TASK-27 NO-GO):** Excluido del horizonte de los 7 sprints del curso escolar (`INTERMEDIATE_DISHES_ENABLED=false`).
-> **Garantía de extensibilidad futura:** Si bien la funcionalidad fue descartada para la iteración actual para concentrar esfuerzos en la estabilidad de las transacciones principales, la saga transaccional y la cola KDS, **queda formal y explícitamente abierta la posibilidad de que se implemente en una fase futura o posterior release**. El diseño arquitectónico (Transactional Outbox), la ruta REST (`POST /intermediate-dishes`), el evento asíncrono (`ordenes.platillo_intermedio.preparado` / `INTERMEDIATE_DISH_PREPARED`) y el feature toggle `INTERMEDIATE_DISHES_ENABLED` ya están pre-concebidos para incorporarse directamente sin requerir rediseño del sistema ni modificaciones estructurales al modelo de base de datos.
-
-**Contexto:** Inventario administra existencia no solo de insumos crudos, sino también de **platillos pre-elaborados/intermedios** (por ejemplo, una olla de salsa o caldo preparado antes del inicio del servicio). Esta existencia es propiedad exclusiva del microservicio de **Inventario** — un platillo intermedio no es un platillo comercial de menú (si lo fuera, pertenecería a Catálogo y Menú). Órdenes y Cocina únicamente **informa** su preparación para que Inventario mueva sus propios inventarios: descuenta los insumos crudos usados y aumenta la existencia del platillo pre-preparado resultante. Esto habilita, en la fase futura en que se decida reactivar la funcionalidad, que el chef registre la elaboración de estos lotes **por adelantado y fuera del flujo de una comanda de cliente**.
-
-- **[Fase futura]** El sistema deberá permitir, mediante la activación de `INTERMEDIATE_DISHES_ENABLED=true`, que el usuario con rol **chef** registre la creación de un lote de un **platillo intermedio** a través del endpoint `POST /intermediate-dishes` de forma independiente a cualquier comanda de cliente, indicando el platillo intermedio producido, la cantidad resultante y los insumos crudos utilizados en su elaboración.
-- **[Fase futura]** El sistema deberá publicar un evento asíncrono al broker de mensajería (`ordenes.platillo_intermedio.preparado` / `INTERMEDIATE_DISH_PREPARED`, routing key EN/ES en `events.py`) que contenga los insumos crudos consumidos y el platillo intermedio resultante junto con la cantidad producida.
-- **[Fase futura]** El sistema deberá diseñarse de forma que, al consumir este evento, **Inventario** descuente los insumos crudos utilizados y, en la misma operación, incremente su propio stock del platillo intermedio resultante, tratándolo como un ítem de inventario propiedad de Inventario (no de Catálogo y Menú).
-- **[Fase futura]** El frontend proveerá una **vista nueva**, dirigida específicamente al rol de **chef**, en la que se registre la preparación de platillos intermedios gobernada por el feature toggle.
-- **[Fase futura]** Esta funcionalidad seguirá estrictamente el patrón arquitectónico del microservicio (Transactional Outbox + evento asíncrono, sin llamadas síncronas hacia Inventario), por lo que no representa una excepción a los principios de arquitectura del proyecto (ver `API_COMUNICACIONES.md`, sección 0).
-
----
-
-## 10. Puntos abiertos a validar con el equipo
-
-1. ~~**Autorización de la anulación por error de cocina (sección 7.1)**~~ — **[RESUELTO]** la confirma un administrador o el chef (rol validado contra Auth).
-2. ~~**Caso borde — comanda con mezcla de estados**~~ — **[RESUELTO]** ya no aplica: una anulación por error de cocina siempre cancela la comanda completa (sección 7.1), por lo que no puede quedar una mezcla de platillos "Mermados" y "Anulados" dentro de la misma comanda.
-3. ~~**Timeout de Saga**~~ — **[RESUELTO]**: fijado en 60 s como máximo desde `confirmed_at` con un intervalo del watcher de 5 s (OP-01 / ADR-0001).
-4. ~~**Contrato del evento `ordenes.platillo_intermedio.preparado` (sección 9):**~~ — **[DIFERIDO A FASE FUTURA / ADR-0011]** La propiedad de la entidad "platillo intermedio" queda confirmada para Inventario. Dado que la funcionalidad fue descartada para el alcance de los 7 sprints (ADR-0011), la homologación fina del esquema JSON queda diferida para el momento en que se reactive el feature flag en una iteración posterior.
-5. ~~**Interfaz para platillos intermedios (sección 9)**~~ — **[RESUELTO]** sí requiere una vista nueva, dirigida al rol chef (fase futura).
-6. **Atomicidad de la reserva de stock en Inventario (sección 1.2):** confirmar con el equipo de Inventario que su reserva de stock ante `ordenes.orden.creada` sea atómica, para garantizar que ante pedidos casi simultáneos del mismo platillo solo uno reciba `inventario.stock.reservado` y el resto `inventario.stock.insuficiente`. Es responsabilidad de Inventario, no de Órdenes, pero condiciona si "Rechazada" cubre correctamente este caso.
-7. ~~**[NUEVO] Duración del tiempo límite para "Expirada":**~~ — **[RESUELTO]** El tiempo límite de la saga se acordó en 60 s contados desde `confirmed_at` (OP-01 / ADR-0001).
-8. ~~**[NUEVO] Estado "Expirada" fuera del listado final de esta corrección:**~~ — **[RESUELTO]** El estado Expirada queda confirmado como estado final del ciclo alternativo (OP-01 / ADR-0001).
+> **Estado actual:** Excluido del entregable principal (`INTERMEDIATE_DISHES_ENABLED=false` y `VITE_FEATURE_INTERMEDIATE_DISHES=false`), mantenido únicamente como punto de extensión futura en documentación y shell experimental sin acoplamiento al flujo de comandas activas.

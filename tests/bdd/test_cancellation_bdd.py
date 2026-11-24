@@ -6,8 +6,6 @@ Covers: AT-02
 
 from __future__ import annotations
 
-import base64
-import json
 from collections.abc import AsyncGenerator, Generator
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -22,25 +20,14 @@ from app.db.models import Order, OrderItem, Outbox
 from app.db.session import get_session
 from app.domain.order_status import OrderStatus
 from app.main import app
+from tests.bdd._support import auth_header as _auth_header
+
+pytestmark = [
+    pytest.mark.bdd,
+    pytest.mark.requirement("RF-23", "RF-24", "RF-25"),
+]
 
 scenarios("cancellation.feature")
-
-
-def _jwt_segment(payload: dict[str, str | int]) -> str:
-    serialized = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    return base64.urlsafe_b64encode(serialized).rstrip(b"=").decode("ascii")
-
-
-def _auth_header(role: str = "waiter") -> dict[str, str]:
-    header = _jwt_segment({"alg": "HS256", "typ": "JWT"})
-    claims = _jwt_segment(
-        {
-            "user_id": str(uuid4()),
-            "role": role,
-            "exp": int(datetime.now(UTC).timestamp()) + 300,
-        }
-    )
-    return {"Authorization": f"Bearer {header}.{claims}.c2ln"}
 
 
 class BddSessionDouble:

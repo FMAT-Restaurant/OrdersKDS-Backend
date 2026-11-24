@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import unicodedata
+from decimal import Decimal
 from typing import Protocol
 
 from redis.asyncio import Redis
@@ -38,6 +39,10 @@ _CATALOG_MOCK_REGISTRY: dict[str, dict[str, str | None]] = {
     "dish-guacamole": {"station": "Fría", "preparation_time_text": "5 min"},
     "dish-hamburguesa": {"station": "Parrilla", "preparation_time_text": "15 min"},
     "dish-ensalada": {"station": "Fría", "preparation_time_text": "8 min"},
+    "PLATE-BURGER-01": {"station": "Parrilla", "preparation_time_text": "15 min"},
+    "PLATE-QUES-01": {"station": "Parrilla", "preparation_time_text": "10 min"},
+    "PLATE-CESAR-01": {"station": "Fría", "preparation_time_text": "8 min"},
+    "PLATE-SIM-0001": {"station": "Parrilla", "preparation_time_text": "12 min"},
 }
 
 
@@ -82,6 +87,10 @@ class CatalogValidatorProtocol(Protocol):
         """Explicitly set dish availability flag in the catalog view."""
         ...
 
+    async def get_dish_price(self, dish_id: str) -> Decimal | None:
+        """Return the positive authoritative catalog price for ``dish_id`` if present."""
+        ...
+
 
 class CatalogRepositoryValidator:
     """Adapt the Redis catalog projection to the order API validator contract."""
@@ -95,6 +104,9 @@ class CatalogRepositoryValidator:
     async def set_availability(self, dish_id: str, available: bool) -> None:
         await self._repository.set_availability(dish_id, available)
 
+    async def get_dish_price(self, dish_id: str) -> Decimal | None:
+        return await self._repository.get_price(dish_id)
+
 
 class DefaultCatalogValidator:
     """In-memory and stub-friendly catalog validator.
@@ -103,8 +115,13 @@ class DefaultCatalogValidator:
     while defaulting all other items to available until TASK-21a (Redis local view).
     """
 
-    def __init__(self, unavailable_dish_ids: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        unavailable_dish_ids: set[str] | None = None,
+        prices: dict[str, Decimal] | None = None,
+    ) -> None:
         self.unavailable_dish_ids: set[str] = set(unavailable_dish_ids or ())
+        self.prices: dict[str, Decimal] = dict(prices or ())
 
     def set_unavailable(self, dish_id: str) -> None:
         """Mark a dish as unavailable in the catalog view."""
@@ -113,6 +130,10 @@ class DefaultCatalogValidator:
     def set_available(self, dish_id: str) -> None:
         """Mark a dish as available in the catalog view."""
         self.unavailable_dish_ids.discard(dish_id)
+
+    def set_price(self, dish_id: str, price: Decimal) -> None:
+        """Register an authoritative catalog price for a dish ID."""
+        self.prices[dish_id] = price
 
     async def validate_dish_available(self, dish_id: str) -> None:
         """Verify dish availability, raising DishUnavailableError if inactive (RF-17)."""
@@ -129,6 +150,11 @@ class DefaultCatalogValidator:
             self.set_available(dish_id)
         else:
             self.set_unavailable(dish_id)
+
+    async def get_dish_price(self, dish_id: str) -> Decimal | None:
+        await asyncio.sleep(0)
+        price = self.prices.get(dish_id)
+        return price if price is not None and price > Decimal("0.00") else None
 
 
 _default_catalog_validator = DefaultCatalogValidator()

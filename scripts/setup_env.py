@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import secrets
 import sys
 from pathlib import Path
 
@@ -63,6 +64,8 @@ _OPTIONAL_EMPTY: dict[str, str] = {
     # OP-07: fill in once the Menu & Catalog team publishes the endpoint.
     "CATALOG_SYNC_URL": "",
     "CATALOG_RECONCILIATION_INTERVAL_SECONDS": "",
+    "JWT_PUBLIC_KEY": "",
+    "GATEWAY_SHARED_SECRET": "",
 }
 
 
@@ -81,6 +84,9 @@ def _build_env_content() -> str:
         **_COMPOSE_DEFAULTS,
         **_REQUIRED_PLACEHOLDERS,
         **_OPTIONAL_EMPTY,
+        "JWT_SECRET": secrets.token_urlsafe(32),
+        "JWT_ALGORITHMS": "HS256,HS384,HS512,RS256,ES256",
+        "TRUST_GATEWAY_HEADERS": "false",
     }
 
     example_path = Path(".env.example")

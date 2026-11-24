@@ -108,12 +108,13 @@ def test_resolve_auth_context_with_unsigned_token_raises_unauthenticated(
         resolve_auth_context(header)
 
 
-def test_resolve_auth_context_does_not_verify_the_signature(make_token: TokenFactory) -> None:
-    # ADR-0011: signature verification belongs to the API Gateway, not to this service.
+def test_resolve_auth_context_rejects_forged_signature(make_token: TokenFactory) -> None:
     token = make_token()
     forged = token.rsplit(".", 1)[0] + ".forged-signature"
+    header = _bearer(forged)
 
-    assert resolve_auth_context(_bearer(forged)).user_id == "user-1"
+    with pytest.raises(UnauthenticatedError):
+        resolve_auth_context(header)
 
 
 @pytest.mark.parametrize(
@@ -293,7 +294,8 @@ def test_access_policy_evaluation() -> None:
     assert denied_by_role_fallback.is_authorized(policy) is False
 
 
-def test_get_auth_context_from_gateway_headers() -> None:
+def test_get_auth_context_from_gateway_headers(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TRUST_GATEWAY_HEADERS", "true")
     scope = {
         "type": "http",
         "headers": [

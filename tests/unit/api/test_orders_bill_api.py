@@ -225,3 +225,108 @@ def test_request_bill_patch_alias(
     assert test_db[order_id].status == OrderStatus.DELIVERED
     assert len(fake_session.outbox_rows) == 1
     assert fake_session.outbox_rows[0].event_type == "ordenes.cuenta.solicitada"
+
+
+def test_request_bill_rejected_when_item_pending_redo_raises_409(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+) -> None:
+    """Reject bill request when a DELIVERED order has an item returned to PENDING for redo."""
+    order_id = uuid4()
+    order = Order(
+        public_id=order_id,
+        table_number=8,
+        status=OrderStatus.DELIVERED,
+        total_amount=Decimal("200.00"),
+    )
+    order.items.extend(
+        [
+            OrderItem(
+                public_id=uuid4(),
+                dish_id="dish-1",
+                name="Corte Ribeye",
+                quantity=1,
+                unit_price=Decimal("150.00"),
+                status=ItemStatus.DELIVERED,
+            ),
+            OrderItem(
+                public_id=uuid4(),
+                dish_id="dish-2",
+                name="Guarnición",
+                quantity=1,
+                unit_price=Decimal("50.00"),
+                status=ItemStatus.PENDING,
+            ),
+        ]
+    )
+    test_db[order_id] = order
+
+    response = client.post(
+        f"/orders/{order_id}/request-bill",
+        headers=auth_headers("waiter"),
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == ErrorCode.INVALID_STATE_TRANSITION.value
+    assert len(fake_session.outbox_rows) == 0
+
+
+def test_request_bill_idempotent_on_unchanged_order_and_reemits_when_total_changes(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+) -> None:
+    """Repeated request-bill is idempotent if unchanged, and stages a new eventId on change."""
+    order_id = uuid4()
+    item1 = OrderItem(
+        public_id=uuid4(),
+        dish_id="dish-1",
+        name="Corte Ribeye",
+        quantity=1,
+        unit_price=Decimal("150.00"),
+        status=ItemStatus.DELIVERED,
+    )
+    item2 = OrderItem(
+        public_id=uuid4(),
+        dish_id="dish-2",
+        name="Papas Trufadas",
+        quantity=1,
+        unit_price=Decimal("50.00"),
+        status=ItemStatus.DELIVERED,
+    )
+    order = Order(
+        public_id=order_id,
+        table_number=9,
+        status=OrderStatus.DELIVERED,
+        version=1,
+        items=[item1, item2],
+    )
+    order.recalculate_total()
+    test_db[order_id] = order
+
+    # 1. First bill request ($200.00)
+    resp1 = client.post(f"/orders/{order_id}/request-bill", headers=auth_headers("waiter"))
+    assert resp1.status_code == 200
+    assert order.version == 1
+    assert len(fake_session.outbox_rows) == 1
+    first_event_id = fake_session.outbox_rows[0].event_id
+
+    # 2. Second bill request without changes -> idempotent (no duplicate outbox row staged)
+    resp2 = client.post(f"/orders/{order_id}/request-bill", headers=auth_headers("waiter"))
+    assert resp2.status_code == 200
+    assert order.version == 1
+    assert len(fake_session.outbox_rows) == 1
+
+    # 3. Item 2 goes through redo and gets cancelled/rejected ($150.00 remaining)
+    item2.status = ItemStatus.CANCELLED
+    order.recalculate_total()
+
+    # 4. Re-request bill after total change -> stages new outbox event with distinct event_id
+    resp3 = client.post(f"/orders/{order_id}/request-bill", headers=auth_headers("waiter"))
+    assert resp3.status_code == 200
+    assert len(fake_session.outbox_rows) == 2
+    second_row = fake_session.outbox_rows[1]
+    assert second_row.event_id != first_event_id
+    assert second_row.payload["totalAmount"] == 150.0

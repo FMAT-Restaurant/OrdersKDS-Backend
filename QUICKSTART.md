@@ -9,7 +9,7 @@
 
 Quick reference for the CI/CD standard required by the course.
 Full setup instructions are in [README.md](README.md); the contributing
-workflow is in [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).  A basic guide
+workflow is in [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md). A basic guide
 (in Spanish) on how Docker works locally and the cloud scope (TASK-38) is in
 [docs/GUIA_DOCKER.md](docs/GUIA_DOCKER.md).
 The shared staging runbook is in [docs/STAGING.md](docs/STAGING.md).
@@ -18,7 +18,7 @@ The shared staging runbook is in [docs/STAGING.md](docs/STAGING.md).
 
 | Service | Staging endpoint/port | Access |
 |---|---|---|
-| Orders API | `https://staging.<team-domain>` / VM `8000` | Team and integration services |
+| Orders API | `https://staging.<team-domain>` / VM `8000` (Gateway ports `8082` / `8086`) | Team and integration services |
 | PostgreSQL | SSH tunnel `127.0.0.1:15432` → VM `5432` | `POSTGRES_READONLY_USER` only |
 | RabbitMQ AMQP | VM `5672` | Integration network |
 | RabbitMQ management | SSH tunnel `127.0.0.1:15672` → VM `15672` | Maintainers |
@@ -40,7 +40,7 @@ the following once per repository.
 
 `Settings → Actions → General → Workflow permissions`
 
-Select **Read and write permissions** and save.  This is required by the
+Select **Read and write permissions** and save. This is required by the
 `build-and-push` job in `ci.yml`, which publishes images to GHCR and needs
 `packages: write`.
 
@@ -74,7 +74,7 @@ zap-api-scan jobs to use a real database:
 ### §2 — Branch protection
 
 Branch protection is configured in `Settings → Branches` (or Rulesets) for
-**both** `develop` and `main`.  The full rule set is documented in
+**both** `develop` and `main`. The full rule set is documented in
 [docs/CONTRIBUTING.md §15](docs/CONTRIBUTING.md#15-protección-de-ramas-para-mantenedores).
 
 Summary:
@@ -99,11 +99,12 @@ unit-tests
 sonarcloud
 integration-tests
 api-and-contract
+k6-smoke
 zap-api-scan
 ```
 
 > **Note:** Status check names only appear in GitHub's selector after the
-> workflow has run at least once on that branch.  Mark them after
+> workflow has run at least once on that branch. Mark them after
 > TASK-01/TASK-02 complete their first successful run.
 
 Also enable **Automatically delete head branches** in
@@ -119,23 +120,23 @@ File: `.github/workflows/ci.yml`
 push/PR to develop or main
         │
         ├─ validate-pr          (PR only) — branch name + Conventional Commits title
-        ├─ lint-and-types        — gitleaks, ruff, mypy --strict
+        ├─ lint-and-types       — gitleaks, ruff check/format, mypy --strict
         │
-        └─ unit-tests            — pytest tests/unit, uploads coverage.xml + junit.xml
+        └─ unit-tests           — pytest tests/unit, uploads coverage.xml + junit.xml
                │
-               ├─ sonarcloud     — downloads artifacts, SonarCloud + Quality Gate
+               ├─ sonarcloud    — downloads artifacts, SonarCloud + Quality Gate
                │
-               └─ integration-tests — pytest tests/integration (Testcontainers)
+               └─ integration-tests — pytest tests/integration/test_smoke.py (Testcontainers)
                         │
-                        ├─ api-and-contract  — Newman (empty until TASK-34)
-                        │
-                        └─ zap-api-scan      — OWASP ZAP against /openapi.json
+                        ├─ api-and-contract — Newman + pytest tests/contract tests/bdd
+                        ├─ k6-smoke         — PT-08 (10 VUs, 30 s against PostgreSQL + Redis)
+                        └─ zap-api-scan     — OWASP ZAP against /openapi.json
 
 Runs after any failure:
-        notify-on-failure        — Discord webhook alert
+        notify-on-failure       — Discord webhook alert
 
-Runs only on push to main (after all checks pass):
-        build-and-push           — Docker image → ghcr.io, Discord notification
+Runs on push to develop or main (after all checks pass):
+        build-and-push          — Docker image → ghcr.io, Discord notification
 ```
 
 ---
@@ -147,7 +148,7 @@ Runs only on push to main (after all checks pass):
 3. Click the red ❌ job name in the left panel.
 4. Expand the failing step to read the log.
 5. For coverage and test reports: scroll to the bottom of the run page and
-   open the **Artifacts** section.  Download `unit-test-results` and open
+   open the **Artifacts** section. Download `unit-test-results` and open
    `htmlcov/index.html` in a browser for a line-by-line coverage view.
 
 Common failures and fixes:
@@ -166,7 +167,7 @@ Common failures and fixes:
 ### §5 — Machine requirements (install once per developer)
 
 Every team member needs the tools below **before** running the bootstrap
-script.  PostgreSQL, Redis and RabbitMQ are **not** installed on your machine:
+script. PostgreSQL, Redis and RabbitMQ are **not** installed on your machine:
 they run inside Docker containers defined in `docker-compose.yml`.
 
 #### 5.1 Required software
@@ -174,20 +175,20 @@ they run inside Docker containers defined in `docker-compose.yml`.
 | Tool | Minimum version | Used for | Download |
 |---|---|---|---|
 | **Git** | 2.40+ | Clone, branches, commits | https://git-scm.com/downloads |
-| **Docker Desktop** (includes Docker Compose v2) | Docker 24+ / Compose v2 | PostgreSQL, Redis, RabbitMQ and Testcontainers | https://www.docker.com/products/docker-desktop |
+| **Docker Desktop** (includes Docker Compose v2) | Docker 24+ / Compose v2 | PostgreSQL, Redis, RabbitMQ, Testcontainers and containerized API/workers | https://www.docker.com/products/docker-desktop |
 | **Python** | 3.12+ | Backend, Alembic, tests | https://www.python.org/downloads/ |
-| **Node.js** + **pnpm** | Node 20 LTS | Frontend repo (`ordenes-kds-frontend`) only | https://nodejs.org · `corepack enable` |
+| **Node.js** + **pnpm** | Node 24 LTS / pnpm 9+ | Frontend repo (`orders-frontend`) and Newman contract runner | https://nodejs.org · `corepack enable` |
 | **DB client** (recommended) | — | Browse and query PostgreSQL visually (see §7) | https://dbeaver.io/download/ or https://www.pgadmin.org/download/ |
-| *k6*, *Newman* (optional) | — | Performance / API contract tests (S5–S6) | `npm i -g newman` · https://k6.io/docs/get-started/installation/ |
+| *k6*, *Newman* (optional) | — | Performance / API contract tests | `npm i -g newman` · https://k6.io/docs/get-started/installation/ |
 
-> **Do not install a local PostgreSQL server.**  The containerised database is
+> **Do not install a local PostgreSQL server.** The containerised database is
 > the single source of truth for everybody, uses the exact version of CI
 > (PostgreSQL 16), and a local server would collide with port `5432`.
 > Install a *client* instead (§7).
 
 #### 5.2 Windows-specific notes
 
-1. Docker Desktop requires **WSL 2**.  If it asks for it, run in an
+1. Docker Desktop requires **WSL 2**. If it asks for it, run in an
    administrator PowerShell and restart:
 
    ```powershell
@@ -213,22 +214,22 @@ docker --version           # Docker version 24 or newer
 docker compose version     # Docker Compose version v2.x
 docker run --rm hello-world   # confirms the Docker engine is running
 python --version           # Python 3.12 or newer
-node --version             # v20.x (frontend only)
+node --version             # v24.x (frontend / Newman)
 ```
 
 #### 5.4 Ports that must be free
 
-| Port | Service |
-|---|---|
-| `5432` | PostgreSQL |
-| `6379` | Redis |
-| `5672` | RabbitMQ (AMQP) |
-| `15672` | RabbitMQ management UI |
-| `8000` | Orders API (uvicorn) |
+| Port | Service | Container (`docker compose`) |
+|---|---|---|
+| `5432` (or `POSTGRES_PORT=5433`) | PostgreSQL | `ordenes-postgres` (`postgres:16-alpine`) |
+| `6379` | Redis | `ordenes-redis` (`redis:7-alpine`) |
+| `5672` | RabbitMQ (AMQP) | `ordenes-rabbitmq` (`rabbitmq:3-management-alpine`) |
+| `15672` | RabbitMQ management UI | `ordenes-rabbitmq` (`rabbitmq:3-management-alpine`) |
+| `8000` | Orders API (`uvicorn` / `api`) | `ordenes-api-ci` (`orders-backend-api`, only when running Mode B) |
 
 If one is taken (typically `5432` by a local PostgreSQL server), stop that
-process or change the **left** side of the mapping in `docker-compose.yml`
-(e.g. `"5433:5432"`) and update the port in your `.env`.
+process or set `POSTGRES_PORT=5433` in `.env` (which maps `"5433:5432"` in
+`docker-compose.yml`) and update `DATABASE_URL` in `.env` to port `5433`.
 
 ---
 
@@ -237,30 +238,30 @@ process or change the **left** side of the mapping in `docker-compose.yml`
 **Windows PowerShell:**
 
 ```powershell
-git clone https://github.com/<org>/ordenes-kds-backend.git
-cd ordenes-kds-backend
+git clone https://github.com/FMAT-Restaurant/OrdersKDS-Backend.git
+cd OrdersKDS-Backend
 .\scripts\bootstrap.ps1
 ```
 
 **macOS / Linux:**
 
 ```bash
-git clone https://github.com/<org>/ordenes-kds-backend.git
-cd ordenes-kds-backend
+git clone https://github.com/FMAT-Restaurant/OrdersKDS-Backend.git
+cd OrdersKDS-Backend
 bash scripts/bootstrap.sh
 ```
 
 The bootstrap script:
 1. Verifies Python 3.12+
 2. Creates `.venv` and installs `requirements/dev.txt`
-3. Generates `.env` with safe local defaults (docker-compose credentials)
-4. Prints the remaining steps (edit `.env`, Docker, migrations, API)
+3. Generates `.env` with safe local defaults (`docker-compose.yml` credentials and `SAGA_TIMEOUT_SECONDS=60`)
+4. Prints the remaining steps (Docker, migrations, API, workers)
 
 After the script finishes:
 
 ```bash
 # Activate the venv (required for alembic, uvicorn, pytest, etc.)
-# Windows:   .venv\Scripts\Activate.ps1
+# Windows:     .venv\Scripts\Activate.ps1
 # macOS/Linux: source .venv/bin/activate
 
 # Verify .env — ensure SAGA_TIMEOUT_SECONDS=60 (OP-01 / ADR-0001)
@@ -268,10 +269,10 @@ After the script finishes:
 docker compose up -d postgres redis rabbitmq
 alembic upgrade head
 
-# Terminal 1 — API with hot reload
+# Terminal 1 — API with hot reload (HTTP + WebSocket)
 uvicorn app.main:app --reload --port 8000
 
-# Terminal 2 — background workers
+# Terminal 2 — background workers (Outbox, Saga Watcher, Inbound Consumer)
 python -m app.workers.run_all
 
 # Generate a dev JWT for manual API testing
@@ -288,7 +289,7 @@ RabbitMQ UI: `http://localhost:15672` (user `ordenes`, password `ordenes`)
 docker compose ps
 # postgres, redis and rabbitmq must show STATUS "Up ... (healthy)"
 
-docker exec ordenes-postgres psql -U ordenes -d ordenes -c "\dt"   # lists tables after alembic upgrade head
+docker exec ordenes-postgres psql -U ordenes -d ordenes -c "\dt"   # lists shifts, orders, order_items, outbox, processed_events
 docker exec ordenes-redis redis-cli ping                          # PONG
 ```
 
@@ -314,30 +315,23 @@ The RabbitMQ container takes up to ~30 s to become *healthy* the first time.
 | `Activate.ps1 cannot be loaded` | PowerShell execution policy | See §5.2 (step 3) |
 | `connection refused` on `localhost:5432` | Container not healthy yet | `docker compose ps`; wait for *healthy* |
 | `password authentication failed for user "ordenes"` | `.env` credentials differ from the compose file, or the volume was created with other credentials | Align `.env` or run `docker compose down -v` |
-| Service refuses to start: `SAGA_TIMEOUT_SECONDS` missing | Variable intentionally has no default (OP-01) | Set it in `.env` |
+| Service refuses to start: `SAGA_TIMEOUT_SECONDS` missing | Variable intentionally has no default (OP-01) | Set `SAGA_TIMEOUT_SECONDS=60` in `.env` |
 | Integration tests fail to start containers | Docker not running (Testcontainers needs it) | Start Docker Desktop |
 
 #### 6.4 Operational configuration variables (Sagas & KDS)
 
-| Variable | Repo | Obligatoria | Ejemplo | Significado |
+| Variable | Repo | Required | Example | Meaning |
 |---|---|---|---|---|
-| `SAGA_TIMEOUT_SECONDS` | `ordenes-kds-backend` | Yes (`Sí`) | `60` | Maximum time (in seconds) a confirmed `CREATED` order waits for Inventory reply before transitioning to `EXPIRED` (OP-01 / ADR-0001). The 60 s countdown starts at `confirmed_at`, not at order creation. No default value in code. |
-| `SAGA_WATCHER_INTERVAL_SECONDS` | `ordenes-kds-backend` | No | `5` | Polling interval (in seconds) for the Saga Timeout Watcher (OP-01 / ADR-0001, TASK-06). Worst-case real expiration is ≈ 65 s (60 s timeout + 5 s watcher interval). |
-| `KDS_WARNING_AFTER_SECONDS` | `ordenes-kds-backend` / `ordenes-kds-frontend` | optional until OP-11 is accepted (`opcional hasta aceptar OP-11`) | *(empty)* | Elapsed kitchen time threshold (in seconds from `in_preparation_at`) to mark a KDS card as warning ("About to be late", `--color-warning`, OP-11 / ADR-0009). |
-| `KDS_LATE_AFTER_SECONDS` | `ordenes-kds-backend` / `ordenes-kds-frontend` | optional until OP-11 is accepted (`opcional hasta aceptar OP-11`) | *(empty)* | Elapsed kitchen time threshold (in seconds from `in_preparation_at`) to mark a KDS card as critical ("Late", `--color-error`, OP-11 / ADR-0009). |
-
-**Important operational notes:**
-- The 60 s countdown starts at `confirmed_at`, not at order creation.
-- The worst-case real expiration is ≈ 65 s (60 s timeout + 5 s watcher interval).
-- Both KDS variables (`KDS_WARNING_AFTER_SECONDS` and `KDS_LATE_AFTER_SECONDS`) are **optional until OP-11 is accepted** (`opcional hasta aceptar OP-11`) and are intentionally left empty in `.env.example`.
-
-> **Design note / Nota de diseño:** Pendiente: dónde viven los umbrales del semáforo (respuesta de /kds/queue vs VITE_*). Se define en TASK-12 (Sprint 3) y TASK-15 (Sprint 4); hasta entonces KDS_WARNING_AFTER_SECONDS y KDS_LATE_AFTER_SECONDS quedan vacías.
+| `SAGA_TIMEOUT_SECONDS` | `orders-backend` | Yes | `60` | Maximum time (in seconds) a confirmed `CREATED` order waits for Inventory reply before transitioning to `EXPIRED` (OP-01 / ADR-0001). The 60 s countdown starts at `confirmed_at`, not at order creation. No default value in code. |
+| `SAGA_WATCHER_INTERVAL_SECONDS` | `orders-backend` | No | `5` | Polling interval (in seconds) for the Saga Timeout Watcher (OP-01 / ADR-0001, TASK-06). Worst-case real expiration is ≈ 65 s (60 s timeout + 5 s watcher interval). |
+| `KDS_WARNING_AFTER_SECONDS` | `orders-backend` / `orders-frontend` | Optional | *(empty)* | Elapsed kitchen time threshold (in seconds from `in_preparation_at`) to mark a KDS card as warning (`--color-warning`, OP-11 / ADR-0009). |
+| `KDS_LATE_AFTER_SECONDS` | `orders-backend` / `orders-frontend` | Optional | *(empty)* | Elapsed kitchen time threshold (in seconds from `in_preparation_at`) to mark a KDS card as critical (`--color-error`, OP-11 / ADR-0009). |
 
 ---
 
 ### §7 — Browsing the database with a visual client
 
-The database lives in the `ordenes-postgres` container.  You do not need a
+The database lives in the `ordenes-postgres` container. You do not need a
 PostgreSQL server on your machine to see it graphically: connect a **client**
 (DBeaver Community or pgAdmin 4) to the container.
 
@@ -353,7 +347,7 @@ PostgreSQL server on your machine to see it graphically: connect a **client**
 
 In DBeaver: *Database → New Database Connection → PostgreSQL*, fill in the
 fields and press **Test Connection** (it downloads the JDBC driver the first
-time).  In pgAdmin: *Register → Server*.
+time). In pgAdmin: *Register → Server*.
 
 #### Databases per environment
 
@@ -361,147 +355,226 @@ time).  In pgAdmin: *Register → Server*.
 |---|---|---|---|
 | **Local development** | Your own Docker container | You only; `docker compose down -v` resets it | Table above |
 | **Automated tests** | Ephemeral Testcontainers (created and destroyed by `pytest tests/integration` and CI) | Test code | Nothing to connect to; never share it |
-| **Shared testing / staging** | Shared host defined in **TASK-38** | The whole team and the integration tests with other microservices | Host, port and credentials provided by the Scrum Master (never commit them) |
+| **Shared testing / staging** | Shared host defined in [docs/STAGING.md](docs/STAGING.md) | The whole team and integration tests with other microservices | Host, port and read-only credentials via SSH tunnel |
 | **Final version (release)** | Deployed from `main` | The released system | Restricted credentials; not used for experiments |
-
-> Use the same client to inspect the shared staging database by creating a
-> second connection.  Prefer **read-only credentials** for it so nobody alters
-> shared test data by accident.
 
 ---
 
-### §8 — Quick Test Environment Startup (Terminal & Docker Desktop)
+### §8 — Exact Step-by-Step Startup & Verification Guide (Local & Full Docker)
 
-Use this step-by-step guide to package the Docker image, start the entire backend environment from scratch, populate realistic test data (*seed*), and run manual functional tests using **PowerShell** and **Docker Desktop**.
-
-#### Step 0 — Packaging the Backend Docker Image (for Docker Desktop)
-To package the backend application (`Dockerfile`) into a container image visible in **Docker Desktop → Images** (and optionally run the API inside a container instead of local `uvicorn`):
-
-```powershell
-# 1. Navigate to the backend repository root
-cd C:\path\to\orders-backend
-
-# 2. Build (package) the Docker image from the Dockerfile
-docker build -t orders-backend:latest .
-
-# 3. Verify in Docker Desktop -> Images that "orders-backend:latest" appears.
-# (Optional) If you want to run the API itself inside a Docker container on port 8000
-# after running Steps 3 & 4 (instead of running uvicorn in the terminal):
-# docker rm -f orders-backend-api 2>$null
-# docker run -d --name orders-backend-api -p 8000:8000 --env-file .env `
-#   -e DATABASE_URL="postgresql+asyncpg://ordenes:ordenes@host.docker.internal:5432/ordenes" `
-#   -e REDIS_URL="redis://host.docker.internal:6379/0" `
-#   -e RABBITMQ_URL="amqp://ordenes:ordenes@host.docker.internal:5672/" `
-#   orders-backend:latest
-```
+Follow **Mode A** for daily development (infrastructure in Docker, API and workers in local `.venv` with `--reload`), or **Mode B** to build all Docker images and run the **entire microservice inside Docker containers** (`postgres`, `redis`, `rabbitmq`, `api`, `workers`, `stubs`).
 
 #### Step 1 — Start Docker Desktop
-1. Open the **Docker Desktop** application on your machine.
-2. Wait until the bottom-left status bar turns green and displays **Engine running**.
-3. Click on the **Containers** tab in the left sidebar to keep it visible; the project containers will appear here in Step 3.
+1. Open **Docker Desktop** and wait until the bottom-left indicator turns green (**Engine running**).
+2. Keep the **Containers** tab visible to monitor container status and logs.
 
-#### Step 2 — Open Terminal & Activate the Python Virtual Environment
-Open a **PowerShell** terminal and run the following commands in order:
+#### Step 2 — Choose Your Startup Mode
+
+##### Mode A — Infrastructure in Docker + Local API & Workers (Recommended for development)
 
 ```powershell
 # 1. Navigate to the backend repository root
 cd C:\path\to\orders-backend
 
-# 2. (First time only) If .venv does not exist yet, run the bootstrap script:
-# .\scripts\bootstrap.ps1
+# 2. (First time only) Create .venv, install dev dependencies, and generate .env
+.\scripts\bootstrap.ps1
 
-# 3. Activate the Python virtual environment (.venv)
+# 3. Activate the Python virtual environment
 .\.venv\Scripts\Activate.ps1
-# Confirm that "(.venv)" appears at the beginning of your terminal prompt.
 
-# 4. Ensure the local .env file exists with Docker Compose defaults
+# 4. Ensure .env exists with local Docker defaults (SAGA_TIMEOUT_SECONDS=60)
 python scripts/setup_env.py
-```
 
-#### Step 3 — Start Infrastructure & Verify in Docker Desktop
-In the same terminal (with `(.venv)` active), start PostgreSQL, Redis, and RabbitMQ:
-
-```powershell
-# 1. Start the containers in the background
-docker compose up -d
-
-# 2. Check container health in the terminal
+# 5. Start PostgreSQL, Redis, and RabbitMQ and wait for healthy status
+docker compose up -d postgres redis rabbitmq
 docker compose ps
 ```
 
-**How to verify in Docker Desktop:**
-1. Switch to **Docker Desktop → Containers**.
-2. Expand the `orders-backend` compose group.
-3. Verify that all three containers show a green status dot (**Running**):
-   - `ordenes-postgres` (Port `5432:5432`)
-   - `ordenes-redis` (Port `6379:6379`)
-   - `ordenes-rabbitmq` (Ports `5672:5672`, `15672:15672`)
-4. You can click any container name in Docker Desktop to view its live **Logs** or open its **Exec** terminal.
+##### Mode B — Full 6-Container Stack Inside Docker (`docker-compose.yml` + `docker-compose.ci.yml`)
 
-#### Step 4 — Run Migrations & Seed Demo Data
-Because this microservice uses a choreographed Saga (orders only enter `RESERVED` / `IN_PREPARATION` after an Inventory event), an empty database has no active orders in the KDS queue. Run the migration and the demo seed script:
+Combining `docker-compose.yml` and `docker-compose.ci.yml` builds **3 application images** from `Dockerfile` (`python:3.12-slim` + `requirements/runtime.txt`, including `websockets==15.0.1` for `/ws/kds` and `/ws/waiter`, and Python `urllib` healthcheck without requiring `curl`) and runs **6 containers total**:
+
+| Compose service | Image | Container name | Host port(s) | Role |
+|---|---|---|---|---|
+| `postgres` | `postgres:16-alpine` | `ordenes-postgres` | `${POSTGRES_PORT:-5432}:5432` | ACID store (`shifts`, `orders`, `order_items`, `outbox`, `processed_events`) |
+| `redis` | `redis:7-alpine` | `ordenes-redis` | `6379:6379` | Menu catalog projection (`catalog:platillo:*`) + WS Pub/Sub bridge |
+| `rabbitmq` | `rabbitmq:3-management-alpine` | `ordenes-rabbitmq` | `5672:5672`, `15672:15672` | Event broker (`ordenes.topic`, `inventory.topic`, `menu.topic`, `sala.events`) + Management UI |
+| `api` | `orders-backend-api` *(built from `Dockerfile`)* | `ordenes-api-ci` | `8000:8000` | FastAPI REST + WebSockets (`/ws/kds`, `/ws/waiter`) |
+| `workers` | `orders-backend-workers` *(built from `Dockerfile`)* | `ordenes-workers-ci` | — *(internal)* | `python -m app.workers.run_all` (Outbox Publisher, Saga Timeout Watcher, Inbound Consumer, Catalog Reconciler; waits for `api` healthy) |
+| `stubs` | `orders-backend-stubs` *(built from `Dockerfile`)* | `ordenes-stubs-ci` | — *(internal)* | `python -m app.stubs.runner` (Inventory & Billing contract stubs over RabbitMQ; waits for `rabbitmq` healthy) |
 
 ```powershell
-# 1. Create or update all PostgreSQL tables (orders, order_items, outbox, processed_events)
-alembic upgrade head
+cd C:\path\to\orders-backend
 
-# 2. Populate Redis catalog and insert 4 demo orders across all lifecycle states
-python scripts/seed_demo.py
+# 1. Export internal Docker-network connection variables for Compose
+#    Why: Docker Compose interpolates .env first; if your local .env uses
+#    127.0.0.1:5433 or an external AMQP URL, containers would fail to reach
+#    sibling services unless you override these variables in the shell.
+$env:DATABASE_URL="postgresql+asyncpg://ordenes:ordenes@postgres:5432/ordenes"
+$env:REDIS_URL="redis://redis:6379/0"
+$env:RABBITMQ_URL="amqp://ordenes:ordenes@rabbitmq:5672/"
+$env:SAGA_TIMEOUT_SECONDS="60"
+# Uncomment if a local PostgreSQL server occupies host port 5432:
+# $env:POSTGRES_PORT="5433"
 
-# TIP: During testing or demos, run with --reset at any time to restore the 4 demo orders
-# back to their initial states:
-python scripts/seed_demo.py --reset
+# 2. Build all images (`api`, `workers`, `stubs`) and start all 6 containers
+docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.ci.yml ps
+docker images | Select-String "orders-backend|postgres|redis|rabbitmq"
+
+# 3. Apply Alembic migrations inside the running API container
+docker exec ordenes-api-ci alembic upgrade head
 ```
 
-**Seeded Data Reference for Manual Testing:**
+> **Important (`Dockerfile` & `scripts/`):** `Dockerfile` packages `app/`, `alembic.ini`, `contracts/events/`, and `ops/staging/staging-smoke.py` — it intentionally does **not** copy `scripts/`. Therefore:
+> - Run `alembic upgrade head` inside the API container (`docker exec ordenes-api-ci alembic upgrade head`).
+> - Run `python scripts/seed_demo.py --reset` and `python scripts/dev_token.py` from your **host `.venv`** against the exposed ports (`localhost:5432` or `5433`, and `localhost:6379`), as shown in Step 3.
+> - If you run **Mode B**, skip Step 4 (the API, workers, and stubs are already running in Docker on port `8000`).
 
-| Order UUID (`orderId`) | Table | Initial Status | Main Item UUID (`itemId`) | What to test with this order |
-|---|---|---|---|---|
-| `11111111-1111-1111-1111-111111111111` | Table 5 | `RESERVED` | `11111111-0000-0000-0000-000000000001` | Visible in KDS Active queue. Test `PATCH /orders/{orderId}/start-preparation` or `kitchen-reject`. |
-| `22222222-2222-2222-2222-222222222222` | Table 12 | `IN_PREPARATION` | `22222222-0000-0000-0000-000000000001` | Visible in KDS Active queue. Test marking item ready (`PATCH .../ready`), Admin void (`PATCH .../void`), or Chef void (`PATCH .../void-kitchen-error`). |
-| `33333333-3333-3333-3333-333333333333` | Table 3 | `DELIVERED` | `33333333-0000-0000-0000-000000000001` | Visible in KDS Delivered tab (`view=delivered`). Test dish redo (`PATCH .../redo`) or bill settlement (`POST .../close-bill`). |
-| `44444444-4444-4444-4444-444444444444` | Table 8 | `CREATED` | `44444444-0000-0000-0000-000000000001` | Draft order. Test `PATCH /orders/{orderId}/items`, table transfer (`PATCH .../transfer`), confirm (`POST .../confirm`), or cancel (`PATCH .../cancel`). |
-
-*Redis Catalog (`dish_id` values):*
-- Available dishes: `dish-tacos`, `dish-horchata`, `dish-arrachera`, `dish-guacamole`, `dish-hamburguesa`, `dish-ensalada`.
-- Unavailable dish (returns `422 DISH_UNAVAILABLE`): `dish-agotado`.
-
-#### Step 5 — Generate Dev JWT Tokens & Start the API Server
-Still in your terminal (with `(.venv)` active):
+#### Step 3 — Run Migrations & Seed Demo Data
 
 ```powershell
-# 1. Generate 24-hour JWT tokens for each role to use in Swagger / Postman
+# Activate host .venv (needed for seed_demo.py and dev_token.py in both Mode A and Mode B)
+.\.venv\Scripts\Activate.ps1
+
+# 1. (Mode A only — skip if already run via `docker exec` in Mode B)
+alembic upgrade head
+
+# 2. Populate Redis catalog + Shift #1 + 8 demo orders with fresh random UUIDv4 IDs
+python scripts/seed_demo.py --reset
+
+# Other useful seed commands:
+# python scripts/seed_demo.py                 # Seeds only if the active shift has 0 orders (random UUIDv4s)
+# python scripts/seed_demo.py --catalog-only  # Seeds only Redis catalog + active Shift #1 (0 demo orders)
+```
+
+> **Note on UUIDs:** Every run of `python scripts/seed_demo.py` or `python scripts/seed_demo.py --reset` generates **new random UUIDv4 values** for `orderId` and `itemId` and prints all 8 generated `OrderId`s directly in the terminal. You can also inspect the active IDs anytime via `GET /orders` or `GET /kds/queue`. (`--fixed-ids` exists only as a legacy option for static test scripts and is not the default workflow.)
+
+**Seeded Data Reference by Shift Folio (`seed_demo.py`, aligned with Inventory `TEST_DATA.md`):**
+
+| Folio | Location | Initial Status | Seeded Dishes | What to test with this order |
+|---|---|---|---|---|
+| `#1` | Table 5 | `RESERVED` | 2× `PLATE-BURGER-01`, 1× `PLATE-QUES-01` | KDS active queue. Test `PATCH /orders/{orderId}/start-preparation` or `PATCH .../items/{itemId}/kitchen-reject`. |
+| `#2` | Table 12 | `IN_PREPARATION` | 2× `PLATE-QUES-01` (`PENDING`), 1× `PLATE-CESAR-01` (`READY`) | KDS active queue. Test `PATCH .../items/{itemId}/ready`, Admin void (`PATCH .../void`), or Chef void (`PATCH .../void-kitchen-error`). |
+| `#3` | Table 3 | `DELIVERED` | 2× `PLATE-BURGER-01` (`DELIVERED`) | KDS Delivered tab (`GET /kds/queue?view=delivered`). Test dish redo (`PATCH .../items/{itemId}/redo`) or bill request (`POST /orders/{orderId}/request-bill`). |
+| `#4` | Table 8 | `CREATED` | 1× `PLATE-BURGER-01`, 1× `PLATE-CESAR-01` | Draft order. Test `PATCH /orders/{orderId}/items`, `PATCH .../transfer`, `POST /orders/{orderId}/confirm` (triggers RabbitMQ Saga), or `PATCH .../cancel`. |
+| `#5` | Takeaway | `CREATED` | 2× `PLATE-QUES-01`, 1× `PLATE-SIM-0001` | Takeaway draft order (`isTakeaway: true`). Ideal for testing `POST /orders/{orderId}/confirm` against stubs or manual RabbitMQ events. |
+| `#6` | Table 15 | `RESERVED` | `PLATE-BURGER-01`, `PLATE-QUES-01`, `PLATE-CESAR-01`, `PLATE-SIM-0001` | Multi-station KDS test (`parrilla` + `fria`). |
+| `#7` | Table 9 | `REJECTED` | 2× `PLATE-BURGER-01`, 1× `PLATE-QUES-01` | Rejected order with `rejectionDetails`. Reopen draft via `PATCH .../items` or cancel. |
+| `#8` | Table 11 | `RESERVED` | 1× `PLATE-CESAR-01` | Reserved > 15 min ago (`Caducados` KDS tab with 10 min grace window). |
+
+*Redis Catalog (`catalog:platillo:<id>`):*
+- Available (`available=true`): `PLATE-BURGER-01` (`OFFER-BURGER-01`), `PLATE-QUES-01` (`OFFER-QUES-01`), `PLATE-CESAR-01` (`OFFER-CESAR-01`), `PLATE-SIM-0001` (`OFFER-SIM-0001`).
+- Unavailable (`available=false`, returns `422 DISH_UNAVAILABLE`): `PLATE-AGOTADO-01`.
+
+#### Step 4 — Generate Dev JWT Tokens & Start API + Workers (Mode A)
+
+```powershell
+# 1. Generate 24-hour development JWT tokens
 python scripts/dev_token.py --role waiter --ttl 86400
 python scripts/dev_token.py --role kitchen --ttl 86400
 python scripts/dev_token.py --role chef --ttl 86400
 python scripts/dev_token.py --role admin --ttl 86400
 
-# 2. Start the FastAPI server (listening on 0.0.0.0:8000 for local & LAN testing)
+# 2. Terminal 1 — Start FastAPI (REST + WebSockets /ws/kds and /ws/waiter)
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-*(Optional)* If you also want the **Transactional Outbox Worker** and **Saga Timeout Watcher** running in the background, open a second PowerShell terminal, activate `.venv`, and run:
+In a **second PowerShell terminal**, start the background workers (required for Outbox publishing, Saga 60 s timeout, and RabbitMQ consumers):
 
 ```powershell
+cd C:\path\to\orders-backend
 .\.venv\Scripts\Activate.ps1
 python -m app.workers.run_all
 ```
 
-#### Step 6 — Run Manual Tests in Swagger UI & Inspect via Docker Desktop
-1. Open **`http://localhost:8000/docs`** in your browser.
-2. Click the green **Authorize** button at the top right, paste one of the JWT strings generated in Step 5 (only the token string, without the word `Bearer`), and click **Authorize**.
-3. Execute endpoints using the deterministic UUIDs from the table in Step 4 (e.g. `GET /orders` with `waiter`/`admin`, `GET /kds/queue` with `kitchen`/`chef`/`admin`).
-4. **Verify database changes directly inside Docker Desktop:**
-   - In **Docker Desktop → Containers**, click on `ordenes-postgres` and open the **Exec** tab.
-   - Run:
-     ```sql
-     psql -U ordenes -d ordenes -c "SELECT public_id, table_number, status, total_amount, version FROM orders ORDER BY table_number;"
+#### Step 5 — Verify Health, Swagger UI & Persistence
+
+1. Verify all four health endpoints return `200 {"status": "ok"}`:
+   - `http://localhost:8000/health`
+   - `http://localhost:8000/api/v1/health`
+   - `http://localhost:8000/api/v1/orders/health`
+   - `http://localhost:8000/api/v1/kitchen/health`
+2. Open **`http://localhost:8000/docs`**, click **Authorize**, paste a JWT from Step 4 (without `Bearer `), and test:
+   - `waiter` / `admin`: `GET /orders` (copy the real `orderId`s of `#1`..`#8`), `POST /orders`, `PATCH /orders/{orderId}/items`, `PATCH /orders/{orderId}/transfer`, `POST /orders/{orderId}/confirm`, `POST /orders/{orderId}/request-bill`.
+   - `kitchen` / `chef` / `admin`: `GET /kds/queue`, `PATCH /orders/{orderId}/start-preparation`, `PATCH /orders/{orderId}/items/{itemId}/ready`.
+   - `chef` / `admin`: `GET /shifts/current`, `POST /shifts/open`, `POST /shifts/current/close`, `PATCH /orders/{orderId}/void-kitchen-error`.
+   - `admin`: `PATCH /orders/{orderId}/void`.
+3. Inspect PostgreSQL and Redis directly:
+   ```powershell
+   # PostgreSQL: orders and outbox
+   docker exec ordenes-postgres psql -U ordenes -d ordenes -c "SELECT public_id, shift_folio, table_number, status, total_amount, version FROM orders ORDER BY id;"
+   docker exec ordenes-postgres psql -U ordenes -d ordenes -c "SELECT id, event_id, event_type, correlation_id, published_at FROM outbox ORDER BY id;"
+
+   # Redis catalog keys
+   docker exec ordenes-redis redis-cli keys "catalog:platillo:*"
+   ```
+
+#### Step 6 — Testing End-to-End Flows with Real RabbitMQ
+
+1. **Inspect exchanges and queues in RabbitMQ Management UI (`http://localhost:15672`, user `ordenes`, password `ordenes`):**
+   - **Exchanges (durable `topic`):** `ordenes.topic`, `inventory.topic`, `menu.topic`, `sala.events`.
+   - **Queues (durable):**
+     - `orders.inventory.inbound` (bound by `workers` to `inventory.reservation.*`, `inventario.stock.*`, `menu.#`, `sala.#`, `pagos.#`, `payments.#`, `pago.#`, etc.).
+     - `stubs.orders.inbound` (bound by `stubs` to `ordenes.orden.creada`, `ordenes.orden.cancelada`, `ordenes.orden.expirada`, `ordenes.cuenta.solicitada`, `ordenes.cobro.solicitado`).
+
+2. **Flow 6A — Automated real RabbitMQ round-trip with `stubs` running:**
+   - Ensure `ordenes-workers-ci` and `ordenes-stubs-ci` are running (Mode B) — or in Mode A start `python -m app.stubs.runner` in a 3rd terminal alongside `run_all`.
+   - Confirm draft Folio `#4` (`CREATED`, Table 8) using the real `orderId` printed by `seed_demo.py`:
+     ```powershell
+     $WAITER_JWT = (python scripts/dev_token.py --role waiter | Select-String '^Bearer\s+(\S+)$').Matches[0].Groups[1].Value
+     $ORDER_ID = "<real-orderId-of-folio-4>"
+     Invoke-RestMethod -Method Post -Uri "http://localhost:8000/orders/$ORDER_ID/confirm" `
+       -Headers @{ Authorization = "Bearer $WAITER_JWT" }
      ```
-   - Or inspect the `outbox` table to see events generated by your actions:
-     ```sql
-     psql -U ordenes -d ordenes -c "SELECT id, event_type, aggregate_id, published_at FROM outbox ORDER BY id;"
+   - Trace the real broker loop:
+     1. `OutboxWorker` publishes `ordenes.orden.creada` to `ordenes.topic` and sets `outbox.published_at`.
+     2. `ordenes-stubs-ci` (`InventoryStub`, default `INVENTORY_STUB_MODE=RESERVE`) receives it and publishes `inventario.stock.reservado`.
+     3. `ordenes-workers-ci` (`InboundConsumerWorker`) consumes `inventario.stock.reservado` from `orders.inventory.inbound`, records it in `processed_events`, and updates the order to `RESERVED` (pushed live to `/ws/kds`).
+   - Verify with `GET /orders/$ORDER_ID` (status is now `RESERVED`) and `docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --tail=30 workers stubs`.
+   - Repeat with `POST /orders/<real-orderId-of-folio-3>/request-bill` (`DELIVERED` order): `BillingStub` (`BILLING_STUB_AUTO_PAY=true`) publishes `pagos.pago.completado` and the order transitions `DELIVERED -> PAID`.
+   - You can switch stub behavior via env vars (`INVENTORY_STUB_MODE=RESERVE|REJECT|SILENT|DELAYED|ATOMIC`, `BILLING_STUB_AUTO_PAY=true|false`).
+
+3. **Flow 6B — Manual real RabbitMQ event testing WITHOUT `stubs` (real contract simulation):**
+   - Stop `stubs` so only real incoming broker messages resolve the Saga:
+     ```powershell
+     docker compose -f docker-compose.yml -f docker-compose.ci.yml stop stubs
      ```
-   - To inspect RabbitMQ queues visually, open **`http://localhost:15672`** (login with the local compose credentials defined in `.env`).
+   - Confirm Folio `#5` (`CREATED`, Takeaway) with `POST /orders/<real-orderId-of-folio-5>/confirm`. It stays `CREATED` waiting for Inventory.
+   - In RabbitMQ UI (`http://localhost:15672`) → **Exchanges** → click **`inventory.topic`** → **Publish message**:
+     - To **reserve** stock, set **Routing key** = `inventario.stock.reservado` and **Payload**:
+       ```json
+       {
+         "eventId": "<generate-a-new-uuid-v4>",
+         "orderId": "<real-orderId-of-folio-5>",
+         "correlationId": "<real-orderId-of-folio-5>",
+         "reservations": [{"offerId": "OFFER-QUES-01", "quantity": 2}],
+         "reservas": [{"offerId": "OFFER-QUES-01", "quantity": 2}]
+       }
+       ```
+     - Or to test **stock rejection** on another confirmed order, set **Routing key** = `inventario.stock.insuficiente` and **Payload**:
+       ```json
+       {
+         "eventId": "<generate-a-new-uuid-v4>",
+         "orderId": "<real-orderId-of-created-order>",
+         "correlationId": "<real-orderId-of-created-order>",
+         "missingIngredients": ["pan"],
+         "faltantes": ["pan"],
+         "rejectedItems": [{"offerId": "OFFER-BURGER-01", "requestedQuantity": 1, "availableQuantity": 0}],
+         "reservedItems": []
+       }
+       ```
+     - Or to test **payment completion** on a `DELIVERED` order, open exchange **`ordenes.topic`**, set **Routing key** = `pagos.pago.completado` and **Payload**:
+       ```json
+       {
+         "eventId": "<generate-a-new-uuid-v4>",
+         "orderId": "<real-orderId-of-delivered-order>",
+         "sessionId": "00000000-0000-0000-0000-000000000099",
+         "totalPaid": 330.0,
+         "status": "PAID"
+       }
+       ```
+   - Verify the transition via `GET /orders/{orderId}` and inspect `processed_events` in PostgreSQL (re-publishing with the exact same `eventId` is ignored idempotently).
 
 ---
 ---
@@ -511,6 +584,7 @@ python -m app.workers.run_all
 Referencia rápida para el estándar de CI/CD requerido por el curso.
 Las instrucciones completas de configuración están en [README.md](README.md); el flujo de contribución está en [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
 Una guía básica sobre cómo funciona Docker en local y su alcance en la nube (TASK-38) se encuentra en [docs/GUIA_DOCKER.md](docs/GUIA_DOCKER.md).
+El runbook del entorno compartido de staging está en [docs/STAGING.md](docs/STAGING.md).
 
 ---
 
@@ -576,6 +650,7 @@ unit-tests
 sonarcloud
 integration-tests
 api-and-contract
+k6-smoke
 zap-api-scan
 ```
 
@@ -593,23 +668,23 @@ Archivo: `.github/workflows/ci.yml`
 push/PR a develop o main
         │
         ├─ validate-pr          (Solo en PR) — nombre de rama + título de Conventional Commits
-        ├─ lint-and-types        — gitleaks, ruff, mypy --strict
+        ├─ lint-and-types       — gitleaks, ruff check/format, mypy --strict
         │
-        └─ unit-tests            — pytest tests/unit, sube coverage.xml + junit.xml
+        └─ unit-tests           — pytest tests/unit, sube coverage.xml + junit.xml
                │
-               ├─ sonarcloud     — descarga artefactos, SonarCloud + Quality Gate
+               ├─ sonarcloud    — descarga artefactos, SonarCloud + Quality Gate
                │
-               └─ integration-tests — pytest tests/integration (Testcontainers)
+               └─ integration-tests — pytest tests/integration/test_smoke.py (Testcontainers)
                         │
-                        ├─ api-and-contract  — Newman (vacío hasta TASK-34)
-                        │
-                        └─ zap-api-scan      — OWASP ZAP contra /openapi.json
+                        ├─ api-and-contract — Newman + pytest tests/contract tests/bdd
+                        ├─ k6-smoke         — PT-08 (10 VUs, 30 s contra PostgreSQL + Redis)
+                        └─ zap-api-scan     — OWASP ZAP contra /openapi.json
 
 Se ejecuta tras cualquier fallo:
-        notify-on-failure        — Alerta por webhook a Discord
+        notify-on-failure       — Alerta por webhook a Discord
 
-Se ejecuta solo al hacer push a main (tras pasar todos los checks):
-        build-and-push           — Imagen Docker → ghcr.io, Notificación a Discord
+Se ejecuta al hacer push a develop o main (tras pasar todos los checks):
+        build-and-push          — Imagen Docker → ghcr.io, Notificación a Discord
 ```
 
 ---
@@ -630,8 +705,8 @@ Fallos comunes y soluciones:
 | `mypy` falla | Tipos faltantes o uso de `Any` | Añadir anotaciones; ver GUIDELINES §5.3 |
 | `pytest` falla | Error de aserción o import | Ejecutar `pytest tests/unit -v` localmente |
 | Quality Gate falla | Cobertura < 85 % o nuevos problemas | Revisar el dashboard de SonarCloud para detalles |
-| `gitleaks` falla | Secreta detectada en un commit | Rotar el secreto inmediatamente; ver CONTRIBUTING §12 |
-| `zap-api-scan` falla (ALTO)| Problema de seguridad en la API | Revisar `.zap/rules.tsv` y arreglar la vulnerabilidad |
+| `gitleaks` falla | Secreto detectado en un commit | Rotar el secreto inmediatamente; ver CONTRIBUTING §12 |
+| `zap-api-scan` falla (ALTO) | Problema de seguridad en la API | Revisar `.zap/rules.tsv` y arreglar la vulnerabilidad |
 
 ---
 
@@ -644,11 +719,11 @@ Cada miembro del equipo necesita las siguientes herramientas **antes** de ejecut
 | Herramienta | Versión mínima | Usado para | Descarga |
 |---|---|---|---|
 | **Git** | 2.40+ | Clonar, ramas, commits | https://git-scm.com/downloads |
-| **Docker Desktop** (incluye Docker Compose v2) | Docker 24+ / Compose v2 | PostgreSQL, Redis, RabbitMQ y Testcontainers | https://www.docker.com/products/docker-desktop |
+| **Docker Desktop** (incluye Docker Compose v2) | Docker 24+ / Compose v2 | PostgreSQL, Redis, RabbitMQ, Testcontainers y API/workers contenerizados | https://www.docker.com/products/docker-desktop |
 | **Python** | 3.12+ | Backend, Alembic, tests | https://www.python.org/downloads/ |
-| **Node.js** + **pnpm** | Node 20 LTS | Solo repo Frontend (`ordenes-kds-frontend`) | https://nodejs.org · `corepack enable` |
-| **Cliente BD** (recomendado)| — | Explorar PostgreSQL visualmente (ver §7) | https://dbeaver.io/download/ o https://www.pgadmin.org/download/ |
-| *k6*, *Newman* (opcional) | — | Pruebas de rendimiento / contrato de API (S5–S6)| `npm i -g newman` · https://k6.io/docs/get-started/installation/ |
+| **Node.js** + **pnpm** | Node 24 LTS / pnpm 9+ | Repo Frontend (`orders-frontend`) y runner Newman | https://nodejs.org · `corepack enable` |
+| **Cliente BD** (recomendado) | — | Explorar PostgreSQL visualmente (ver §7) | https://dbeaver.io/download/ or https://www.pgadmin.org/download/ |
+| *k6*, *Newman* (opcional) | — | Pruebas de rendimiento / contrato de API | `npm i -g newman` · https://k6.io/docs/get-started/installation/ |
 
 > **No instales un servidor PostgreSQL local.** La base de datos contenerizada es la única fuente de verdad para todos, usa la versión exacta de CI (PostgreSQL 16), y un servidor local chocaría con el puerto `5432`.
 > Instala un *cliente* en su lugar (§7).
@@ -678,20 +753,20 @@ docker --version           # Docker version 24 o superior
 docker compose version     # Docker Compose version v2.x
 docker run --rm hello-world   # confirma que el motor Docker corre
 python --version           # Python 3.12 o superior
-node --version             # v20.x (solo frontend)
+node --version             # v24.x (frontend / Newman)
 ```
 
 #### 5.4 Puertos que deben estar libres
 
-| Puerto | Servicio |
-|---|---|
-| `5432` | PostgreSQL |
-| `6379` | Redis |
-| `5672` | RabbitMQ (AMQP) |
-| `15672` | RabbitMQ interfaz de administración |
-| `8000` | API de Órdenes (uvicorn) |
+| Puerto | Servicio | Contenedor (`docker compose`) |
+|---|---|---|
+| `5432` (o `POSTGRES_PORT=5433`) | PostgreSQL | `ordenes-postgres` (`postgres:16-alpine`) |
+| `6379` | Redis | `ordenes-redis` (`redis:7-alpine`) |
+| `5672` | RabbitMQ (AMQP) | `ordenes-rabbitmq` (`rabbitmq:3-management-alpine`) |
+| `15672` | RabbitMQ interfaz de administración | `ordenes-rabbitmq` (`rabbitmq:3-management-alpine`) |
+| `8000` | API de Órdenes (`uvicorn` / `api`) | `ordenes-api-ci` (`orders-backend-api`, solo en Modo B) |
 
-Si uno está ocupado (típicamente el `5432` por un servidor local de PostgreSQL), detén ese proceso o cambia el lado **izquierdo** del mapeo en `docker-compose.yml` (ej. `"5433:5432"`) y actualiza el puerto en tu `.env`.
+Si uno está ocupado (típicamente el `5432` por un servidor local de PostgreSQL), detén ese proceso o define `POSTGRES_PORT=5433` en `.env` (que mapea `"5433:5432"` en `docker-compose.yml`) y actualiza el puerto a `5433` en `DATABASE_URL`.
 
 ---
 
@@ -700,30 +775,30 @@ Si uno está ocupado (típicamente el `5432` por un servidor local de PostgreSQL
 **Windows PowerShell:**
 
 ```powershell
-git clone https://github.com/<org>/ordenes-kds-backend.git
-cd ordenes-kds-backend
+git clone https://github.com/FMAT-Restaurant/OrdersKDS-Backend.git
+cd OrdersKDS-Backend
 .\scripts\bootstrap.ps1
 ```
 
 **macOS / Linux:**
 
 ```bash
-git clone https://github.com/<org>/ordenes-kds-backend.git
-cd ordenes-kds-backend
+git clone https://github.com/FMAT-Restaurant/OrdersKDS-Backend.git
+cd OrdersKDS-Backend
 bash scripts/bootstrap.sh
 ```
 
 El script de bootstrap:
 1. Verifica Python 3.12+
 2. Crea `.venv` e instala `requirements/dev.txt`
-3. Genera `.env` con defaults locales seguros (credenciales de docker-compose)
-4. Imprime los pasos restantes (editar `.env`, Docker, migraciones, API)
+3. Genera `.env` con defaults locales seguros (credenciales de `docker-compose.yml` y `SAGA_TIMEOUT_SECONDS=60`)
+4. Imprime los pasos restantes (Docker, migraciones, API, workers)
 
 Después de que el script termine:
 
 ```bash
 # Activa el entorno virtual (requerido para alembic, uvicorn, pytest, etc.)
-# Windows:   .venv\Scripts\Activate.ps1
+# Windows:     .venv\Scripts\Activate.ps1
 # macOS/Linux: source .venv/bin/activate
 
 # Verifica .env — asegura SAGA_TIMEOUT_SECONDS=60 (OP-01 / ADR-0001)
@@ -731,10 +806,10 @@ Después de que el script termine:
 docker compose up -d postgres redis rabbitmq
 alembic upgrade head
 
-# Terminal 1 — API con recarga en caliente
+# Terminal 1 — API con recarga en caliente (HTTP + WebSocket)
 uvicorn app.main:app --reload --port 8000
 
-# Terminal 2 — workers en segundo plano
+# Terminal 2 — workers en segundo plano (Outbox, Saga Watcher, Inbound Consumer)
 python -m app.workers.run_all
 
 # Genera un JWT de desarrollo para probar la API manualmente
@@ -751,7 +826,7 @@ Interfaz RabbitMQ: `http://localhost:15672` (usuario `ordenes`, contraseña `ord
 docker compose ps
 # postgres, redis y rabbitmq deben mostrar STATUS "Up ... (healthy)"
 
-docker exec ordenes-postgres psql -U ordenes -d ordenes -c "\dt"   # lista tablas tras alembic upgrade head
+docker exec ordenes-postgres psql -U ordenes -d ordenes -c "\dt"   # lista shifts, orders, order_items, outbox, processed_events
 docker exec ordenes-redis redis-cli ping                          # PONG
 ```
 
@@ -777,24 +852,17 @@ El contenedor de RabbitMQ tarda hasta ~30 s en estar *healthy* la primera vez.
 | `Activate.ps1 cannot be loaded` | Política de ejecución de PowerShell | Ver §5.2 (paso 3) |
 | `connection refused` en `localhost:5432` | Contenedor aún no está *healthy* | `docker compose ps`; esperar *healthy* |
 | `password authentication failed` | Credenciales en `.env` difieren del compose... | Alinear `.env` o ejecutar `docker compose down -v` |
-| Servicio rechaza arrancar: falta `SAGA_TIMEOUT_SECONDS` | Variable intencionalmente sin default | Establécela en `.env` |
+| Servicio rechaza arrancar: falta `SAGA_TIMEOUT_SECONDS` | Variable intencionalmente sin default | Establécela en `60` dentro de `.env` |
 | Falla arranque de tests de integración | Docker no corre (Testcontainers lo necesita) | Inicia Docker Desktop |
 
 #### 6.4 Variables operacionales de configuración (Sagas y KDS)
 
 | Variable | Repo | Obligatoria | Ejemplo | Significado |
 |---|---|---|---|---|
-| `SAGA_TIMEOUT_SECONDS` | `ordenes-kds-backend` | Sí | `60` | Tiempo máximo (en segundos) que una orden confirmada en estado `CREATED` espera respuesta de Inventario antes de transitar a `EXPIRED` (OP-01 / ADR-0001). El conteo de 60 s inicia en `confirmed_at`, no en la creación del pedido. Sin valor por defecto en código. |
-| `SAGA_WATCHER_INTERVAL_SECONDS` | `ordenes-kds-backend` | No | `5` | Intervalo de sondeo (en segundos) con el que el Saga Timeout Watcher revisa órdenes vencidas (OP-01 / ADR-0001, TASK-06). El peor caso real de expiración es ≈ 65 s (60 s del timeout + 5 s del intervalo del watcher). |
-| `KDS_WARNING_AFTER_SECONDS` | `ordenes-kds-backend` / `ordenes-kds-frontend` | opcional hasta aceptar OP-11 | *(vacía)* | Umbral de tiempo en cocina (en segundos desde `in_preparation_at`) para marcar una tarjeta en el KDS como "Por atrasarse" (`--color-warning`, OP-11 / ADR-0009). |
-| `KDS_LATE_AFTER_SECONDS` | `ordenes-kds-backend` / `ordenes-kds-frontend` | opcional hasta aceptar OP-11 | *(vacía)* | Umbral crítico de tiempo en cocina (en segundos desde `in_preparation_at`) para marcar una tarjeta en el KDS como "Atrasada" (`--color-error`, OP-11 / ADR-0009). |
-
-**Aclaraciones operacionales importantes:**
-- El conteo de 60 s inicia en `confirmed_at`, no en la creación del pedido.
-- El peor caso real de expiración es ≈ 65 s (60 s del timeout + 5 s del intervalo del watcher).
-- Las dos variables del KDS (`KDS_WARNING_AFTER_SECONDS` y `KDS_LATE_AFTER_SECONDS`) son **opcional hasta aceptar OP-11** (se dejan vacías a propósito en `.env.example`).
-
-> **Nota de diseño:** Pendiente: dónde viven los umbrales del semáforo (respuesta de /kds/queue vs VITE_*). Se define en TASK-12 (Sprint 3) y TASK-15 (Sprint 4); hasta entonces KDS_WARNING_AFTER_SECONDS y KDS_LATE_AFTER_SECONDS quedan vacías.
+| `SAGA_TIMEOUT_SECONDS` | `orders-backend` | Sí | `60` | Tiempo máximo (en segundos) que una orden confirmada en estado `CREATED` espera respuesta de Inventario antes de transitar a `EXPIRED` (OP-01 / ADR-0001). El conteo de 60 s inicia en `confirmed_at`, no en la creación del pedido. Sin valor por defecto en código. |
+| `SAGA_WATCHER_INTERVAL_SECONDS` | `orders-backend` | No | `5` | Intervalo de sondeo (en segundos) con el que el Saga Timeout Watcher revisa órdenes vencidas (OP-01 / ADR-0001, TASK-06). El peor caso real de expiración es ≈ 65 s (60 s del timeout + 5 s del intervalo del watcher). |
+| `KDS_WARNING_AFTER_SECONDS` | `orders-backend` / `orders-frontend` | Opcional | *(vacía)* | Umbral de tiempo en cocina (en segundos desde `in_preparation_at`) para marcar una tarjeta en el KDS como "Por atrasarse" (`--color-warning`, OP-11 / ADR-0009). |
+| `KDS_LATE_AFTER_SECONDS` | `orders-backend` / `orders-frontend` | Opcional | *(vacía)* | Umbral crítico de tiempo en cocina (en segundos desde `in_preparation_at`) para marcar una tarjeta en el KDS como "Atrasada" (`--color-error`, OP-11 / ADR-0009). |
 
 ---
 
@@ -820,152 +888,223 @@ En DBeaver: *Database → New Database Connection → PostgreSQL*, llena los cam
 |---|---|---|---|
 | **Desarrollo local** | Tu propio contenedor Docker | Solo tú; `docker compose down -v` la reinicia | Tabla superior |
 | **Pruebas automáticas** | Testcontainers efímeros (creados y destruidos por `pytest tests/integration` y CI) | Código de pruebas | Nada a qué conectar; nunca la compartas |
-| **Pruebas compartidas / staging** | Host compartido definido en **TASK-38** | Todo el equipo y tests de integración con otros MS | Host, puerto y credenciales provistas por el Scrum Master (nunca las comitees) |
+| **Pruebas compartidas / staging** | Host compartido definido en [docs/STAGING.md](docs/STAGING.md) | Todo el equipo y tests de integración con otros MS | Host, puerto y credenciales de solo lectura vía túnel SSH |
 | **Versión final (release)** | Desplegada desde `main` | El sistema liberado | Credenciales restringidas; no se usa para experimentos |
-
-> Usa el mismo cliente para inspeccionar la base de staging compartida creando una segunda conexión. Prefiere **credenciales de solo lectura** para que nadie altere los datos de prueba compartidos por accidente.
 
 ---
 
-### §8 — Inicio de entorno rápido para pruebas manuales (Terminal y Docker Desktop)
+### §8 — Guía Exacta Paso a Paso para Levantar y Verificar el Microservicio (Local y Docker Completo)
 
-Esta sección describe **paso a paso desde cero** cómo empaquetar la imagen Docker del backend, levantar la infraestructura, activar el entorno de Python en la terminal, poblar datos de prueba (*seeds*), iniciar la API y verificar el funcionamiento usando **PowerShell** y **Docker Desktop**.
+Usa el **Modo A** para desarrollo diario (infraestructura en Docker, API y workers locales en `.venv` con `--reload`), o el **Modo B** para construir todas las imágenes Docker y ejecutar **todo el microservicio dentro de contenedores** (`postgres`, `redis`, `rabbitmq`, `api`, `workers`, `stubs`).
 
-#### Paso 0 — Cómo empaquetar el contenedor Docker del Backend (para Docker Desktop)
-Si necesitas empaquetar la aplicación del backend a partir de su `Dockerfile` para mostrar la imagen o ejecutar el contenedor directamente en **Docker Desktop**:
+#### Paso 1 — Iniciar Docker Desktop
+1. Abre **Docker Desktop** y espera hasta que la esquina inferior izquierda muestre el indicador verde **Engine running**.
+2. Mantén abierta la pestaña **Containers** para supervisar el estado y los logs de los contenedores.
 
-```powershell
-# 1. Entrar a la carpeta raíz del repositorio backend
-cd C:\ruta\a\orders-backend
+#### Paso 2 — Elegir Modo de Arranque
 
-# 2. Empaquetar (construir) la imagen Docker del backend
-docker build -t orders-backend:latest .
-
-# 3. En Docker Desktop -> Images verás aparecer la imagen "orders-backend:latest".
-# (Opcional) Si después de correr los Pasos 3 y 4 deseas correr la API dentro de un
-# contenedor en Docker Desktop en lugar de usar uvicorn en la terminal:
-# docker rm -f orders-backend-api 2>$null
-# docker run -d --name orders-backend-api -p 8000:8000 --env-file .env `
-#   -e DATABASE_URL="postgresql+asyncpg://ordenes:ordenes@host.docker.internal:5432/ordenes" `
-#   -e REDIS_URL="redis://host.docker.internal:6379/0" `
-#   -e RABBITMQ_URL="amqp://ordenes:ordenes@host.docker.internal:5672/" `
-#   orders-backend:latest
-```
-
-#### Paso 1 — Iniciar y verificar Docker Desktop
-1. Abre la aplicación **Docker Desktop** en Windows (o macOS).
-2. Espera a que la esquina inferior izquierda se ponga en color verde y muestre el texto **Engine running**.
-3. En el menú lateral izquierdo de Docker Desktop, haz clic en **Containers** y déjalo abierto para visualizar los contenedores que se crearán en el Paso 3.
-
-#### Paso 2 — Abrir la Terminal y activar el entorno de Python (`.venv`)
-Abre una ventana de **PowerShell** y ejecuta los siguientes comandos en orden:
+##### Modo A — Infraestructura en Docker + API y Workers locales (Recomendado para desarrollo)
 
 ```powershell
-# 1. Entrar a la carpeta raíz del repositorio backend
+# 1. Entrar a la raíz del repositorio backend
 cd C:\ruta\a\orders-backend
 
-# 2. (Solo la primera vez) Si aún no existe la carpeta .venv, ejecuta el bootstrap:
-# .\scripts\bootstrap.ps1
+# 2. (Solo la primera vez) Crear .venv, instalar dependencias dev y generar .env
+.\scripts\bootstrap.ps1
 
-# 3. Activar el entorno virtual de Python (.venv)
+# 3. Activar el entorno virtual de Python
 .\.venv\Scripts\Activate.ps1
-# Verifica que aparezca el prefijo "(.venv)" al inicio de tu línea de comandos.
 
-# 4. Generar o verificar el archivo .env local con las variables de Docker Compose
+# 4. Asegurar .env con los defaults de Docker local (SAGA_TIMEOUT_SECONDS=60)
 python scripts/setup_env.py
-```
 
-#### Paso 3 — Levantar los contenedores y comprobarlos en Docker Desktop y Terminal
-En la misma terminal (con `(.venv)` activo), levanta PostgreSQL, Redis y RabbitMQ:
-
-```powershell
-# 1. Levantar los contenedores en segundo plano
-docker compose up -d
-
-# 2. Verificar en la terminal que los 3 servicios estén en estado "healthy"
+# 5. Levantar PostgreSQL, Redis y RabbitMQ y esperar estado healthy
+docker compose up -d postgres redis rabbitmq
 docker compose ps
 ```
 
-**Cómo comprobarlo paso a paso dentro de Docker Desktop:**
-1. Ve a la ventana de **Docker Desktop → Containers**.
-2. Despliega el grupo llamado `orders-backend`.
-3. Confirma que los 3 contenedores tengan el círculo verde (**Running**):
-   - `ordenes-postgres` (Puerto `5432:5432`)
-   - `ordenes-redis` (Puerto `6379:6379`)
-   - `ordenes-rabbitmq` (Puertos `5672:5672` y `15672:15672`)
-4. Desde Docker Desktop puedes hacer clic sobre cualquiera de los 3 contenedores para:
-   - Ver la pestaña **Logs** en tiempo real.
-   - Abrir la pestaña **Exec** (terminal interna del contenedor) o **Stats** (uso de CPU/RAM).
+##### Modo B — Stack Completo de 6 Contenedores en Docker (`docker-compose.yml` + `docker-compose.ci.yml`)
 
-#### Paso 4 — Ejecutar migraciones de PostgreSQL e inyectar los datos de prueba (*Seed*)
-Debido a que el microservicio implementa una Saga coreografiada (una orden solo pasa a `RESERVED` / `IN_PREPARATION` cuando el microservicio de Inventario emite `inventario.stock.reservado`), una base de datos recién migrada está vacía y no mostraría órdenes en la cola del KDS. Para solucionarlo durante pruebas manuales y demostraciones, ejecuta las migraciones seguidas del script `scripts/seed_demo.py`:
+Al combinar `docker-compose.yml` y `docker-compose.ci.yml`, Docker construye **3 imágenes de aplicación** desde `Dockerfile` (`python:3.12-slim` + `requirements/runtime.txt`, con `websockets==15.0.1` para `/ws/kds` y `/ws/waiter`, y `healthcheck` con Python `urllib` sin requerir `curl`) y levanta **6 contenedores en total**:
+
+| Servicio Compose | Imagen | Contenedor | Puerto(s) en host | Rol |
+|---|---|---|---|---|
+| `postgres` | `postgres:16-alpine` | `ordenes-postgres` | `${POSTGRES_PORT:-5432}:5432` | Base ACID (`shifts`, `orders`, `order_items`, `outbox`, `processed_events`) |
+| `redis` | `redis:7-alpine` | `ordenes-redis` | `6379:6379` | Vista materializada del catálogo (`catalog:platillo:*`) + puente Pub/Sub WS |
+| `rabbitmq` | `rabbitmq:3-management-alpine` | `ordenes-rabbitmq` | `5672:5672`, `15672:15672` | Broker de eventos (`ordenes.topic`, `inventory.topic`, `menu.topic`, `sala.events`) + Panel UI |
+| `api` | `orders-backend-api` *(creada desde `Dockerfile`)* | `ordenes-api-ci` | `8000:8000` | API FastAPI REST + WebSockets (`/ws/kds`, `/ws/waiter`) |
+| `workers` | `orders-backend-workers` *(creada desde `Dockerfile`)* | `ordenes-workers-ci` | — *(red interna)* | `python -m app.workers.run_all` (Outbox, Saga Watcher, Consumer AMQP, Reconciliador; espera a `api` healthy) |
+| `stubs` | `orders-backend-stubs` *(creada desde `Dockerfile`)* | `ordenes-stubs-ci` | — *(red interna)* | `python -m app.stubs.runner` (Stubs de contrato de Inventario y Pagos sobre RabbitMQ; espera a `rabbitmq` healthy) |
 
 ```powershell
-# 1. Crear/actualizar las tablas en PostgreSQL (orders, order_items, outbox, processed_events)
-alembic upgrade head
+cd C:\ruta\a\orders-backend
 
-# 2. Inyectar el catálogo de platillos en Redis y 4 órdenes de prueba en PostgreSQL
-python scripts/seed_demo.py
+# 1. Definir en consola las URLs internas de la red Docker para Compose
+#    Por qué: Docker Compose lee primero tu .env; si tu .env local apunta a
+#    127.0.0.1:5433 o a una URL externa de AMQP, los contenedores fallarían al
+#    intentar conectarse a los servicios hermanos si no sobrescribes estas variables.
+$env:DATABASE_URL="postgresql+asyncpg://ordenes:ordenes@postgres:5432/ordenes"
+$env:REDIS_URL="redis://redis:6379/0"
+$env:RABBITMQ_URL="amqp://ordenes:ordenes@rabbitmq:5672/"
+$env:SAGA_TIMEOUT_SECONDS="60"
+# Descomenta esta línea si un PostgreSQL local ocupa el puerto 5432 en tu máquina:
+# $env:POSTGRES_PORT="5433"
 
-# TIP: Si durante las pruebas modificas, anulas o cancelas las órdenes y quieres
-# regresarlas a su estado original limpio, ejecuta en cualquier momento:
-python scripts/seed_demo.py --reset
+# 2. Compilar todas las imágenes (`api`, `workers`, `stubs`) y levantar los 6 contenedores
+docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.ci.yml ps
+docker images | Select-String "orders-backend|postgres|redis|rabbitmq"
+
+# 3. Aplicar migraciones Alembic dentro del contenedor de la API
+docker exec ordenes-api-ci alembic upgrade head
 ```
 
-**Tabla de referencia de los datos insertados por `seed_demo.py`:**
+> **Importante (`Dockerfile` y `scripts/`):** El `Dockerfile` copia `app/`, `alembic.ini`, `contracts/events/` y `ops/staging/staging-smoke.py`, pero intencionalmente **no** incluye la carpeta `scripts/`. Por ello:
+> - Ejecuta `alembic upgrade head` dentro del contenedor (`docker exec ordenes-api-ci alembic upgrade head`).
+> - Ejecuta `python scripts/seed_demo.py --reset` y `python scripts/dev_token.py` desde el **`.venv` de tu máquina host** contra los puertos expuestos (`localhost:5432` o `5433`, y `localhost:6379`), como indica el Paso 3.
+> - Si utilizas el **Modo B**, omite el Paso 4 siguiente (API, workers y stubs ya están corriendo en Docker en el puerto `8000`).
 
-| UUID de la Orden (`orderId`) | Mesa | Estado Inicial | UUID del Ítem Principal (`itemId`) | Qué probar con esta orden |
-|---|---|---|---|---|
-| `11111111-1111-1111-1111-111111111111` | Mesa 5 | `RESERVED` | `11111111-0000-0000-0000-000000000001` | Aparece en la cola activa del KDS (`GET /kds/queue`). Lista para probar iniciar preparación (`PATCH /orders/{orderId}/start-preparation`) o rechazo de cocina (`kitchen-reject`). |
-| `22222222-2222-2222-2222-222222222222` | Mesa 12 | `IN_PREPARATION` | `22222222-0000-0000-0000-000000000001` | Aparece en cocción en el KDS. Lista para probar marcar ítem como listo (`PATCH .../items/{itemId}/ready`), anulación administrativa con cargo (`PATCH .../void`, rol `admin`) o anulación por error de cocina sin cargo (`PATCH .../void-kitchen-error`, rol `chef`). |
-| `33333333-3333-3333-3333-333333333333` | Mesa 3 | `DELIVERED` | `33333333-0000-0000-0000-000000000001` | Aparece en la pestaña de entregadas (`GET /kds/queue?view=delivered`). Lista para probar rehechura de platillo (`PATCH .../items/{itemId}/redo`) o cierre de cuenta (`POST /orders/{orderId}/close-bill`). |
-| `44444444-4444-4444-4444-444444444444` | Mesa 8 | `CREATED` | `44444444-0000-0000-0000-000000000001` | Orden en borrador de mesero. Lista para probar edición de platillos (`PATCH /orders/{orderId}/items`), transferencia de mesa (`PATCH .../transfer`), confirmación (`POST .../confirm`) o cancelación (`PATCH .../cancel`). |
-
-*Platillos cargados en Redis (`dish_id`):*
-- **Disponibles (`available=true`):** `dish-tacos`, `dish-horchata`, `dish-arrachera`, `dish-guacamole`, `dish-hamburguesa`, `dish-ensalada`.
-- **Agotado (`available=false`):** `dish-agotado` (útil para probar que `PATCH /orders/{orderId}/items` rechaza platillos no disponibles con `422 DISH_UNAVAILABLE`).
-
-#### Paso 5 — Generar tokens JWT por rol y levantar el servidor de la API
-En la misma terminal (con `(.venv)` activo):
+#### Paso 3 — Ejecutar Migraciones y Cargar Datos Demo
 
 ```powershell
-# 1. Generar tokens JWT (válidos por 24 horas) para cada rol del sistema
+# Activar el .venv del host (necesario para seed_demo.py y dev_token.py en Modo A y Modo B)
+.\.venv\Scripts\Activate.ps1
+
+# 1. (Solo Modo A — omítelo si ya aplicaste migraciones con `docker exec` en Modo B)
+alembic upgrade head
+
+# 2. Poblar catálogo en Redis + Turno #1 + 8 órdenes demo con UUIDv4 aleatorios nuevos
+python scripts/seed_demo.py --reset
+
+# Otros modos útiles del seeder:
+# python scripts/seed_demo.py                 # Siembra solo si el turno activo tiene 0 órdenes (UUIDv4 aleatorios)
+# python scripts/seed_demo.py --catalog-only  # Carga solo el catálogo en Redis y abre Turno #1 (0 órdenes)
+```
+
+> **Nota sobre los UUID:** Cada ejecución de `python scripts/seed_demo.py` o `python scripts/seed_demo.py --reset` genera **UUIDv4 aleatorios nuevos** para cada `orderId` e `itemId`, e imprime los 8 `OrderId` generados directamente en la consola. También puedes consultarlos en todo momento mediante `GET /orders` o `GET /kds/queue`. *(El flag `--fixed-ids` solo permanece como opción heredada para scripts estáticos; ya no es el flujo por defecto.)*
+
+**Tabla de referencia por Folio de Turno (`seed_demo.py`, alineado a `TEST_DATA.md` de Inventario):**
+
+| Folio | Ubicación | Estado Inicial | Platillos Sembrados | Qué probar con esta orden |
+|---|---|---|---|---|
+| `#1` | Mesa 5 | `RESERVED` | 2× `PLATE-BURGER-01`, 1× `PLATE-QUES-01` | Cola activa KDS. Probar `PATCH /orders/{orderId}/start-preparation` o `PATCH .../items/{itemId}/kitchen-reject`. |
+| `#2` | Mesa 12 | `IN_PREPARATION` | 2× `PLATE-QUES-01` (`PENDING`), 1× `PLATE-CESAR-01` (`READY`) | Cola activa KDS. Probar `PATCH .../items/{itemId}/ready`, anulación admin (`PATCH .../void`) o error de cocina (`PATCH .../void-kitchen-error`). |
+| `#3` | Mesa 3 | `DELIVERED` | 2× `PLATE-BURGER-01` (`DELIVERED`) | Pestaña Entregadas (`GET /kds/queue?view=delivered`). Probar rehechura (`PATCH .../items/{itemId}/redo`) o solicitud de cuenta (`POST /orders/{orderId}/request-bill`). |
+| `#4` | Mesa 8 | `CREATED` | 1× `PLATE-BURGER-01`, 1× `PLATE-CESAR-01` | Borrador. Probar `PATCH /orders/{orderId}/items`, `PATCH .../transfer`, `POST /orders/{orderId}/confirm` (dispara Saga en RabbitMQ) o `PATCH .../cancel`. |
+| `#5` | Para llevar | `CREATED` | 2× `PLATE-QUES-01`, 1× `PLATE-SIM-0001` | Borrador para llevar (`isTakeaway: true`). Ideal para probar `POST /orders/{orderId}/confirm` con stubs o eventos manuales en RabbitMQ. |
+| `#6` | Mesa 15 | `RESERVED` | `PLATE-BURGER-01`, `PLATE-QUES-01`, `PLATE-CESAR-01`, `PLATE-SIM-0001` | Prueba multi-estación en KDS (`parrilla` + `fria`). |
+| `#7` | Mesa 9 | `REJECTED` | 2× `PLATE-BURGER-01`, 1× `PLATE-QUES-01` | Orden rechazada con `rejectionDetails`. Reabrir borrador con `PATCH .../items` o cancelar. |
+| `#8` | Mesa 11 | `RESERVED` | 1× `PLATE-CESAR-01` | Reservada hace > 15 min (pestaña `Caducados` del KDS con ventana de gracia de 10 min). |
+
+*Catálogo en Redis (`catalog:platillo:<id>`):*
+- **Disponibles (`available=true`):** `PLATE-BURGER-01` (`OFFER-BURGER-01`), `PLATE-QUES-01` (`OFFER-QUES-01`), `PLATE-CESAR-01` (`OFFER-CESAR-01`), `PLATE-SIM-0001` (`OFFER-SIM-0001`).
+- **Agotado (`available=false`, responde `422 DISH_UNAVAILABLE`):** `PLATE-AGOTADO-01`.
+
+#### Paso 4 — Generar Tokens JWT de Desarrollo y Arrancar API + Workers (Modo A)
+
+```powershell
+# 1. Generar tokens JWT de desarrollo válidos por 24 horas
 python scripts/dev_token.py --role waiter --ttl 86400
 python scripts/dev_token.py --role kitchen --ttl 86400
 python scripts/dev_token.py --role chef --ttl 86400
 python scripts/dev_token.py --role admin --ttl 86400
 
-# 2. Arrancar la API de FastAPI (expuesta en 0.0.0.0:8000 para pruebas locales o en red local)
+# 2. Terminal 1 — Levantar FastAPI (REST + WebSockets /ws/kds y /ws/waiter)
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-*(Opcional)* Si deseas que también estén corriendo el **Event Outbox Worker** (que publica los eventos de la tabla `outbox` hacia RabbitMQ) y el **Saga Timeout Watcher** (que expira órdenes confirmadas sin respuesta de Inventario tras 60 s), abre una **segunda terminal de PowerShell**, activa `.venv` y ejecuta:
+En una **segunda terminal de PowerShell**, inicia los workers en segundo plano (necesarios para publicar el `outbox`, vigilar el timeout de Saga de 60 s y consumir eventos de RabbitMQ):
 
 ```powershell
+cd C:\ruta\a\orders-backend
 .\.venv\Scripts\Activate.ps1
 python -m app.workers.run_all
 ```
 
-#### Paso 6 — Probar manualmente en Swagger UI (`/docs`) y verificar desde Docker Desktop
-1. Abre en tu navegador **`http://localhost:8000/docs`**.
-2. Haz clic en el botón verde **Authorize** (arriba a la derecha), pega el token JWT del rol que quieras probar (solo el código del token, **sin** la palabra `Bearer`) y haz clic en **Authorize**.
-3. Prueba los endpoints copiando y pegando los UUIDs de la tabla del Paso 4:
-   - Con token de **`waiter`** o **`admin`**: prueba `GET /orders`, `POST /orders`, `PATCH /orders/{orderId}/items`, `PATCH /orders/{orderId}/transfer`, `POST /orders/{orderId}/confirm`, `POST /orders/{orderId}/close-bill`.
-   - Con token de **`kitchen`**, **`chef`** o **`admin`**: prueba `GET /kds/queue`, `PATCH /orders/{orderId}/start-preparation`, `PATCH /orders/{orderId}/items/{itemId}/ready`.
-   - Con token de **`chef`** o **`admin`**: prueba `PATCH /orders/{orderId}/void-kitchen-error`.
-   - Con token de **`admin`**: prueba `PATCH /orders/{orderId}/void` (si intentas llamarlo con un token de `waiter` o `kitchen`, verificarás que responde `403 FORBIDDEN_ROLE`).
-4. **Cómo verificar en vivo los cambios desde Docker Desktop:**
-   - En **Docker Desktop → Containers**, haz clic sobre `ordenes-postgres` y entra a la pestaña **Exec**.
-   - Ejecuta este comando para ver cómo cambian los estados y versiones (`version`) de las órdenes en PostgreSQL:
-     ```sql
-     psql -U ordenes -d ordenes -c "SELECT public_id, table_number, status, total_amount, version FROM orders ORDER BY table_number;"
+#### Paso 5 — Verificar Salud, Swagger UI y Persistencia
+
+1. Verifica que las cuatro rutas de salud respondan `200 {"status": "ok"}`:
+   - `http://localhost:8000/health`
+   - `http://localhost:8000/api/v1/health`
+   - `http://localhost:8000/api/v1/orders/health`
+   - `http://localhost:8000/api/v1/kitchen/health`
+2. Abre **`http://localhost:8000/docs`**, haz clic en **Authorize**, pega uno de los JWT del Paso 4 (sin la palabra `Bearer`) y prueba:
+   - `waiter` / `admin`: `GET /orders` (copia los `orderId` reales de `#1`..`#8`), `POST /orders`, `PATCH /orders/{orderId}/items`, `PATCH /orders/{orderId}/transfer`, `POST /orders/{orderId}/confirm`, `POST /orders/{orderId}/request-bill`.
+   - `kitchen` / `chef` / `admin`: `GET /kds/queue`, `PATCH /orders/{orderId}/start-preparation`, `PATCH /orders/{orderId}/items/{itemId}/ready`.
+   - `chef` / `admin`: `GET /shifts/current`, `POST /shifts/open`, `POST /shifts/current/close`, `PATCH /orders/{orderId}/void-kitchen-error`.
+   - `admin`: `PATCH /orders/{orderId}/void`.
+3. Inspecciona directamente PostgreSQL y Redis:
+   ```powershell
+   # PostgreSQL: órdenes y eventos en outbox
+   docker exec ordenes-postgres psql -U ordenes -d ordenes -c "SELECT public_id, shift_folio, table_number, status, total_amount, version FROM orders ORDER BY id;"
+   docker exec ordenes-postgres psql -U ordenes -d ordenes -c "SELECT id, event_id, event_type, correlation_id, published_at FROM outbox ORDER BY id;"
+
+   # Claves del catálogo en Redis
+   docker exec ordenes-redis redis-cli keys "catalog:platillo:*"
+   ```
+
+#### Paso 6 — Pruebas End-to-End con RabbitMQ Real
+
+1. **Inspeccionar exchanges y colas en RabbitMQ UI (`http://localhost:15672`, usuario `ordenes`, contraseña `ordenes`):**
+   - **Exchanges (durables `topic`):** `ordenes.topic`, `inventory.topic`, `menu.topic`, `sala.events`.
+   - **Colas (durables):**
+     - `orders.inventory.inbound` (declarada por `workers`, enlazada a `inventory.reservation.*`, `inventario.stock.*`, `menu.#`, `sala.#`, `pagos.#`, `payments.#`, `pago.#`, etc.).
+     - `stubs.orders.inbound` (declarada por `stubs`, enlazada a `ordenes.orden.creada`, `ordenes.orden.cancelada`, `ordenes.orden.expirada`, `ordenes.cuenta.solicitada`, `ordenes.cobro.solicitado`).
+
+2. **Flujo 6A — Ciclo completo automático en RabbitMQ real (con `stubs` activo):**
+   - Verifica que `ordenes-workers-ci` y `ordenes-stubs-ci` estén corriendo (Modo B) — o en Modo A levanta `python -m app.stubs.runner` en una 3ra terminal.
+   - Confirma el borrador Folio `#4` (`CREATED`, Mesa 8) usando su `orderId` real impreso por `seed_demo.py`:
+     ```powershell
+     $WAITER_JWT = (python scripts/dev_token.py --role waiter | Select-String '^Bearer\s+(\S+)$').Matches[0].Groups[1].Value
+     $ORDER_ID = "<orderId-real-del-folio-4>"
+     Invoke-RestMethod -Method Post -Uri "http://localhost:8000/orders/$ORDER_ID/confirm" `
+       -Headers @{ Authorization = "Bearer $WAITER_JWT" }
      ```
-   - Ejecuta este comando para ver los eventos transaccionales escritos en la tabla `outbox`:
-     ```sql
-     psql -U ordenes -d ordenes -c "SELECT id, event_type, aggregate_id, published_at FROM outbox ORDER BY id;"
+   - Traza del recorrido real por RabbitMQ:
+     1. `OutboxWorker` publica `ordenes.orden.creada` en `ordenes.topic` y llena `outbox.published_at`.
+     2. `ordenes-stubs-ci` (`InventoryStub`, por defecto `INVENTORY_STUB_MODE=RESERVE`) la consume y responde `inventario.stock.reservado`.
+     3. `ordenes-workers-ci` (`InboundConsumerWorker`) consume `inventario.stock.reservado` de `orders.inventory.inbound`, registra el evento en `processed_events` y transiciona la orden a `RESERVED` (notificando en vivo a `/ws/kds`).
+   - Verifica con `GET /orders/$ORDER_ID` (estado `RESERVED`) y logs: `docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --tail=30 workers stubs`.
+   - Prueba también `POST /orders/<orderId-real-del-folio-3>/request-bill` (orden `DELIVERED`): `BillingStub` (`BILLING_STUB_AUTO_PAY=true`) publica `pagos.pago.completado` y la orden pasa a `PAID`.
+   - Puedes cambiar el comportamiento del stub con variables de entorno (`INVENTORY_STUB_MODE=RESERVE|REJECT|SILENT|DELAYED|ATOMIC`, `BILLING_STUB_AUTO_PAY=true|false`).
+
+3. **Flujo 6B — Pruebas manuales con eventos reales SIN `stubs`:**
+   - Detén `stubs` para que la Saga espere mensajes reales en el broker:
+     ```powershell
+     docker compose -f docker-compose.yml -f docker-compose.ci.yml stop stubs
      ```
-   - Ejecuta este comando en la pestaña **Exec** de `ordenes-redis` para inspeccionar el catálogo en caché:
-     ```sh
-     redis-cli keys "catalog:platillo:*"
-     ```
-   - Para ver las colas e intercambios de eventos en **RabbitMQ**, abre **`http://localhost:15672`** en el navegador e inicia sesión con el usuario y contraseña locales configurados en tu `.env`.
+   - Confirma la orden Folio `#5` (`CREATED`, Para llevar) con `POST /orders/<orderId-real-del-folio-5>/confirm`: permanecerá en `CREATED` esperando respuesta de Inventario.
+   - En RabbitMQ UI (`http://localhost:15672`) → **Exchanges** → **`inventory.topic`** → **Publish message**:
+     - Para **reservar** stock, usa **Routing key** = `inventario.stock.reservado` y **Payload**:
+       ```json
+       {
+         "eventId": "<nuevo-uuid-v4>",
+         "orderId": "<orderId-real-del-folio-5>",
+         "correlationId": "<orderId-real-del-folio-5>",
+         "reservations": [{"offerId": "OFFER-QUES-01", "quantity": 2}],
+         "reservas": [{"offerId": "OFFER-QUES-01", "quantity": 2}]
+       }
+       ```
+     - Para simular **stock insuficiente**, usa **Routing key** = `inventario.stock.insuficiente` y **Payload**:
+       ```json
+       {
+         "eventId": "<nuevo-uuid-v4>",
+         "orderId": "<orderId-real-de-la-orden>",
+         "correlationId": "<orderId-real-de-la-orden>",
+         "missingIngredients": ["pan"],
+         "faltantes": ["pan"],
+         "rejectedItems": [{"offerId": "OFFER-BURGER-01", "requestedQuantity": 1, "availableQuantity": 0}],
+         "reservedItems": []
+       }
+       ```
+     - Para simular **pago completado** sobre una orden `DELIVERED`, entra al exchange **`ordenes.topic`**, usa **Routing key** = `pagos.pago.completado` y **Payload**:
+       ```json
+       {
+         "eventId": "<nuevo-uuid-v4>",
+         "orderId": "<orderId-real-de-la-orden>",
+         "sessionId": "00000000-0000-0000-0000-000000000099",
+         "totalPaid": 330.0,
+         "status": "PAID"
+       }
+       ```
+   - Consulta `GET /orders/{orderId}` para confirmar la transición y revisa `processed_events` en PostgreSQL (si reenvías exactamente el mismo `eventId`, se descarta por idempotencia).

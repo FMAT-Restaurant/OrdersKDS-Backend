@@ -17,7 +17,12 @@ from app.messaging.events import (
     OrderCreatedEvent,
     OrderExpiredEvent,
 )
-from app.messaging.validator import EventContractError, load_schema, validate_event_payload
+from app.messaging.validator import (
+    EventContractError,
+    get_validator,
+    load_schema,
+    validate_event_payload,
+)
 
 
 @pytest.mark.unit
@@ -107,3 +112,11 @@ def test_schema_non_dict_raises(tmp_path: Path) -> None:
 
     with pytest.raises(EventContractError, match="not a valid JSON object"):
         load_schema("array", schema_dir=tmp_path)
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("RNF-13", "CT-23")
+def test_get_validator_reuses_cached_compiled_instance() -> None:
+    first = get_validator(EventName.ORDER_CREATED)
+    second = get_validator(EventName.ORDER_CREATED)
+    assert first is second

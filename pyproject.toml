@@ -82,6 +82,9 @@ markers = [
     "security: OWASP ZAP / security scans",
     "requirement(*ids): traceability to RF-XX / RNF-XX requirement ids (Guidelines §11.3)",
 ]
+filterwarnings = [
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated:UserWarning",
+]
 
 # ---------------------------------------------------------------------------
 # Coverage — mirrors the thresholds in DEVELOPMENT_GUIDELINES §11.4

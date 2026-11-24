@@ -16,8 +16,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.error_codes import ErrorCode
-from app.db.models import Order, OrderItem
+from app.db.models import Order, OrderItem, Shift
 from app.domain.order_status import OrderStatus
+from app.domain.shift import ShiftStatus
 from tests.unit.api.conftest import FakeAsyncSession
 
 pytestmark = [
@@ -64,7 +65,9 @@ def test_confirm_order_stages_deterministic_event_and_records_actor(
     outbox = fake_session.outbox_rows[0]
     assert outbox.event_type == "ordenes.orden.creada"
     assert outbox.payload["orderId"] == str(order.public_id)
-    assert outbox.payload["items"] == [{"offerId": "dish-1", "quantity": 2}]
+    assert outbox.payload["items"] == [
+        {"offerId": "dish-1", "plateId": "dish-1", "sourceId": "dish-1", "quantity": 2}
+    ]
 
 
 def test_confirm_order_rejects_items_without_inventory_identifier(
@@ -309,4 +312,160 @@ def test_reconfirm_reopened_order_generates_distinct_event_id(
     event_id_2 = payload_2["eventId"]
 
     assert event_id_1 != event_id_2
-    assert payload_2["items"] == [{"offerId": "dish-101", "quantity": 1}]
+    assert payload_2["items"] == [
+        {"offerId": "dish-101", "plateId": "dish-101", "sourceId": "dish-101", "quantity": 1}
+    ]
+
+
+def test_confirm_order_rejected_with_409_when_shift_is_closed(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+) -> None:
+    """Draft CREATED order cannot be confirmed after the operational shift closes."""
+    fake_session.add(
+        Shift(
+            public_id=uuid4(),
+            shift_number=1,
+            status=ShiftStatus.CLOSED,
+            last_order_folio=2,
+        )
+    )
+    order = Order(
+        public_id=uuid4(),
+        table_number=7,
+        status=OrderStatus.CREATED,
+        version=1,
+    )
+    order.items.append(
+        OrderItem(
+            public_id=uuid4(),
+            dish_id="dish-101",
+            name="Guacamole",
+            quantity=1,
+            unit_price=Decimal("50.00"),
+        )
+    )
+    test_db[order.public_id] = order
+
+    response = client.post(
+        f"/orders/{order.public_id}/confirm",
+        headers=auth_headers("waiter"),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == ErrorCode.INVALID_STATE_TRANSITION
+    assert order.confirmed_at is None
+    assert order.confirmed_by is None
+    assert fake_session.outbox_rows == []
+    assert fake_session.committed is False
+
+
+def test_confirm_order_succeeds_when_shift_is_open(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+) -> None:
+    """Confirming a draft order succeeds and stages outbox event while a shift is OPEN."""
+    fake_session.add(
+        Shift(
+            public_id=uuid4(),
+            shift_number=2,
+            status=ShiftStatus.OPEN,
+            last_order_folio=0,
+        )
+    )
+    order = Order(
+        public_id=uuid4(),
+        table_number=8,
+        status=OrderStatus.CREATED,
+        version=1,
+    )
+    order.items.append(
+        OrderItem(
+            public_id=uuid4(),
+            dish_id="dish-102",
+            name="Hamburguesa",
+            quantity=1,
+            unit_price=Decimal("120.00"),
+        )
+    )
+    test_db[order.public_id] = order
+
+    response = client.post(
+        f"/orders/{order.public_id}/confirm",
+        headers=auth_headers("waiter"),
+    )
+
+    assert response.status_code == 200
+    assert order.confirmed_at is not None
+    assert len(fake_session.outbox_rows) == 1
+    assert fake_session.committed is True
+
+
+def test_confirm_order_already_awaiting_stock_stays_idempotent_after_shift_close(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+    fake_session: FakeAsyncSession,
+) -> None:
+    """Already-confirmed orders awaiting stock remain idempotent even if shift closes later."""
+    fake_session.add(
+        Shift(
+            public_id=uuid4(),
+            shift_number=1,
+            status=ShiftStatus.CLOSED,
+            last_order_folio=1,
+        )
+    )
+    confirmed_at = datetime.now(UTC)
+    order = Order(
+        public_id=uuid4(),
+        table_number=2,
+        status=OrderStatus.CREATED,
+        confirmed_at=confirmed_at,
+        confirmed_by=uuid4(),
+    )
+    test_db[order.public_id] = order
+
+    response = client.post(
+        f"/orders/{order.public_id}/confirm",
+        headers=auth_headers("waiter"),
+    )
+
+    assert response.status_code == 200
+    assert order.confirmed_at == confirmed_at
+    assert fake_session.outbox_rows == []
+
+
+def test_list_orders_under_api_v1_orders_prefix_returns_200_and_detail_still_resolves(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+    test_db: dict[UUID, Order],
+) -> None:
+    """Kong /api/v1/orders prefix resolves list_orders cleanly alongside UUID detail paths."""
+    order = Order(
+        public_id=uuid4(),
+        table_number=6,
+        status=OrderStatus.CREATED,
+        version=1,
+    )
+    test_db[order.public_id] = order
+
+    list_resp = client.get("/api/v1/orders/orders", headers=auth_headers("waiter"))
+    assert list_resp.status_code == 200
+    listed_ids = [item["orderId"] for item in list_resp.json()]
+    assert str(order.public_id) in listed_ids
+
+    detail_resp = client.get(f"/api/v1/orders/{order.public_id}", headers=auth_headers("waiter"))
+    assert detail_resp.status_code == 200
+    assert detail_resp.json()["orderId"] == str(order.public_id)
+
+    gateway_detail_resp = client.get(
+        f"/api/v1/orders/orders/{order.public_id}",
+        headers=auth_headers("waiter"),
+    )
+    assert gateway_detail_resp.status_code == 200
+    assert gateway_detail_resp.json()["orderId"] == str(order.public_id)
