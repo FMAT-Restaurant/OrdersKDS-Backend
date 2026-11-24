@@ -510,9 +510,7 @@ def _build_order_from_spec(
 
 def _build_demo_orders(now: datetime, *, fixed_ids: bool = False) -> list[Order]:
     """Create demo Order aggregates aligned to Inventory TEST_DATA.md."""
-    return [
-        _build_order_from_spec(spec, now, fixed_ids=fixed_ids) for spec in _SEED_ORDER_SPECS
-    ]
+    return [_build_order_from_spec(spec, now, fixed_ids=fixed_ids) for spec in _SEED_ORDER_SPECS]
 
 
 def _build_demo_shift(

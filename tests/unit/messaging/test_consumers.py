@@ -601,9 +601,7 @@ async def test_inventory_reservation_expired_transitions_reserved_and_dedups_saf
     assert dlq.dead_letters == []
     assert order.status is OrderStatus.EXPIRED
     assert len(notifier.notified_orders) == 1
-    expected_dedup = _dedup_event_id(
-        ReservationExpiredMessage.model_validate(payload)
-    )
+    expected_dedup = _dedup_event_id(ReservationExpiredMessage.model_validate(payload))
     assert expected_dedup != shared_event_id
     processed_repo.add.assert_called_once_with(
         event_id=expected_dedup,

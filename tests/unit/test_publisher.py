@@ -361,10 +361,9 @@ async def test_publish_populates_non_null_correlation_id_from_payload_or_event_i
 
     # Helper fallback to event_id when neither correlationId nor orderId is present
     fallback_event_id = uuid4()
-    assert (
-        _resolve_correlation_id({"correlationId": None, "orderId": "  "}, fallback_event_id, None)
-        == str(fallback_event_id)
-    )
+    assert _resolve_correlation_id(
+        {"correlationId": None, "orderId": "  "}, fallback_event_id, None
+    ) == str(fallback_event_id)
 
 
 @pytest.mark.unit

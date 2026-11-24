@@ -152,4 +152,3 @@ async def handle_stock_insufficient(
 
     await notify_order_changed(order, notifier=notifier)
     return True
-
