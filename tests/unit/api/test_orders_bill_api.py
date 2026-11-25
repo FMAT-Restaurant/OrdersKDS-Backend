@@ -19,6 +19,7 @@ from app.core.error_codes import ErrorCode
 from app.db.models import Order, OrderItem
 from app.domain.order_status import ItemStatus, OrderStatus
 from tests.unit.api.conftest import FakeAsyncSession, SpyOrderNotifier
+from tests.unit.conftest import TokenFactory
 
 pytestmark = [
     pytest.mark.unit,
@@ -28,7 +29,7 @@ pytestmark = [
 
 def test_request_bill_publishes_frozen_prices_and_session_id(
     client: TestClient,
-    auth_headers: Callable[[str], dict[str, str]],
+    make_token: TokenFactory,
     test_db: dict[UUID, Order],
     fake_session: FakeAsyncSession,
     spy_notifier: SpyOrderNotifier,
@@ -62,7 +63,7 @@ def test_request_bill_publishes_frozen_prices_and_session_id(
 
     response = client.post(
         f"/orders/{order_id}/request-bill",
-        headers=auth_headers("waiter"),
+        headers={"Authorization": f"Bearer {make_token(role='waiter', user_id=str(waiter_id))}"},
     )
 
     assert response.status_code == 200

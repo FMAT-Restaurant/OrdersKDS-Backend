@@ -164,7 +164,7 @@ def ensure_waiter_order_ownership(order: Order, auth: AuthContext) -> None:
             caller_uuid,
             order.responsible_waiter_id,
         )
-        raise ForbiddenRoleError("Cannot modify, transfer, or cancel another waiter's order.")
+        raise ForbiddenRoleError("Cannot operate on another waiter's order.")
 
 
 def _build_charge_items(items: list[OrderItem]) -> list[ChargeRequestedItem]:
@@ -380,6 +380,7 @@ class OrderService:
         order = await self._orders.get_by_public_id(order_id, for_update=True)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
+        ensure_waiter_order_ownership(order, auth)
 
         target_item = next((i for i in order.items if i.public_id == item_id), None)
         if target_item is None:
@@ -873,6 +874,7 @@ class OrderService:
         order = await self._orders.get_by_public_id(order_id, for_update=True)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
+        ensure_waiter_order_ownership(order, auth)
 
         if order.status != OrderStatus.DELIVERED or _has_undelivered_active_items(order.items):
             raise InvalidStateTransitionError(order.status, "REQUEST_BILL")
@@ -916,9 +918,16 @@ class OrderService:
         order.confirmed_by = confirmed_by
         self._outbox.add(event)
 
-    async def confirm_order(self, order_id: UUID, confirmed_by: UUID) -> Order:
+    async def confirm_order(
+        self,
+        order_id: UUID,
+        confirmed_by: UUID,
+        auth: AuthContext | None = None,
+    ) -> Order:
         """Confirm an order and atomically stage its inventory event (OP-05, TASK-11)."""
         order = await self._orders.get_for_update(order_id)
+        if auth is not None:
+            ensure_waiter_order_ownership(order, auth)
 
         if order.status in _IDEMPOTENT_CONFIRM_STATUSES:
             return order

@@ -757,6 +757,12 @@ async def request_bill(
         "reservation without waiting for Inventory (RF-32)."
     ),
     responses={
+        status.HTTP_403_FORBIDDEN: {
+            "model": ErrorResponse,
+            "description": (
+                "Caller lacks waiter/admin role or does not own the order (`FORBIDDEN_ROLE`)."
+            ),
+        },
         status.HTTP_404_NOT_FOUND: {
             "model": ErrorResponse,
             "description": "Order not found (`ORDER_NOT_FOUND`).",
@@ -792,11 +798,13 @@ async def confirm_order(
 
     Raises:
         OrderNotFoundError: If order does not exist (404).
+        ForbiddenRoleError: If waiter does not own the order (403).
         InvalidStateTransitionError: If order is not in CREATED status or is terminal (409).
     """
     order = await order_service.confirm_order(
         order_id,
         confirmed_by=parse_actor_uuid(auth.user_id),
+        auth=auth,
     )
     return OrderResponse.from_model(order)
 
