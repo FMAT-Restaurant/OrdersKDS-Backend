@@ -197,6 +197,17 @@ def test_cp014_cors_whitelist_blocks_untrusted_origins_and_strips_wildcard(
     assert ok_preflight.headers.get("access-control-allow-credentials") == "true"
 
 
+def test_cp014_default_cors_origins_cover_all_six_microfrontends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CORS_ALLOWED_ORIGINS", raising=False)
+    allowed = get_cors_allowed_origins()
+    assert "*" not in allowed
+    for port in (3000, 5173, 5174, 5176, 5177, 5178, 5179, 8000):
+        assert f"http://localhost:{port}" in allowed
+        assert f"http://127.0.0.1:{port}" in allowed
+
+
 # ---------------------------------------------------------------------------
 # DEF-E5-008 & OBS-03 (CP-019, CP-020): Input bounds & table+takeaway exclusion
 # ---------------------------------------------------------------------------
@@ -475,6 +486,95 @@ def test_obs04_waiter_bola_ownership_blocks_other_waiter_but_allows_owner_and_ad
     assert client.patch(f"/orders/{order_id}/cancel", headers=headers_admin).status_code == 200
 
 
+def test_obs04_waiter_bola_blocks_confirm_request_bill_and_redo(
+    client: TestClient,
+    fake_session: FakeAsyncSession,
+    make_token: TokenFactory,
+) -> None:
+    now = datetime.now(UTC)
+    from scripts.seed_demo import _build_demo_shift
+
+    fake_session.add(_build_demo_shift(now, shift_number=1, fixed_ids=True))
+    waiter_a_uuid = uuid4()
+    waiter_b_uuid = uuid4()
+    headers_a = {
+        "Authorization": f"Bearer {make_token(role='waiter', user_id=str(waiter_a_uuid))}"
+    }
+    headers_b = {
+        "Authorization": f"Bearer {make_token(role='waiter', user_id=str(waiter_b_uuid))}"
+    }
+    headers_admin = {"Authorization": f"Bearer {make_token(role='admin', user_id=str(uuid4()))}"}
+
+    # 1. Confirm BOLA: Waiter B gets 403 on Waiter A's draft order; Waiter A gets 200
+    created = client.post("/orders", headers=headers_a, json={"tableNumber": 18})
+    assert created.status_code == 201
+    draft_order_id = created.json()["orderId"]
+    patched = client.patch(
+        f"/orders/{draft_order_id}/items",
+        headers=headers_a,
+        json={"items": [{"dishId": "D-1", "name": "Tacos", "quantity": 1, "unitPrice": "80.00"}]},
+    )
+    assert patched.status_code == 200
+
+    confirm_bola = client.post(f"/orders/{draft_order_id}/confirm", headers=headers_b)
+    assert confirm_bola.status_code == 403
+    assert confirm_bola.json()["error"]["code"] == ErrorCode.FORBIDDEN_ROLE.value
+
+    confirm_owner = client.post(f"/orders/{draft_order_id}/confirm", headers=headers_a)
+    assert confirm_owner.status_code == 200
+
+    # 2. Request-bill & Redo BOLA on Waiter A's DELIVERED order
+    delivered_id = uuid4()
+    delivered_item_id = uuid4()
+    delivered_order = Order(
+        public_id=delivered_id,
+        table_number=19,
+        status=OrderStatus.DELIVERED,
+        responsible_waiter_id=waiter_a_uuid,
+        total_amount=Decimal("160.00"),
+        items=[
+            OrderItem(
+                public_id=delivered_item_id,
+                dish_id="D-1",
+                name="Tacos",
+                quantity=2,
+                unit_price=Decimal("80.00"),
+                status=ItemStatus.DELIVERED,
+            )
+        ],
+    )
+    fake_session.add(delivered_order)
+
+    bill_bola = client.post(f"/orders/{delivered_id}/request-bill", headers=headers_b)
+    assert bill_bola.status_code == 403
+    assert bill_bola.json()["error"]["code"] == ErrorCode.FORBIDDEN_ROLE.value
+
+    redo_bola = client.patch(
+        f"/orders/{delivered_id}/items/{delivered_item_id}/redo",
+        headers=headers_b,
+        json={"note": "Intento de otro mesero"},
+    )
+    assert redo_bola.status_code == 403
+    assert redo_bola.json()["error"]["code"] == ErrorCode.FORBIDDEN_ROLE.value
+
+    # Owner Waiter A and Admin can request-bill; Owner Waiter A can redo
+    assert (
+        client.post(f"/orders/{delivered_id}/request-bill", headers=headers_a).status_code == 200
+    )
+    assert (
+        client.post(f"/orders/{delivered_id}/request-bill", headers=headers_admin).status_code
+        == 200
+    )
+    assert (
+        client.patch(
+            f"/orders/{delivered_id}/items/{delivered_item_id}/redo",
+            headers=headers_a,
+            json={"note": "Llegó frío"},
+        ).status_code
+        == 200
+    )
+
+
 # ---------------------------------------------------------------------------
 # DEF-E5-013 (CP-032): KDS queue reads real Redis CatalogRepository (not mock)
 # ---------------------------------------------------------------------------
@@ -682,6 +782,9 @@ async def test_obs02_payment_completed_rejects_unsettled_status_and_underpayment
     uow.orders = order_repo
     uow.processed_events = proc_repo
 
+    def _current_status() -> OrderStatus:
+        return order.status
+
     # 1. Non-settled payment status ignored
     failed_msg = PaymentCompletedMessage(
         eventId=uuid4(),
@@ -690,7 +793,7 @@ async def test_obs02_payment_completed_rejects_unsettled_status_and_underpayment
         status="FAILED",
     )
     assert await handle_payment_completed(failed_msg, uow) is False
-    assert order.status is OrderStatus.DELIVERED
+    assert _current_status() == OrderStatus.DELIVERED
 
     # 2. Partial/underpaid settlement ignored
     underpaid_msg = PaymentCompletedMessage(
@@ -700,7 +803,7 @@ async def test_obs02_payment_completed_rejects_unsettled_status_and_underpayment
         status="PAID",
     )
     assert await handle_payment_completed(underpaid_msg, uow) is False
-    assert order.status is OrderStatus.DELIVERED
+    assert _current_status() == OrderStatus.DELIVERED
 
     # 3. Exact or tipped settlement transitions order to PAID
     valid_msg = PaymentCompletedMessage(
@@ -710,7 +813,7 @@ async def test_obs02_payment_completed_rejects_unsettled_status_and_underpayment
         status="COMPLETED",
     )
     assert await handle_payment_completed(valid_msg, uow) is True
-    assert order.status is OrderStatus.PAID
+    assert _current_status() == OrderStatus.PAID
 
 
 # ---------------------------------------------------------------------------

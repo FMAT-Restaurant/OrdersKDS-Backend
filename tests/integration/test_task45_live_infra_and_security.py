@@ -76,6 +76,15 @@ def _endpoint_or_skip(env_name: str, default_url: str, default_port: int) -> str
     return url
 
 
+def _live_database_url() -> str:
+    """Resolve the live PostgreSQL URL from environment without hardcoded passwords."""
+    default_url = (
+        os.getenv("DATABASE_URL", "").strip()
+        or "postgresql+asyncpg://ordenes@127.0.0.1:5432/ordenes"
+    )
+    return _endpoint_or_skip("LIVE_DATABASE_URL", default_url, 5432)
+
+
 def _sign_live_jwt(
     *,
     secret: str,
@@ -111,11 +120,7 @@ async def test_live_postgres_and_redis_post_orders_catalog_and_kds_queue(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """DEF-E5-001, DEF-E5-010, DEF-E5-013 against real PostgreSQL and Redis."""
-    db_url = _endpoint_or_skip(
-        "LIVE_DATABASE_URL",
-        os.getenv("DATABASE_URL", "postgresql+asyncpg://ordenes:ordenes@127.0.0.1:5432/ordenes"),
-        5432,
-    )
+    db_url = _live_database_url()
     redis_url = _endpoint_or_skip(
         "LIVE_REDIS_URL",
         os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
@@ -265,11 +270,7 @@ async def test_live_rabbitmq_dlq_routes_poison_messages_and_keeps_worker_healthy
         os.getenv("RABBITMQ_URL", "amqp://ordenes:ordenes@127.0.0.1:5672/"),
         5672,
     )
-    db_url = _endpoint_or_skip(
-        "LIVE_DATABASE_URL",
-        os.getenv("DATABASE_URL", "postgresql+asyncpg://ordenes:ordenes@127.0.0.1:5432/ordenes"),
-        5432,
-    )
+    db_url = _live_database_url()
 
     engine = create_async_engine(db_url, echo=False)
     session_maker = async_sessionmaker(engine, expire_on_commit=False)
@@ -421,17 +422,18 @@ async def test_deployed_container_websocket_smoke_and_sec03_sec04() -> None:
     async with websockets.connect(f"{ws_base}/ws/waiter?token={waiter_token}") as ws_waiter:
         await ws_waiter.send(json.dumps({"action": "subscribe", "channel": "floor"}))
 
-    async def _connect_and_expect_close(ws_uri: str) -> None:
-        async with websockets.connect(ws_uri) as ws_conn:
-            await asyncio.wait_for(ws_conn.recv(), timeout=5.0)
-
-    with pytest.raises(ConnectionClosed) as unauth_ws:
-        await _connect_and_expect_close(f"{ws_base}/ws/kds")
+    async with asyncio.timeout(5.0), websockets.connect(f"{ws_base}/ws/kds") as ws_bad:
+        with pytest.raises(ConnectionClosed) as unauth_ws:
+            await ws_bad.recv()
     assert unauth_ws.value.rcvd is not None
     assert unauth_ws.value.rcvd.code == 4401
 
-    with pytest.raises(ConnectionClosed) as forbidden_ws:
-        await _connect_and_expect_close(f"{ws_base}/ws/kds?token={waiter_token}")
+    async with (
+        asyncio.timeout(5.0),
+        websockets.connect(f"{ws_base}/ws/kds?token={waiter_token}") as ws_wrong_role,
+    ):
+        with pytest.raises(ConnectionClosed) as forbidden_ws:
+            await ws_wrong_role.recv()
     assert forbidden_ws.value.rcvd is not None
     assert forbidden_ws.value.rcvd.code == 4403
 

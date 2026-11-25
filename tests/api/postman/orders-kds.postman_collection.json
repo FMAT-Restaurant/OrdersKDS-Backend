@@ -418,6 +418,35 @@
       ]
     },
     {
+      "name": "CT-03c - PATCH /orders/{id}/items after Confirm -> 409 INVALID_STATE_TRANSITION",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token_waiter}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"items\": [{\"dishId\": \"PLATE-BURGER-01\", \"offerId\": \"OFFER-BURGER-01\", \"name\": \"Hamburguesa clásica\", \"quantity\": 1, \"unitPrice\": \"165.00\"}]}"
+        },
+        "url": "{{baseUrl}}/orders/{{createdOrderId}}/items"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-03c editing confirmed order returns 409 INVALID_STATE_TRANSITION', function () {",
+              "  pm.response.to.have.status(409);",
+              "  pm.expect(pm.response.json().error.code).to.eql('INVALID_STATE_TRANSITION');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "CT-06 - PATCH /orders/{id}/cancel (Cancel Order -> 200 CANCELLED)",
       "request": {
         "method": "PATCH",
@@ -1049,6 +1078,83 @@
             "type": "text/javascript",
             "exec": [
               "pm.test('OBS-04 other waiter forbidden from mutating order (403)', function () {",
+              "  pm.response.to.have.status(403);",
+              "  pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN_ROLE');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-19e & OBS-04 - Waiter BOLA Check (Cannot Confirm Another Waiter's Order) -> 403",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token_waiter_other}}" }
+        ],
+        "url": "{{baseUrl}}/orders/{{seedDraftOrder}}/confirm"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('OBS-04 other waiter forbidden from confirming order (403)', function () {",
+              "  pm.response.to.have.status(403);",
+              "  pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN_ROLE');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-19f & OBS-04 - Waiter BOLA Check (Cannot Request Bill On Another Waiter's Order) -> 403",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token_waiter_other}}" }
+        ],
+        "url": "{{baseUrl}}/orders/{{seedDeliveredOrder}}/request-bill"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('OBS-04 other waiter forbidden from requesting bill (403)', function () {",
+              "  pm.response.to.have.status(403);",
+              "  pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN_ROLE');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-19g & OBS-04 - Waiter BOLA Check (Cannot Redo Item On Another Waiter's Order) -> 403",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token_waiter_other}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"note\": \"Intento BOLA de rehacer platillo\"}"
+        },
+        "url": "{{baseUrl}}/orders/{{seedDeliveredOrder}}/items/{{seedDeliveredItem}}/redo"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('OBS-04 other waiter forbidden from redoing item (403)', function () {",
               "  pm.response.to.have.status(403);",
               "  pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN_ROLE');",
               "});"

@@ -175,9 +175,13 @@ def an_order_exists_in_status(bdd_context: dict[str, Any], status: str) -> None:
 @when(parsers.parse('the waiter requests the bill via "{path_template}"'))
 def waiter_requests_bill(bdd_context: dict[str, Any], path_template: str) -> None:
     client: TestClient = bdd_context["client"]
-    order_id = bdd_context["order"].public_id
+    order = bdd_context["order"]
+    order_id = order.public_id
     path = path_template.replace("POST ", "").replace("{orderId}", str(order_id))
-    response = client.post(path, headers=_auth_header("waiter"))
+    response = client.post(
+        path,
+        headers=_auth_header("waiter", user_id=order.responsible_waiter_id),
+    )
     bdd_context["last_response"] = response
 
 
