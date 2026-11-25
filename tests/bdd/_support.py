@@ -35,10 +35,17 @@ from app.services.orders import OrderService, get_order_service
 from app.services.shifts import ShiftService, get_shift_service
 from tests.conftest import TEST_JWT_SECRET
 
+_DEFAULT_BDD_ROLE_IDS: dict[str, UUID] = {
+    "waiter": UUID("00000000-0000-0000-0000-000000000001"),
+    "kitchen": UUID("00000000-0000-0000-0000-000000000002"),
+    "chef": UUID("00000000-0000-0000-0000-000000000003"),
+    "admin": UUID("00000000-0000-0000-0000-000000000004"),
+}
+
 
 def auth_header(role: str = "waiter", user_id: UUID | None = None) -> dict[str, str]:
     """Build a signed Bearer JWT header matching gateway verification."""
-    caller_uuid = user_id or uuid4()
+    caller_uuid = user_id or _DEFAULT_BDD_ROLE_IDS.get(role, uuid4())
     token = jwt.encode(
         {
             "user_id": str(caller_uuid),
@@ -284,15 +291,17 @@ def bdd_client_override(
     def _get_shift_svc() -> ShiftService:
         return ShiftService(session=cast(AsyncSession, session))
 
+    active_catalog = (
+        catalog_validator if catalog_validator is not None else DefaultCatalogValidator()
+    )
+
+    def _get_catalog() -> DefaultCatalogValidator:
+        return active_catalog
+
     app.dependency_overrides[get_session] = _get_test_session
     app.dependency_overrides[get_order_service] = _get_order_svc
     app.dependency_overrides[get_shift_service] = _get_shift_svc
-    if catalog_validator is not None:
-
-        def _get_catalog() -> DefaultCatalogValidator:
-            return catalog_validator
-
-        app.dependency_overrides[get_catalog_validator] = _get_catalog
+    app.dependency_overrides[get_catalog_validator] = _get_catalog
 
     with TestClient(app) as test_client:
         yield test_client

@@ -204,7 +204,8 @@ class EventPublisher:
         if not self.is_connected or self._exchange is None:
             await self.connect()
 
-        assert self._exchange is not None
+        if self._exchange is None:
+            raise EventPublishError("RabbitMQ exchange is not initialized")
         message = aio_pika.Message(
             body=json.dumps(effective_payload).encode("utf-8"),
             delivery_mode=aio_pika.DeliveryMode.PERSISTENT,

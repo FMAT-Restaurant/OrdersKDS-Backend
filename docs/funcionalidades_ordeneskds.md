@@ -32,7 +32,7 @@ El sistema **Orders & KDS** cubre el ciclo operativo completo desde la apertura 
 7. **Rechazo físico en cocina y cancelación de ítem:** rechazo por falta física de ingrediente en cocina (`kitchen-reject`, con `availableQuantity` parcial o 0 y bloqueo automático en caché Redis si llega a 0) y cancelación individual de ítems (`ItemStatus.CANCELLED`).
 8. **Anulaciones desde cocina / administración:**
    - **Error de cocina (`VOIDED`):** exclusiva de `ADMIN` o `CHEF_MASTER` en `IN_PREPARATION` con nota obligatoria; publica `ordenes.comanda.mermada` sin cobro al cliente.
-   - **Anulación administrativa (`WASTED`):** exclusiva de `ADMIN` en `IN_PREPARATION` con bandera `chargeCustomer` (`true` emite `ordenes.cobro.solicitado`, `false` emite `ordenes.comanda.mermada`).
+   - **Anulación administrativa (`WASTED` / `VOIDED`):** exclusiva de `ADMIN` en `IN_PREPARATION` con bandera `chargeCustomer` (`true` por defecto transiciona a `WASTED` y emite conjuntamente `ordenes.comanda.mermada` + `ordenes.cobro.solicitado`; `false` transiciona a `VOIDED` y emite únicamente `ordenes.comanda.mermada` sin cobro).
 9. **Retiro automático al pagar:** al consumirse `pagos.pago.completado`, la comanda pasa a `PAID` y desaparece en tiempo real del KDS.
 
 ### 2.3 Seguridad, Mensajería y Tiempo Real Transversal

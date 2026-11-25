@@ -103,11 +103,11 @@ Documento de referencia rápida alineado al estado real del código fuente (`ord
 - **RF-25 · Emisión de cancelación y liberación de reservas**
   - **Descripción:** Al cancelar una orden se almacena atómicamente `ordenes.orden.cancelada` (`itemsCancelados`) para liberar stock en Inventario sin generar cobro al cliente.
 
-- **RF-26 · Anulación administrativa exclusiva de administrador (`WASTED`)**
-  - **Descripción:** Permite únicamente al rol/permiso administrativo (`orders:orders:void_admin`) anular una orden en `IN_PREPARATION` (`PATCH/POST /orders/{orderId}/void`), transicionando a `WASTED`.
+- **RF-26 · Anulación administrativa exclusiva de administrador (`WASTED` / `VOIDED`)**
+  - **Descripción:** Permite únicamente al rol/permiso administrativo (`orders:orders:void_admin`) anular una orden en `IN_PREPARATION` (`PATCH/POST /orders/{orderId}/void`), emitiendo siempre `ordenes.comanda.mermada` (`reason="ADMINISTRATIVE"`) hacia Inventario.
 
 - **RF-27 · Cobro configurable en anulación administrativa (`chargeCustomer`)**
-  - **Descripción:** Cuando `chargeCustomer=true` (por defecto), publica `ordenes.cobro.solicitado` con precios congelados; cuando `chargeCustomer=false`, publica `ordenes.comanda.mermada` (`reason="ADMINISTRATIVE"`) sin cobro.
+  - **Descripción:** Cuando `chargeCustomer=true` (por defecto), transiciona a `WASTED` y publica conjuntamente `ordenes.comanda.mermada` + `ordenes.cobro.solicitado` con precios congelados en la misma transacción; cuando `chargeCustomer=false`, transiciona a `VOIDED` y publica únicamente `ordenes.comanda.mermada` sin cobro.
 
 - **RF-28 · Anulación por error de cocina (`VOIDED`)**
   - **Descripción:** Permite únicamente a administrador o chef (`kitchen:orders:void_error`) anular toda una orden en `IN_PREPARATION` (`PATCH/POST /orders/{orderId}/void-kitchen-error`), transicionando a `VOIDED`.

@@ -12,7 +12,8 @@ import asyncio
 import json
 import logging
 from collections.abc import Callable
-from typing import Any, Protocol
+from dataclasses import dataclass
+from typing import Any, Final, Protocol
 
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +44,18 @@ logger = logging.getLogger(__name__)
 SessionFactory = Callable[[], AsyncSession]
 
 
+MAX_IN_MEMORY_DEAD_LETTERS: Final[int] = 500
+
+
+@dataclass(frozen=True, slots=True)
+class DispatchOutcome:
+    """Outcome of dispatching one raw broker message."""
+
+    applied: bool
+    dead_lettered: bool = False
+    reason: str | None = None
+
+
 class DLQRouter(Protocol):
     """Protocol for routing unprocessable or poison messages to a DLQ."""
 
@@ -57,9 +70,10 @@ class DLQRouter(Protocol):
 
 
 class InMemoryDLQRouter:
-    """In-memory DLQ tracker for testing and standalone operations."""
+    """Bounded in-memory DLQ tracker for testing and standalone operations."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, max_entries: int = MAX_IN_MEMORY_DEAD_LETTERS) -> None:
+        self._max_entries = max(1, max_entries)
         self.dead_letters: list[dict[str, object]] = []
 
     async def route_to_dlq(
@@ -68,7 +82,7 @@ class InMemoryDLQRouter:
         queue_name: str,
         reason: str,
     ) -> None:
-        """Record dead-letter payload with timestamp and reason."""
+        """Record dead-letter payload with bounded retention to prevent OOM."""
         await asyncio.sleep(0)
         entry = {
             "queue_name": queue_name,
@@ -76,12 +90,34 @@ class InMemoryDLQRouter:
             "reason": reason,
             "raw_message": raw_message,
         }
+        if len(self.dead_letters) >= self._max_entries:
+            self.dead_letters.pop(0)
         self.dead_letters.append(entry)
         logger.error(
             "Message sent to DLQ [%s]: %s (payload: %s)",
             entry["dlq_queue"],
             reason,
             raw_message,
+        )
+
+
+class BrokerNativeDLQRouter:
+    """Stateless DLQ logger used when RabbitMQ dead-letters rejected messages natively."""
+
+    async def route_to_dlq(
+        self,
+        raw_message: object,
+        queue_name: str,
+        reason: str,
+    ) -> None:
+        """Log structured poison-message rejection without retaining payloads in memory."""
+        del raw_message
+        await asyncio.sleep(0)
+        logger.error(
+            "Poison message rejected to broker DLQ [%s.dlq]: %s",
+            queue_name,
+            reason,
+            extra={"queue_name": queue_name, "dlq_queue": f"{queue_name}.dlq"},
         )
 
 
@@ -352,6 +388,52 @@ class EventConsumerDispatcher:
         """Return the active DLQ router instance."""
         return self._dlq_router
 
+    async def dispatch_with_outcome(
+        self,
+        raw_message: object,
+        queue_name: str,
+        event_type: str | None = None,
+    ) -> DispatchOutcome:
+        """Parse, validate, and execute handler returning explicit DLQ status (SEC-12)."""
+        parsed_data, parse_err = _parse_payload(raw_message)
+        if parse_err is not None or parsed_data is None:
+            reason = parse_err or "Empty payload"
+            await self._dlq_router.route_to_dlq(
+                raw_message=raw_message,
+                queue_name=queue_name,
+                reason=reason,
+            )
+            return DispatchOutcome(applied=False, dead_lettered=True, reason=reason)
+
+        target_event = _resolve_target_event(parsed_data, queue_name, event_type)
+        uow = self._uow_factory(self._session_factory)
+        try:
+            applied = await _execute_typed_handler(
+                target_event=target_event,
+                parsed_data=parsed_data,
+                uow=uow,
+                notifier=self._notifier,
+                catalog_consumer=self._catalog_consumer,
+            )
+            return DispatchOutcome(applied=applied, dead_lettered=False)
+        except (ValidationError, ValueError, TypeError) as err:
+            reason = f"Message validation error: {err}"
+            await self._dlq_router.route_to_dlq(
+                raw_message=raw_message,
+                queue_name=queue_name,
+                reason=reason,
+            )
+            return DispatchOutcome(applied=False, dead_lettered=True, reason=reason)
+        except Exception as exc:
+            logger.exception("Unexpected error processing message: %s", exc)
+            reason = f"Unexpected processing error: {exc}"
+            await self._dlq_router.route_to_dlq(
+                raw_message=raw_message,
+                queue_name=queue_name,
+                reason=reason,
+            )
+            return DispatchOutcome(applied=False, dead_lettered=True, reason=reason)
+
     async def dispatch_raw(
         self,
         raw_message: object,
@@ -359,37 +441,9 @@ class EventConsumerDispatcher:
         event_type: str | None = None,
     ) -> bool:
         """Parse, validate, and execute idempotent handler with DLQ fallback."""
-        parsed_data, parse_err = _parse_payload(raw_message)
-        if parse_err is not None or parsed_data is None:
-            await self._dlq_router.route_to_dlq(
-                raw_message=raw_message,
-                queue_name=queue_name,
-                reason=parse_err or "Empty payload",
-            )
-            return False
-
-        target_event = _resolve_target_event(parsed_data, queue_name, event_type)
-        uow = self._uow_factory(self._session_factory)
-        try:
-            return await _execute_typed_handler(
-                target_event=target_event,
-                parsed_data=parsed_data,
-                uow=uow,
-                notifier=self._notifier,
-                catalog_consumer=self._catalog_consumer,
-            )
-        except (ValidationError, ValueError, TypeError) as err:
-            await self._dlq_router.route_to_dlq(
-                raw_message=raw_message,
-                queue_name=queue_name,
-                reason=f"Message validation error: {err}",
-            )
-            return False
-        except Exception as exc:
-            logger.exception("Unexpected error processing message: %s", exc)
-            await self._dlq_router.route_to_dlq(
-                raw_message=raw_message,
-                queue_name=queue_name,
-                reason=f"Unexpected processing error: {exc}",
-            )
-            return False
+        outcome = await self.dispatch_with_outcome(
+            raw_message=raw_message,
+            queue_name=queue_name,
+            event_type=event_type,
+        )
+        return outcome.applied

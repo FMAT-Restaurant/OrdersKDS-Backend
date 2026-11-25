@@ -1,9 +1,11 @@
 """Authentication context, cryptographic JWT verification, and access guards.
 
-Every ``Authorization: Bearer`` token (header, query parameter, or WebSocket subprotocol)
-is cryptographically verified using :func:`app.core.config.get_auth_settings` against an
-explicit allowlist of signing algorithms (``HS256``/``HS384``/``HS512`` with ``JWT_SECRET``,
-or ``RS256``/``ES256`` with ``JWT_PUBLIC_KEY``).
+Every ``Authorization: Bearer`` token (HTTP header, or WebSocket handshake query parameter
+/ subprotocol) is cryptographically verified using :func:`app.core.config.get_auth_settings`
+against an explicit allowlist of signing algorithms (``HS256``/``HS384``/``HS512`` with
+``JWT_SECRET``, or ``RS256``/``ES256`` with ``JWT_PUBLIC_KEY``) with mandatory ``exp``.
+Query-string tokens (``?token=`` / ``?access_token=``) are strictly rejected on HTTP REST
+endpoints with ``401`` and permitted only during WebSocket handshakes.
 
 When a verified Bearer token is present, its claims are authoritative and gateway role or
 permission headers (``X-User-Roles``, ``X-User-Permissions``, ``X-User-Type``) can never
@@ -195,7 +197,12 @@ def _decode_claims(token: str) -> dict[str, Any]:
             token,
             key=verification_key,
             algorithms=[algorithm],
-            options={"verify_signature": True, "verify_exp": True, "verify_aud": False},
+            options={
+                "verify_signature": True,
+                "verify_exp": True,
+                "require": ["exp"],
+                "verify_aud": False,
+            },
         )
         if not isinstance(claims, dict):
             raise ValueError("JWT claims payload must be a JSON object")
@@ -394,11 +401,19 @@ def _token_from_ws_protocol(ws_protocol: str | None) -> str | None:
     return None
 
 
+def _is_http_rest_connection(connection: HTTPConnection) -> bool:
+    """Return True strictly for HTTP REST requests (excluding WebSocket handshakes)."""
+    scope = getattr(connection, "scope", None)
+    return isinstance(scope, dict) and scope.get("type") == "http"
+
+
 def _authorization_value(connection: HTTPConnection) -> str | None:
-    """Read token from ``Authorization`` header, query parameter, or subprotocol (SEC-09)."""
+    """Read token from ``Authorization`` header, or WS-only query/subprotocol (SEC-09)."""
     authorization = connection.headers.get("authorization")
     if authorization:
         return authorization
+    if _is_http_rest_connection(connection):
+        return None
     query_token = _token_from_query_string(getattr(connection, "scope", None))
     if query_token:
         return query_token
@@ -407,6 +422,15 @@ def _authorization_value(connection: HTTPConnection) -> str | None:
 
 def get_auth_context(connection: HTTPConnection) -> AuthContext:
     """FastAPI dependency resolving the caller of an HTTP request or WebSocket handshake."""
+    scope = getattr(connection, "scope", None)
+    if (
+        _is_http_rest_connection(connection)
+        and not connection.headers.get("authorization")
+        and _token_from_query_string(scope) is not None
+    ):
+        logger.info("url token rejected on rest endpoint")
+        raise UnauthenticatedError(_AUTH_REQUIRED_MESSAGE)
+
     authorization = _authorization_value(connection)
     if authorization:
         jwt_context = resolve_auth_context(authorization)

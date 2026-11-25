@@ -11,6 +11,7 @@ from collections.abc import Callable
 import pytest
 from fastapi.testclient import TestClient
 from starlette.requests import Request
+from starlette.websockets import WebSocket
 
 from app.api.dependencies.auth import (
     AuthContext,
@@ -379,30 +380,45 @@ def test_api_v1_and_orders_prefix_routes_mounted(client: TestClient) -> None:
     assert client.get("/api/v1/orders/kds/queue").status_code == 401
 
 
-def test_get_auth_context_from_query_params(make_token: TokenFactory) -> None:
+def test_get_auth_context_from_query_params_ws_only(make_token: TokenFactory) -> None:
     token = make_token(role="waiter", user_id="query-user")
-    req_token = Request(
+    ws_token = WebSocket(
         {
-            "type": "http",
-            "method": "GET",
+            "type": "websocket",
             "path": "/ws/waiter",
             "headers": [],
             "query_string": f"token={token}".encode(),
-        }
+        },
+        receive=None,  # type: ignore[arg-type]
+        send=None,  # type: ignore[arg-type]
     )
-    ctx = get_auth_context(req_token)
+    ctx = get_auth_context(ws_token)
     assert ctx.user_id == "query-user"
     assert ctx.role == Role.WAITER
 
-    req_access_token = Request(
+    ws_access_token = WebSocket(
         {
-            "type": "http",
-            "method": "GET",
+            "type": "websocket",
             "path": "/ws/waiter",
             "headers": [],
             "query_string": f"access_token={token}".encode(),
-        }
+        },
+        receive=None,  # type: ignore[arg-type]
+        send=None,  # type: ignore[arg-type]
     )
-    ctx2 = get_auth_context(req_access_token)
+    ctx2 = get_auth_context(ws_access_token)
     assert ctx2.user_id == "query-user"
     assert ctx2.role == Role.WAITER
+
+    for param_name in ("token", "access_token"):
+        http_req = Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/orders",
+                "headers": [],
+                "query_string": f"{param_name}={token}".encode(),
+            }
+        )
+        with pytest.raises(UnauthenticatedError):
+            get_auth_context(http_req)

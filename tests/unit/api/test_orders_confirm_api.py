@@ -218,7 +218,19 @@ def test_confirm_order_role_matrix(
     test_db: dict[UUID, Order],
 ) -> None:
     """Role matrix for POST /orders/{orderId}/confirm (RNF-03)."""
-    order = Order(public_id=uuid4(), status=OrderStatus.CREATED)
+    order = Order(
+        public_id=uuid4(),
+        status=OrderStatus.CREATED,
+        items=[
+            OrderItem(
+                public_id=uuid4(),
+                dish_id="dish-role-matrix",
+                name="Platillo Matriz",
+                quantity=1,
+                unit_price=Decimal("50.00"),
+            )
+        ],
+    )
     test_db[order.public_id] = order
 
     assert (

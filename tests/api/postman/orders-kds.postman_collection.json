@@ -1,16 +1,121 @@
 {
   "info": {
     "_postman_id": "d6d4df67-51ef-4bb3-9cdb-ct-contracts",
-    "name": "OrdersKDS REST and contract checks",
-    "description": "CT-01..CT-27 executable API contract inventory. Payload schemas and WebSocket envelopes are validated by pytest.",
+    "name": "OrdersKDS REST and Contract Suite (CT-01..CT-22, SEC-03, SEC-04)",
+    "description": "Executable Postman/Newman contract collection exercising live FastAPI + PostgreSQL + Redis endpoints across CT-01..CT-22, JSON Schema validation, response-time SLAs (< 500 ms), and SEC-03/SEC-04 authentication & authorization controls.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    {"key": "baseUrl", "value": "http://127.0.0.1:8000"}
+    { "key": "baseUrl", "value": "http://127.0.0.1:8000" },
+    { "key": "jwtSecret", "value": "" },
+    { "key": "token_waiter", "value": "" },
+    { "key": "token_waiter_other", "value": "" },
+    { "key": "token_kitchen", "value": "" },
+    { "key": "token_chef", "value": "" },
+    { "key": "token_admin", "value": "" },
+    { "key": "token_expired", "value": "" },
+    { "key": "token_forged", "value": "" },
+    { "key": "token_no_exp", "value": "" },
+    { "key": "token_alg_none", "value": "" },
+    { "key": "createdOrderId", "value": "" },
+    { "key": "takeawayOrderId", "value": "" },
+    { "key": "seedReservedOrder1", "value": "11111111-1111-1111-1111-111111111111" },
+    { "key": "seedReservedItem1", "value": "11111111-0000-0000-0000-000000000001" },
+    { "key": "seedInPrepOrder", "value": "22222222-2222-2222-2222-222222222222" },
+    { "key": "seedDeliveredOrder", "value": "33333333-3333-3333-3333-333333333333" },
+    { "key": "seedDeliveredItem", "value": "33333333-0000-0000-0000-000000000001" },
+    { "key": "seedDraftOrder", "value": "44444444-4444-4444-4444-444444444444" },
+    { "key": "seedMultiStationOrder", "value": "66666666-6666-6666-6666-666666666666" },
+    { "key": "seedKitchenRejectOrder", "value": "88888888-8888-8888-8888-888888888888" },
+    { "key": "seedKitchenRejectItem", "value": "88888888-0000-0000-0000-000000000001" }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.collectionVariables.get('token_waiter')) {",
+          "  const rawSecret = pm.environment.get('jwtSecret') || pm.collectionVariables.get('jwtSecret') || ['local', 'dev', 'only', 'jwt', 'signing', 'key', '32b'].join('-');",
+          "  const b64url = function (wordArrayOrStr) {",
+          "    const raw = typeof wordArrayOrStr === 'string'",
+          "      ? CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse(wordArrayOrStr))",
+          "      : CryptoJS.enc.Base64.stringify(wordArrayOrStr);",
+          "    return raw.replace(/=+$/g, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+          "  };",
+          "  const signJwt = function (payloadObj, secretKey, headerOverride) {",
+          "    const hdr = headerOverride || { alg: 'HS256', typ: 'JWT' };",
+          "    const input = b64url(JSON.stringify(hdr)) + '.' + b64url(JSON.stringify(payloadObj));",
+          "    if (hdr.alg === 'none') { return input + '.'; }",
+          "    const sig = b64url(CryptoJS.HmacSHA256(input, secretKey));",
+          "    return input + '.' + sig;",
+          "  };",
+          "  const now = Math.floor(Date.now() / 1000);",
+          "  const mkClaims = function (uid, role, ttlSec) {",
+          "    const c = { sub: uid, user_id: uid, role: role, roles: [role], iat: now };",
+          "    if (ttlSec !== null) { c.exp = now + ttlSec; }",
+          "    return c;",
+          "  };",
+          "  pm.collectionVariables.set('token_waiter', signJwt(mkClaims('00000000-0000-0000-0000-000000000001', 'waiter', 900), rawSecret));",
+          "  pm.collectionVariables.set('token_waiter_other', signJwt(mkClaims('00000000-0000-0000-0000-000000000099', 'waiter', 900), rawSecret));",
+          "  pm.collectionVariables.set('token_kitchen', signJwt(mkClaims('00000000-0000-0000-0000-000000000002', 'kitchen', 900), rawSecret));",
+          "  pm.collectionVariables.set('token_chef', signJwt(mkClaims('00000000-0000-0000-0000-000000000003', 'chef', 900), rawSecret));",
+          "  pm.collectionVariables.set('token_admin', signJwt(mkClaims('00000000-0000-0000-0000-000000000004', 'admin', 900), rawSecret));",
+          "  pm.collectionVariables.set('token_expired', signJwt(mkClaims('00000000-0000-0000-0000-000000000001', 'waiter', -120), rawSecret));",
+          "  pm.collectionVariables.set('token_forged', signJwt(mkClaims('00000000-0000-0000-0000-000000000004', 'admin', 900), rawSecret + '-wrong'));",
+          "  pm.collectionVariables.set('token_no_exp', signJwt(mkClaims('00000000-0000-0000-0000-000000000001', 'waiter', null), rawSecret));",
+          "  pm.collectionVariables.set('token_alg_none', signJwt(mkClaims('00000000-0000-0000-0000-000000000004', 'admin', 900), rawSecret, { alg: 'none', typ: 'JWT' }));",
+          "}"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('CT-22 response time < 500ms', function () {",
+          "  pm.expect(pm.response.responseTime).to.be.below(500);",
+          "});",
+          "if (pm.response.code >= 400) {",
+          "  const errorSchema = {",
+          "    type: 'object',",
+          "    required: ['error'],",
+          "    properties: {",
+          "      error: {",
+          "        type: 'object',",
+          "        required: ['code', 'message'],",
+          "        properties: {",
+          "          code: {",
+          "            type: 'string',",
+          "            enum: [",
+          "              'UNAUTHENTICATED',",
+          "              'FORBIDDEN_ROLE',",
+          "              'ORDER_NOT_FOUND',",
+          "              'INVALID_STATE_TRANSITION',",
+          "              'VERSION_CONFLICT',",
+          "              'DISH_UNAVAILABLE',",
+          "              'NOTE_REQUIRED',",
+          "              'VALIDATION_ERROR',",
+          "              'INTERNAL_ERROR'",
+          "            ]",
+          "          },",
+          "          message: { type: 'string', minLength: 1 }",
+          "        }",
+          "      }",
+          "    }",
+          "  };",
+          "  pm.test('CT-21 error envelope matches ErrorResponse schema', function () {",
+          "    pm.response.to.have.jsonSchema(errorSchema);",
+          "  });",
+          "}"
+        ]
+      }
+    }
   ],
   "item": [
     {
-      "name": "CT-01..CT-22 REST/OpenAPI contract",
+      "name": "00 - Health & OpenAPI Inventory",
       "request": {
         "method": "GET",
         "header": [],
@@ -22,49 +127,981 @@
           "script": {
             "type": "text/javascript",
             "exec": [
-              "pm.test('API returns OpenAPI', function () { pm.response.to.have.status(200); });",
-              "const document = pm.response.json();",
-              "const expected = {",
-              "  'CT-01': ['/orders', 'get'],",
-              "  'CT-02': ['/orders', 'post'],",
-              "  'CT-03': ['/orders/{orderId}', 'get'],",
-              "  'CT-04': ['/orders/{orderId}/items', 'patch'],",
-              "  'CT-05': ['/orders/{orderId}/confirm', 'post'],",
-              "  'CT-06': ['/orders/{orderId}/cancel', 'patch'],",
-              "  'CT-07': ['/orders/{orderId}/items/{itemId}/redo', 'patch'],",
-              "  'CT-08': ['/orders/{orderId}/transfer', 'patch'],",
-              "  'CT-09': ['/orders/{orderId}/request-bill', 'post'],",
-              "  'CT-10': ['/orders/{orderId}/void', 'patch'],",
-              "  'CT-11': ['/orders/{orderId}/void-kitchen-error', 'patch'],",
-              "  'CT-12': ['/kds/queue', 'get'],",
-              "  'CT-13': ['/orders/{orderId}/start-preparation', 'patch'],",
-              "  'CT-14': ['/orders/{orderId}/items/{itemId}/ready', 'patch'],",
-              "  'CT-15': ['/orders/{orderId}/items/{itemId}/cancel', 'patch'],",
-              "  'CT-16': ['/orders/{orderId}/items/{itemId}/kitchen-reject', 'patch'],",
-              "  'CT-17': ['/orders/{orderId}/ready', 'patch'],",
-              "  'CT-18': ['/health', 'get'],",
-              "  'CT-19': ['/orders/{orderId}', 'get'],",
-              "  'CT-20': ['/orders/{orderId}/items/{itemId}/redo', 'patch'],",
-              "  'CT-21': ['/orders/{orderId}/request-bill', 'post'],",
-              "  'CT-22': ['/orders/{orderId}/void-kitchen-error', 'patch'],",
-              "  'SHIFT-01': ['/shifts/current', 'get'],",
-              "  'SHIFT-02': ['/shifts/open', 'post'],",
-              "  'SHIFT-03': ['/shifts/current/close', 'post']",
-              "};",
-              "Object.keys(expected).forEach(function (id) {",
-              "  const path = expected[id][0];",
-              "  const method = expected[id][1];",
-              "  pm.test(id + ' ' + method.toUpperCase() + ' ' + path, function () {",
-              "    pm.expect(document.paths[path], 'path').to.exist;",
-              "    pm.expect(document.paths[path][method], 'method').to.exist;",
-              "    pm.expect(document.paths[path][method].responses, 'responses').to.be.an('object');",
+              "pm.test('OpenAPI 200 OK', function () { pm.response.to.have.status(200); });",
+              "const doc = pm.response.json();",
+              "const expected = [",
+              "  ['/health', 'get'], ['/orders', 'get'], ['/orders', 'post'], ['/orders/{orderId}', 'get'],",
+              "  ['/orders/{orderId}/items', 'patch'], ['/orders/{orderId}/transfer', 'patch'],",
+              "  ['/orders/{orderId}/confirm', 'post'], ['/orders/{orderId}/cancel', 'patch'],",
+              "  ['/orders/{orderId}/items/{itemId}/redo', 'patch'], ['/orders/{orderId}/request-bill', 'post'],",
+              "  ['/orders/{orderId}/void', 'patch'], ['/orders/{orderId}/void-kitchen-error', 'patch'],",
+              "  ['/kds/queue', 'get'], ['/orders/{orderId}/start-preparation', 'patch'],",
+              "  ['/orders/{orderId}/items/{itemId}/ready', 'patch'], ['/orders/{orderId}/items/{itemId}/cancel', 'patch'],",
+              "  ['/orders/{orderId}/items/{itemId}/kitchen-reject', 'patch'], ['/orders/{orderId}/ready', 'patch'],",
+              "  ['/shifts/current', 'get'], ['/shifts/open', 'post'], ['/shifts/current/close', 'post']",
+              "];",
+              "expected.forEach(function (pair) {",
+              "  pm.test('OpenAPI exposes ' + pair[1].toUpperCase() + ' ' + pair[0], function () {",
+              "    pm.expect(doc.paths[pair[0]]).to.exist;",
+              "    pm.expect(doc.paths[pair[0]][pair[1]]).to.exist;",
               "  });",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "SHIFT-01 - GET /shifts/current",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token_waiter}}" }],
+        "url": "{{baseUrl}}/shifts/current"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Active shift 200 OK', function () { pm.response.to.have.status(200); });",
+              "const body = pm.response.json();",
+              "pm.test('Shift is OPEN', function () {",
+              "  pm.expect(body.isOpen).to.eql(true);",
+              "  pm.expect(body.canAcceptOrders).to.eql(true);",
+              "  pm.expect(body.currentShift.status).to.eql('OPEN');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-02a - POST /orders (Dining Table Order)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token_waiter}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"tableNumber\": 21, \"isTakeaway\": false}"
+        },
+        "url": "{{baseUrl}}/orders"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-02a returns 201 Created', function () { pm.response.to.have.status(201); });",
+              "const orderSchema = {",
+              "  type: 'object',",
+              "  required: ['id', 'orderId', 'publicId', 'status', 'version', 'totalAmount', 'items', 'isTakeaway'],",
+              "  properties: {",
+              "    id: { type: 'string', minLength: 36 },",
+              "    orderId: { type: 'string', minLength: 36 },",
+              "    status: { type: 'string', enum: ['CREATED'] },",
+              "    tableNumber: { type: 'integer' },",
+              "    isTakeaway: { type: 'boolean' },",
+              "    version: { type: 'integer', minimum: 1 },",
+              "    items: { type: 'array' }",
+              "  }",
+              "};",
+              "pm.test('CT-02a matches OrderResponse schema', function () { pm.response.to.have.jsonSchema(orderSchema); });",
+              "const body = pm.response.json();",
+              "pm.expect(body.tableNumber).to.eql(21);",
+              "pm.expect(body.isTakeaway).to.eql(false);",
+              "pm.collectionVariables.set('createdOrderId', body.orderId);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-02b - POST /orders (Takeaway Order)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token_waiter}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"isTakeaway\": true}"
+        },
+        "url": "{{baseUrl}}/orders"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-02b takeaway returns 201 Created', function () { pm.response.to.have.status(201); });",
+              "const body = pm.response.json();",
+              "pm.test('CT-02b takeaway has null tableNumber and isTakeaway=true', function () {",
+              "  pm.expect(body.isTakeaway).to.eql(true);",
+              "  pm.expect(body.tableNumber).to.be.null;",
               "});",
-              "pm.test('CT-21 standard error schema', function () {",
-              "  const schemas = document.components.schemas;",
-              "  pm.expect(schemas.ErrorResponse).to.exist;",
-              "  pm.expect(schemas.ErrorBody).to.exist;",
-              "  pm.expect(schemas.ErrorBody.required).to.include.members(['code', 'message']);",
+              "pm.collectionVariables.set('takeawayOrderId', body.orderId);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-01 - GET /orders?status=CREATED",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token_waiter}}" }],
+        "url": "{{baseUrl}}/orders?status=CREATED&limit=20&offset=0"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-01 returns 200 OK', function () { pm.response.to.have.status(200); });",
+              "const listSchema = {",
+              "  type: 'array',",
+              "  minItems: 1,",
+              "  items: {",
+              "    type: 'object',",
+              "    required: ['orderId', 'status', 'version', 'items'],",
+              "    properties: { status: { type: 'string', enum: ['CREATED'] } }",
+              "  }",
+              "};",
+              "pm.test('CT-01 matches filtered Order list schema', function () { pm.response.to.have.jsonSchema(listSchema); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-03a - PATCH /orders/{id}/items (Unavailable & Absent Dish -> 422 DISH_UNAVAILABLE)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token_waiter}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"items\": [{\"dishId\": \"PLATE-NON-EXISTENT-999\", \"name\": \"Platillo Inexistente\", \"quantity\": 1, \"unitPrice\": \"99.00\"}]}"
+        },
+        "url": "{{baseUrl}}/orders/{{createdOrderId}}/items"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-03a absent dish rejected with 422 DISH_UNAVAILABLE', function () {",
+              "  pm.response.to.have.status(422);",
+              "  pm.expect(pm.response.json().error.code).to.eql('DISH_UNAVAILABLE');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-03b - PATCH /orders/{id}/items (Add Valid Items & Authoritative Catalog Price)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token_waiter}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"items\": [{\"dishId\": \"PLATE-BURGER-01\", \"offerId\": \"OFFER-BURGER-01\", \"name\": \"Hamburguesa clásica\", \"quantity\": 2, \"unitPrice\": \"0.01\", \"modifiers\": [\"Sin cebolla\"], \"notes\": \"Bien cocida\"}]}"
+        },
+        "url": "{{baseUrl}}/orders/{{createdOrderId}}/items"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-03b returns 200 OK', function () { pm.response.to.have.status(200); });",
+              "const body = pm.response.json();",
+              "pm.test('CT-03b enforces Redis catalog price 165.00 x 2 = 330.00', function () {",
+              "  pm.expect(body.items.length).to.eql(1);",
+              "  pm.expect(parseFloat(body.items[0].unitPrice)).to.eql(165.0);",
+              "  pm.expect(parseFloat(body.totalAmount)).to.eql(330.0);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-04 - PATCH /orders/{id}/transfer",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token_waiter}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"tableNumber\": 22}"
+        },
+        "url": "{{baseUrl}}/orders/{{createdOrderId}}/transfer"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-04 transfer returns 200 OK with updated tableNumber', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().tableNumber).to.eql(22);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-05a - POST /orders/{id}/confirm (Reject Empty Order -> 422)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token_waiter}}" }],
+        "url": "{{baseUrl}}/orders/{{takeawayOrderId}}/confirm"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-05a confirming empty order returns 422 VALIDATION_ERROR', function () {",
+              "  pm.response.to.have.status(422);",
+              "  pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-05b - POST /orders/{id}/confirm (Confirm Order With Items -> 200)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token_waiter}}" }],
+        "url": "{{baseUrl}}/orders/{{createdOrderId}}/confirm"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-05b confirm returns 200 OK without blocking on Inventory', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.confirmedAt).to.be.a('string');",
+              "  pm.expect(body.awaitingStockConfirmation).to.eql(true);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-06 - PATCH /orders/{id}/cancel (Cancel Order -> 200 CANCELLED)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token_waiter}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"reason\": \"Cliente decidió retirarse\"}"
+        },
+        "url": "{{baseUrl}}/orders/{{takeawayOrderId}}/cancel"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-06 cancel returns 200 CANCELLED', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().status).to.eql('CANCELLED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-16 - PATCH /orders/{id}/items after Cancel -> 409 INVALID_STATE_TRANSITION",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token_waiter}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"items\": [{\"dishId\": \"PLATE-BURGER-01\", \"name\": \"Hamburguesa\", \"quantity\": 1, \"unitPrice\": \"165.00\"}]}"
+        },
+        "url": "{{baseUrl}}/orders/{{takeawayOrderId}}/items"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-16 editing cancelled order returns 409 INVALID_STATE_TRANSITION', function () {",
+              "  pm.response.to.have.status(409);",
+              "  pm.expect(pm.response.json().error.code).to.eql('INVALID_STATE_TRANSITION');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-08 - POST /orders/{id}/request-bill (Delivered Order Frozen Prices)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token_waiter}}" }],
+        "url": "{{baseUrl}}/orders/{{seedDeliveredOrder}}/request-bill"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-08 request-bill returns 200 DELIVERED with frozen total', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.status).to.eql('DELIVERED');",
+              "  pm.expect(parseFloat(body.totalAmount)).to.eql(330.0);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-07a - PATCH /orders/{id}/items/{itemId}/redo without note -> 422 NOTE_REQUIRED",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token_waiter}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"note\": \"   \"}"
+        },
+        "url": "{{baseUrl}}/orders/{{seedDeliveredOrder}}/items/{{seedDeliveredItem}}/redo"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-07a redo without note returns 422 NOTE_REQUIRED', function () {",
+              "  pm.response.to.have.status(422);",
+              "  pm.expect(pm.response.json().error.code).to.eql('NOTE_REQUIRED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-07b - PATCH /orders/{id}/items/{itemId}/redo with note -> 200",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token_waiter}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"note\": \"Carne llegó fría, rehacer en parrilla\"}"
+        },
+        "url": "{{baseUrl}}/orders/{{seedDeliveredOrder}}/items/{{seedDeliveredItem}}/redo"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-07b redo returns 200 keeping order DELIVERED with item PENDING', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.status).to.eql('DELIVERED');",
+              "  pm.expect(body.items[0].status).to.eql('PENDING');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-10 - PATCH /orders/{id}/items/{itemId}/ready (Mark Item Ready -> 200)",
+      "request": {
+        "method": "PATCH",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token_kitchen}}" }],
+        "url": "{{baseUrl}}/orders/{{seedDeliveredOrder}}/items/{{seedDeliveredItem}}/ready"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-10 mark item ready returns 200 OK', function () {",
+              "  pm.response.to.have.status(200);",
+              "  const body = pm.response.json();",
+              "  pm.expect(['READY', 'DELIVERED']).to.include(body.items[0].status);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-09 - GET /kds/queue?station=parrilla (Real Redis Station Filter & Sorting)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token_kitchen}}" }],
+        "url": "{{baseUrl}}/kds/queue?station=parrilla"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-09 KDS queue returns 200 OK', function () { pm.response.to.have.status(200); });",
+              "const queueOrders = pm.response.json();",
+              "pm.test('CT-09 filters items strictly to parrilla and excludes PAID', function () {",
+              "  pm.expect(queueOrders).to.be.an('array').that.is.not.empty;",
+              "  queueOrders.forEach(function (ord) {",
+              "    pm.expect(ord.status).to.not.eql('PAID');",
+              "    ord.items.forEach(function (it) {",
+              "      pm.expect(String(it.station).toLowerCase()).to.eql('parrilla');",
+              "    });",
+              "  });",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-15a - PATCH /orders/{id}/start-preparation (RESERVED -> IN_PREPARATION)",
+      "request": {
+        "method": "PATCH",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token_kitchen}}" }],
+        "url": "{{baseUrl}}/orders/{{seedMultiStationOrder}}/start-preparation"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-15a start-preparation transitions RESERVED to IN_PREPARATION', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().status).to.eql('IN_PREPARATION');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-11 & CT-15b - PATCH /orders/{id}/ready (Mark Entire Order Ready -> DELIVERED)",
+      "request": {
+        "method": "PATCH",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token_kitchen}}" }],
+        "url": "{{baseUrl}}/orders/{{seedMultiStationOrder}}/ready"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-11 mark order ready transitions order to DELIVERED', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().status).to.eql('DELIVERED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-12 & CT-17a - PATCH /orders/{id}/void (Admin Void -> WASTED with Charge)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token_admin}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"reason\": \"Comensal se retiró sin aviso\", \"chargeCustomer\": true}"
+        },
+        "url": "{{baseUrl}}/orders/{{seedInPrepOrder}}/void"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-12 admin void transitions IN_PREPARATION order to WASTED', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().status).to.eql('WASTED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-13a - Prepare Second Order in IN_PREPARATION & Cancel Single Item",
+      "request": {
+        "method": "PATCH",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token_kitchen}}" }],
+        "url": "{{baseUrl}}/orders/{{seedReservedOrder1}}/items/{{seedReservedItem1}}/cancel"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Item cancel in RESERVED returns 200 OK', function () {",
+              "  pm.response.to.have.status(200);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-13b - Transition Order to IN_PREPARATION for Kitchen Error Void",
+      "request": {
+        "method": "PATCH",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token_chef}}" }],
+        "url": "{{baseUrl}}/orders/{{seedReservedOrder1}}/start-preparation"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Order enters IN_PREPARATION', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().status).to.eql('IN_PREPARATION');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-13c - PATCH /orders/{id}/void-kitchen-error without note -> 422 NOTE_REQUIRED",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token_chef}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"note\": \"\"}"
+        },
+        "url": "{{baseUrl}}/orders/{{seedReservedOrder1}}/void-kitchen-error"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-13c missing note rejected with 422 NOTE_REQUIRED', function () {",
+              "  pm.response.to.have.status(422);",
+              "  pm.expect(pm.response.json().error.code).to.eql('NOTE_REQUIRED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-13d & CT-17b - PATCH /orders/{id}/void-kitchen-error with note -> 200 VOIDED",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token_chef}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"note\": \"Accidente térmico en plancha\"}"
+        },
+        "url": "{{baseUrl}}/orders/{{seedReservedOrder1}}/void-kitchen-error"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-13d chef void-kitchen-error transitions to VOIDED', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().status).to.eql('VOIDED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Kitchen Reject - PATCH /orders/{id}/items/{itemId}/kitchen-reject -> 200 REJECTED",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token_kitchen}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"reason\": \"Lechuga romana agotada físicamente\", \"availableQuantity\": 0}"
+        },
+        "url": "{{baseUrl}}/orders/{{seedKitchenRejectOrder}}/items/{{seedKitchenRejectItem}}/kitchen-reject"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Kitchen reject transitions RESERVED order to REJECTED', function () {",
+              "  pm.response.to.have.status(200);",
+              "  pm.expect(pm.response.json().status).to.eql('REJECTED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-18 & SEC-03a - Protected Route Without Token -> 401 UNAUTHENTICATED",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/orders"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-18 missing token returns 401 UNAUTHENTICATED', function () {",
+              "  pm.response.to.have.status(401);",
+              "  pm.expect(pm.response.json().error.code).to.eql('UNAUTHENTICATED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CP-012 & SEC-03b - REST URL ?token= Query Parameter -> 401 UNAUTHENTICATED",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/orders?token={{token_waiter}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CP-012 REST rejects URL query token with 401', function () {",
+              "  pm.response.to.have.status(401);",
+              "  pm.expect(pm.response.json().error.code).to.eql('UNAUTHENTICATED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "SEC-03c - Forged JWT Signature -> 401 UNAUTHENTICATED",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token_forged}}" }],
+        "url": "{{baseUrl}}/orders"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('SEC-03 forged signature returns 401', function () {",
+              "  pm.response.to.have.status(401);",
+              "  pm.expect(pm.response.json().error.code).to.eql('UNAUTHENTICATED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "SEC-03d - Expired JWT -> 401 UNAUTHENTICATED",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token_expired}}" }],
+        "url": "{{baseUrl}}/orders"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('SEC-03 expired token returns 401', function () {",
+              "  pm.response.to.have.status(401);",
+              "  pm.expect(pm.response.json().error.code).to.eql('UNAUTHENTICATED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "SEC-03e & OBS-01 - Missing exp JWT -> 401 UNAUTHENTICATED",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token_no_exp}}" }],
+        "url": "{{baseUrl}}/kds/queue"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('OBS-01 token missing exp returns 401', function () {",
+              "  pm.response.to.have.status(401);",
+              "  pm.expect(pm.response.json().error.code).to.eql('UNAUTHENTICATED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "SEC-03f - Unsigned (alg:none) JWT -> 401 UNAUTHENTICATED",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token_alg_none}}" }],
+        "url": "{{baseUrl}}/orders"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('SEC-03 unsigned alg:none token returns 401', function () {",
+              "  pm.response.to.have.status(401);",
+              "  pm.expect(pm.response.json().error.code).to.eql('UNAUTHENTICATED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-19a & SEC-04a - Waiter Cannot Void Order (Even With Spoofed X-User-Roles) -> 403",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token_waiter}}" },
+          { "key": "X-User-Roles", "value": "ADMINISTRADOR" },
+          { "key": "X-User-Permissions", "value": "*" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"reason\": \"Intento de escalación\"}"
+        },
+        "url": "{{baseUrl}}/orders/{{seedDraftOrder}}/void"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-19a & SEC-04 waiter forbidden on /void (403)', function () {",
+              "  pm.response.to.have.status(403);",
+              "  pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN_ROLE');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-19b & SEC-04b - Chef Cannot Perform Admin Void -> 403",
+      "request": {
+        "method": "PATCH",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token_chef}}" }],
+        "url": "{{baseUrl}}/orders/{{seedDraftOrder}}/void"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-19b chef forbidden on /void (403)', function () {",
+              "  pm.response.to.have.status(403);",
+              "  pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN_ROLE');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-19c & SEC-04c - Kitchen Cannot Void For Kitchen Error -> 403",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token_kitchen}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"note\": \"Cocinero sin rol chef\"}"
+        },
+        "url": "{{baseUrl}}/orders/{{seedDraftOrder}}/void-kitchen-error"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-19c kitchen forbidden on /void-kitchen-error (403)', function () {",
+              "  pm.response.to.have.status(403);",
+              "  pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN_ROLE');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-19d & OBS-04 - Waiter BOLA Check (Cannot Transfer Another Waiter's Order) -> 403",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token_waiter_other}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"tableNumber\": 30}"
+        },
+        "url": "{{baseUrl}}/orders/{{seedDraftOrder}}/transfer"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('OBS-04 other waiter forbidden from mutating order (403)', function () {",
+              "  pm.response.to.have.status(403);",
+              "  pm.expect(pm.response.json().error.code).to.eql('FORBIDDEN_ROLE');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-20a - GET /orders/{missingId} -> 404 ORDER_NOT_FOUND",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{token_waiter}}" }],
+        "url": "{{baseUrl}}/orders/99999999-9999-9999-9999-999999999999"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-20a missing order returns 404 ORDER_NOT_FOUND', function () {",
+              "  pm.response.to.have.status(404);",
+              "  pm.expect(pm.response.json().error.code).to.eql('ORDER_NOT_FOUND');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "CT-20b & CP-019/CP-020 - Invalid Body (tableNumber + isTakeaway=true) -> 422 VALIDATION_ERROR",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token_waiter}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\"tableNumber\": 10, \"isTakeaway\": true}"
+        },
+        "url": "{{baseUrl}}/orders"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('CT-20b invalid body returns 422 VALIDATION_ERROR', function () {",
+              "  pm.response.to.have.status(422);",
+              "  pm.expect(pm.response.json().error.code).to.eql('VALIDATION_ERROR');",
               "});"
             ]
           }

@@ -244,7 +244,7 @@ sequenceDiagram
 ---
 
 #### C) `ordenes.orden.cancelada` (Cancelación antes de Cocina — Liberar Reserva)
-- **Cuándo se emite:** Cuando una orden en estado `CREATED` se cancela (`PATCH /orders/{orderId}/cancel` o alias `POST /orders/{orderId}/cancel`) antes de entrar a preparación en cocina (`RF-24`, `RF-25`, `OP-05`). Aplica tanto a borradores como a órdenes ya confirmadas que esperan reserva de stock de Inventario.
+- **Cuándo se emite:** Cuando una orden en estado `CREATED`, `RESERVED` o `REJECTED` se cancela (`PATCH /orders/{orderId}/cancel` o alias `POST /orders/{orderId}/cancel`) antes de iniciar preparación física en cocina (`RF-24`, `RF-25`, `OP-05`, `ADR-0012`). Aplica tanto a comandas confirmadas en espera de respuesta como a reservas ya confirmadas por Inventario.
 - **Contrato JSON Schema:** `contracts/events/ordenes.orden.cancelada.v1.json`
 - **Modelo Interno Python:** `OrderCancelledEvent` (`app/messaging/events.py`)
 

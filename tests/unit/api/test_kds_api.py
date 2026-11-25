@@ -29,6 +29,7 @@ from app.domain.order_status import ItemStatus, OrderStatus
 from app.domain.roles import Role
 from app.main import app
 from app.messaging.events import EventName
+from app.services.catalog import get_catalog_info_mock, get_catalog_validator
 from app.services.notifications import OrderNotifier
 from app.services.orders import OrderService, get_order_service
 from tests.unit.conftest import FakeAsyncSession
@@ -79,6 +80,12 @@ class FakeCatalogValidator:
     async def validate_dish_available(self, dish_id: str) -> None:
         pass
 
+    async def get_dish_price(self, dish_id: str) -> Decimal | None:
+        return None
+
+    async def get_catalog_info(self, dish_id: str) -> dict[str, str | None]:
+        return get_catalog_info_mock(dish_id)
+
 
 @pytest.fixture
 def fake_catalog() -> FakeCatalogValidator:
@@ -100,6 +107,7 @@ def override_dependencies(
         yield fake_session
 
     app.dependency_overrides[get_session] = _get_test_session
+    app.dependency_overrides[get_catalog_validator] = lambda: fake_catalog
     app.dependency_overrides[get_order_service] = lambda: OrderService(
         session=cast(AsyncSession, fake_session),
         notifier=spy_notifier,

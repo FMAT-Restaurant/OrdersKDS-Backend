@@ -68,7 +68,11 @@ from app.services.notifications import (
     get_order_notifier,
     notify_order_changed,
 )
-from app.services.orders import OrderService, get_order_service
+from app.services.orders import (
+    OrderService,
+    ensure_waiter_order_ownership,
+    get_order_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +184,7 @@ async def transfer_order(
         order_id=order_id,
         new_table_number=payload.table_number,
         expected_version=expected_version,
+        auth=auth,
     )
     return OrderResponse.from_model(order)
 
@@ -442,7 +447,10 @@ async def update_order_items(
     if order is None:
         raise OrderNotFoundError(f"Order with id={order_id} not found.")
 
+    ensure_waiter_order_ownership(order, auth)
     _ensure_order_modifiable(order)
+    if order.responsible_waiter_id is None:
+        order.responsible_waiter_id = parse_actor_uuid(auth.user_id)
 
     # Preserve original item information for price and dish_id fallbacks
     original_items = list(order.items)
@@ -483,15 +491,32 @@ async def update_order_items(
     status_code=status.HTTP_200_OK,
     summary="Cancel order",
     description=(
-        "Cancels an order while in CREATED status and publishes compensation event (RF-24, RF-25)."
+        "Cancels an order while in CREATED, RESERVED, or REJECTED status before kitchen "
+        "preparation begins (IN_PREPARATION) and publishes compensation event "
+        "ordenes.orden.cancelada so Inventory releases any pre-reserved or confirmed "
+        "stock reservation (RF-24, RF-25, ADR-0012)."
     ),
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "model": ErrorResponse,
+            "description": "Order not found (`ORDER_NOT_FOUND`).",
+        },
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorResponse,
+            "description": (
+                "Order has already entered IN_PREPARATION or a terminal status "
+                "(`INVALID_STATE_TRANSITION`)."
+            ),
+        },
+    },
 )
 @router.post(
     "/{orderId}/cancel",
     status_code=status.HTTP_200_OK,
     summary="Cancel order (POST alias)",
     description=(
-        "Cancels an order while in CREATED status and publishes compensation event (RF-24, RF-25)."
+        "Cancels an order while in CREATED, RESERVED, or REJECTED status and publishes "
+        "compensation event (RF-24, RF-25, ADR-0012)."
     ),
     include_in_schema=False,
 )
@@ -501,7 +526,7 @@ async def cancel_order(
     order_service: Annotated[OrderService, Depends(get_order_service)],
     payload: CancelOrderRequest | None = None,
 ) -> OrderResponse:
-    """Cancel an order draft in CREATED status (RF-24, RF-25).
+    """Cancel an order in CREATED, RESERVED, or REJECTED status (RF-24, RF-25, ADR-0012).
 
     Args:
         order_id: Public UUID of target order.
@@ -514,7 +539,7 @@ async def cancel_order(
 
     Raises:
         OrderNotFoundError: If order does not exist (404).
-        InvalidStateTransitionError: If order is not in CREATED status (409).
+        InvalidStateTransitionError: If order is not in CREATED, RESERVED, or REJECTED (409).
     """
     order = await order_service.cancel_order(
         order_id=order_id,
@@ -530,10 +555,11 @@ async def cancel_order(
     summary="Administratively void order (with configurable charge)",
     description=(
         "Administratively voids an order in IN_PREPARATION status (RF-26, RF-27, ADR-0012). "
-        "When chargeCustomer is true (default), transitions the order to WASTED and publishes "
-        "ordenes.cobro.solicitado with frozen prices. When chargeCustomer is false, transitions "
-        "the order to terminal VOIDED status and publishes ordenes.comanda.mermada. "
-        "Strictly restricted to admin role."
+        "Always stages ordenes.comanda.mermada for Inventory waste accounting. "
+        "When chargeCustomer is true (default per RF-27), transitions the order to WASTED and "
+        "jointly stages ordenes.cobro.solicitado with frozen prices in the same transaction. "
+        "When chargeCustomer is false (RF-38), transitions the order to terminal VOIDED status "
+        "without staging a charge event. Strictly restricted to admin role."
     ),
     responses={
         status.HTTP_403_FORBIDDEN: {
@@ -727,8 +753,27 @@ async def request_bill(
     status_code=status.HTTP_200_OK,
     summary="Confirm order",
     description=(
-        "Confirms a draft order and queues inventory reservation without waiting for Inventory."
+        "Confirms a draft order with at least one active item and queues inventory "
+        "reservation without waiting for Inventory (RF-32)."
     ),
+    responses={
+        status.HTTP_404_NOT_FOUND: {
+            "model": ErrorResponse,
+            "description": "Order not found (`ORDER_NOT_FOUND`).",
+        },
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorResponse,
+            "description": (
+                "Order cannot be confirmed in its current state (`INVALID_STATE_TRANSITION`)."
+            ),
+        },
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "model": ErrorResponse,
+            "description": (
+                "Order has no active items or invalid item identifiers (`VALIDATION_ERROR`)."
+            ),
+        },
+    },
 )
 async def confirm_order(
     order_id: OrderIdPath,

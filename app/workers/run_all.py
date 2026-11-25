@@ -27,7 +27,7 @@ from app.core.config import (
     get_saga_timeout_settings,
 )
 from app.core.logging import configure_structured_logging
-from app.messaging.consumers.base import EventConsumerDispatcher
+from app.messaging.consumers.base import BrokerNativeDLQRouter, EventConsumerDispatcher
 from app.messaging.consumers.catalog import CatalogConsumer
 from app.messaging.publisher import EventPublisher
 from app.realtime.redis_bridge import RedisRealtimeBridge
@@ -106,6 +106,7 @@ async def main() -> None:
         catalog_consumer = CatalogConsumer(catalog_repository)
         dispatcher = EventConsumerDispatcher(
             session_factory=session_factory,
+            dlq_router=BrokerNativeDLQRouter(),
             notifier=default_notifier,
             catalog_consumer=catalog_consumer,
         )

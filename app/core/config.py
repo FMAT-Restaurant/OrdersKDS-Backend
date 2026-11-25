@@ -52,7 +52,36 @@ ALLOWED_JWT_ALGORITHMS: Final[frozenset[str]] = frozenset(
     {"HS256", "HS384", "HS512", "RS256", "ES256"}
 )
 DEFAULT_JWT_ALGORITHMS: Final[tuple[str, ...]] = ("HS256", "HS384", "HS512", "RS256", "ES256")
+DEFAULT_CORS_ALLOWED_ORIGINS: Final[tuple[str, ...]] = (
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    "http://localhost:5177",
+    "http://127.0.0.1:5177",
+    "http://localhost:5179",
+    "http://127.0.0.1:5179",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+)
 _TRUTHY_ENV_VALUES: Final[frozenset[str]] = frozenset({"1", "true", "yes", "on"})
+
+
+def get_cors_allowed_origins() -> list[str]:
+    """Parse explicit CORS origin allowlist, never permitting '*' with credentials."""
+    raw = os.getenv("CORS_ALLOWED_ORIGINS", "").strip()
+    if not raw:
+        return list(DEFAULT_CORS_ALLOWED_ORIGINS)
+    origins: list[str] = []
+    for candidate in raw.split(","):
+        cleaned = candidate.strip().rstrip("/")
+        if not cleaned or cleaned == "*":
+            continue
+        if cleaned not in origins:
+            origins.append(cleaned)
+    return origins or list(DEFAULT_CORS_ALLOWED_ORIGINS)
 
 
 @dataclass(frozen=True)
@@ -74,6 +103,7 @@ class AuthSettings:
     jwt_algorithms: tuple[str, ...]
     trust_gateway_headers: bool = False
     gateway_shared_secret: str | None = None
+    enforce_waiter_ownership: bool = True
 
 
 def _parse_jwt_algorithms(raw: str | None) -> tuple[str, ...]:
@@ -94,12 +124,14 @@ def get_auth_settings() -> AuthSettings:
     raw_public_key = os.getenv("JWT_PUBLIC_KEY", "").replace("\\n", "\n").strip()
     raw_gateway_secret = os.getenv("GATEWAY_SHARED_SECRET", "").strip()
     raw_trust_gateway = os.getenv("TRUST_GATEWAY_HEADERS", "false").strip().lower()
+    raw_waiter_ownership = os.getenv("ENFORCE_WAITER_ORDER_OWNERSHIP", "true").strip().lower()
     return AuthSettings(
         jwt_secret=raw_secret or None,
         jwt_public_key=raw_public_key or None,
         jwt_algorithms=_parse_jwt_algorithms(os.getenv("JWT_ALGORITHMS")),
         trust_gateway_headers=raw_trust_gateway in _TRUTHY_ENV_VALUES,
         gateway_shared_secret=raw_gateway_secret or None,
+        enforce_waiter_ownership=raw_waiter_ownership in _TRUTHY_ENV_VALUES,
     )
 
 

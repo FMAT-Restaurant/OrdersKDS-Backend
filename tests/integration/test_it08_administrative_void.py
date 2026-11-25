@@ -169,9 +169,16 @@ async def test_it08_administrative_void_flow_and_payment() -> None:
     assert voided_order.status == OrderStatus.WASTED
     assert db.orders[order_id].status == OrderStatus.WASTED
 
-    # Step 2: Verify charge outbox event staged atomically (no merma event on charged void)
-    assert len(db.outbox) == 1
-    assert db.outbox[0].event_type == EventName.CHARGE_REQUESTED
+    # Step 2: Verify both merma and charge outbox events staged atomically (RF-27)
+    assert len(db.outbox) == 2
+    event_types = [o.event_type for o in db.outbox]
+    assert EventName.ORDER_WASTED in event_types
+    assert EventName.CHARGE_REQUESTED in event_types
+
+    wasted_entry = next(o for o in db.outbox if o.event_type == EventName.ORDER_WASTED)
+    assert wasted_entry.payload["orderId"] == str(order_id)
+    assert wasted_entry.payload["motivo"] == "administrativo"
+    assert wasted_entry.payload["reason"] == "ADMINISTRATIVE"
 
     # Inspect ordenes.cobro.solicitado
     charge_entry = next(o for o in db.outbox if o.event_type == EventName.CHARGE_REQUESTED)

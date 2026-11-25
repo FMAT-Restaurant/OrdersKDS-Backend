@@ -76,39 +76,42 @@ def _catalog_item_payload(data: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     return [data]
 
 
+def _resolve_projection_ids(item: Mapping[str, Any]) -> list[str]:
+    """Collect distinct source/recipe and commercial offer IDs from a Menu item payload."""
+    primary = _first(
+        item,
+        "sourceId",
+        "oferta",
+        "ofertaId",
+        "offerId",
+        "platilloId",
+        "dishId",
+        "plateId",
+        "itemId",
+        "id",
+    )
+    if primary is None:
+        return []
+    ids = [str(primary)]
+    secondary = _first(item, "offerId", "ofertaId", "oferta")
+    if secondary is not None and str(secondary) not in ids:
+        ids.append(str(secondary))
+    return ids
+
+
 class CatalogConsumer:
     """Translate menu events while keeping the anti-corruption boundary explicit."""
 
     def __init__(self, repository: CatalogRepository) -> None:
         self._repository = repository
 
-    async def _project_item(
+    async def _project_single_id(
         self,
+        dish_id: str,
         event_name: str,
         item: Mapping[str, Any],
-        data: Mapping[str, Any],
+        common: dict[str, Any],
     ) -> bool:
-        dish_id = _first(
-            item,
-            "sourceId",
-            "oferta",
-            "ofertaId",
-            "offerId",
-            "platilloId",
-            "dishId",
-            "plateId",
-            "itemId",
-            "id",
-        )
-        if dish_id is None:
-            return False
-
-        common = {
-            "updated_at": _first(item, "updated_at", "updatedAt")
-            or _first(data, "updated_at", "updatedAt"),
-            "menu_version": _first(item, "menuVersion", "menu_version")
-            or _first(data, "menuVersion", "menu_version"),
-        }
         if event_name == EventName.MENU_DISH_PRICE_UPDATED:
             return await self._repository.upsert(
                 dish_id,
@@ -169,6 +172,28 @@ class CatalogConsumer:
             available = _extract_available(item)
             return await self._repository.upsert(dish_id, available=available, **common)
         return False
+
+    async def _project_item(
+        self,
+        event_name: str,
+        item: Mapping[str, Any],
+        data: Mapping[str, Any],
+    ) -> bool:
+        target_ids = _resolve_projection_ids(item)
+        if not target_ids:
+            return False
+
+        common = {
+            "updated_at": _first(item, "updated_at", "updatedAt")
+            or _first(data, "updated_at", "updatedAt"),
+            "menu_version": _first(item, "menuVersion", "menu_version")
+            or _first(data, "menuVersion", "menu_version"),
+        }
+        stored = False
+        for dish_id in target_ids:
+            projected = await self._project_single_id(dish_id, event_name, item, common)
+            stored = projected or stored
+        return stored
 
     async def consume(self, event_type: str | EventName, payload: Mapping[str, Any]) -> bool:
         event_name = str(event_type)

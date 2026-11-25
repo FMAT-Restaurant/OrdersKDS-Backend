@@ -12,7 +12,15 @@ from uuid import UUID, uuid4
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
-from app.domain.constants import MAX_CATALOG_ID_LENGTH, MAX_NOTE_LENGTH
+from app.domain.constants import (
+    MAX_CATALOG_ID_LENGTH,
+    MAX_ITEM_QUANTITY,
+    MAX_MONETARY_AMOUNT,
+    MAX_NOTE_LENGTH,
+    MAX_ORDER_ITEMS,
+    MAX_SQL_INT32,
+    MAX_TABLE_NUMBER,
+)
 from app.domain.order_status import ItemStatus, OrderStatus
 
 if TYPE_CHECKING:
@@ -55,6 +63,7 @@ class KitchenRejectItemInput(BaseModel):
     available_quantity: int = Field(
         default=0,
         ge=0,
+        le=MAX_ITEM_QUANTITY,
         validation_alias=AliasChoices("availableQuantity", "available_quantity"),
         serialization_alias="availableQuantity",
         description="Physical units kitchen can still prepare out of requested quantity.",
@@ -81,6 +90,7 @@ class KitchenRejectRequest(BaseModel):
     available_quantity: int = Field(
         default=0,
         ge=0,
+        le=MAX_ITEM_QUANTITY,
         validation_alias=AliasChoices("availableQuantity", "available_quantity"),
         serialization_alias="availableQuantity",
         description="Physical units kitchen can still prepare out of requested quantity.",
@@ -88,6 +98,7 @@ class KitchenRejectRequest(BaseModel):
     items: list[KitchenRejectItemInput] | None = Field(
         default=None,
         min_length=1,
+        max_length=MAX_ORDER_ITEMS,
         description="Optional multi-item shortage breakdown for multi-dish orders.",
     )
 
@@ -104,6 +115,7 @@ class CreateOrderRequest(BaseModel):
         default=None,
         alias="tableNumber",
         ge=1,
+        le=MAX_TABLE_NUMBER,
         description="Assigned table number in dining room (required if isTakeaway is False).",
     )
     is_takeaway: bool = Field(
@@ -119,6 +131,8 @@ class CreateOrderRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_table_or_takeaway(self) -> CreateOrderRequest:
+        if self.is_takeaway and self.table_number is not None:
+            raise ValueError("tableNumber must not be provided when isTakeaway is true")
         if not self.is_takeaway and self.table_number is None:
             raise ValueError("tableNumber is required when isTakeaway is false")
         return self
@@ -164,12 +178,16 @@ class OrderItemInput(BaseModel):
     quantity: int = Field(
         default=1,
         gt=0,
-        description="Quantity of dishes requested.",
+        le=MAX_ITEM_QUANTITY,
+        description="Quantity of dishes requested (bounded to business maximum).",
     )
     unit_price: Decimal = Field(
         default=Decimal("0.00"),
         alias="unitPrice",
         ge=Decimal("0.00"),
+        le=MAX_MONETARY_AMOUNT,
+        max_digits=12,
+        decimal_places=2,
         description="Unit price frozen at ordering time.",
     )
     modifiers: list[str] = Field(
@@ -184,7 +202,7 @@ class OrderItemInput(BaseModel):
 
     @model_validator(mode="after")
     def validate_identifier_and_dish_id(self) -> Self:
-        """Ensure catalog identifiers are not whitespace-only when provided."""
+        """Ensure catalog identifiers are non-blank and line subtotal fits NUMERIC(12, 2)."""
         for field_name, value in (
             ("dish_id", self.dish_id),
             ("source_id", self.source_id),
@@ -192,6 +210,8 @@ class OrderItemInput(BaseModel):
         ):
             if value is not None and not value.strip():
                 raise ValueError(f"{field_name} cannot be an empty string")
+        if self.unit_price * self.quantity > MAX_MONETARY_AMOUNT:
+            raise ValueError("Item subtotal exceeds NUMERIC(12, 2) maximum")
         return self
 
 
@@ -202,8 +222,17 @@ class UpdateOrderItemsRequest(BaseModel):
 
     items: list[OrderItemInput] = Field(
         min_length=1,
+        max_length=MAX_ORDER_ITEMS,
         description="Non-empty list of items that replace the draft order items.",
     )
+
+    @model_validator(mode="after")
+    def validate_total_amount_bounds(self) -> Self:
+        """Prevent aggregate total overflow on NUMERIC(12, 2)."""
+        total = sum((item.unit_price * item.quantity for item in self.items), Decimal("0.00"))
+        if total > MAX_MONETARY_AMOUNT:
+            raise ValueError("Order total exceeds NUMERIC(12, 2) maximum")
+        return self
 
 
 class TransferOrderRequest(BaseModel):
@@ -214,21 +243,27 @@ class TransferOrderRequest(BaseModel):
     table_number: int = Field(
         alias="tableNumber",
         ge=1,
+        le=MAX_TABLE_NUMBER,
         description="Target table number in the dining room.",
     )
     version: int | None = Field(
         default=None,
         ge=1,
+        le=MAX_SQL_INT32,
         description="Expected order version for optimistic concurrency (RNF-09).",
     )
 
 
 class CancelOrderRequest(BaseModel):
-    """Optional payload for cancelling an order (RF-24)."""
+    """Optional payload for cancelling an order (RF-24, ADR-0012)."""
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
-    reason: str | None = Field(default=None, description="Optional cancellation reason.")
+    reason: str | None = Field(
+        default=None,
+        max_length=MAX_NOTE_LENGTH,
+        description="Optional cancellation reason.",
+    )
 
 
 class VoidOrderRequest(BaseModel):

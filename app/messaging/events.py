@@ -300,16 +300,22 @@ class KitchenDishRejectedEvent(_DishItemReasonEvent):
         reason: str,
         plate_id: str | None = None,
         source_id: str | None = None,
+        attempt: int | str | None = None,
         correlation_id: UUID | None = None,
     ) -> KitchenDishRejectedEvent:
-        """Build a repeatable event for item rejected by kitchen."""
+        """Build a deterministic UUIDv5 event for item rejected by kitchen."""
         effective_plate_id, effective_source_id = cls._resolve_recipe_aliases(
             offer_id=offer_id,
             plate_id=plate_id,
             source_id=source_id,
         )
+        attempt_segment = str(attempt) if attempt is not None else "1"
+        event_id = uuid5(
+            NAMESPACE_URL,
+            f"{cls.event_name}:{order_id}:{item_id}:{attempt_segment}",
+        )
         return cls(
-            eventId=uuid4(),
+            eventId=event_id,
             orderId=order_id,
             itemId=item_id,
             offerId=offer_id,
@@ -341,17 +347,27 @@ class DishRedoRequestedEvent(_DishItemReasonEvent):
         redo_id: UUID | None = None,
         plate_id: str | None = None,
         source_id: str | None = None,
+        attempt: int | str | None = None,
         correlation_id: UUID | None = None,
     ) -> DishRedoRequestedEvent:
-        """Build a repeatable event requesting Inventory validation and FEFO consumption."""
+        """Build a deterministic UUIDv5 event requesting Inventory FEFO consumption."""
         effective_plate_id, effective_source_id = cls._resolve_recipe_aliases(
             offer_id=offer_id,
             plate_id=plate_id,
             source_id=source_id,
         )
+        attempt_segment = str(attempt) if attempt is not None else "1"
+        resolved_redo_id = redo_id or uuid5(
+            NAMESPACE_URL,
+            f"{cls.event_name}:redo:{order_id}:{item_id}:{attempt_segment}",
+        )
+        event_id = uuid5(
+            NAMESPACE_URL,
+            f"{cls.event_name}:{order_id}:{item_id}:{resolved_redo_id}",
+        )
         return cls(
-            eventId=uuid4(),
-            redoId=redo_id or uuid4(),
+            eventId=event_id,
+            redoId=resolved_redo_id,
             orderId=order_id,
             itemId=item_id,
             offerId=offer_id,
@@ -412,11 +428,20 @@ class DishPreparedEvent(OrderEvent):
         source_id: str | None = None,
         quantity: int = 1,
         is_redo: bool = False,
+        attempt: int | str | None = None,
         correlation_id: UUID | None = None,
     ) -> DishPreparedEvent:
-        """Build a repeatable event for an individual prepared dish/offer (RF-10)."""
+        """Build a deterministic UUIDv5 event per (orderId, itemId, attempt/isRedo) (RF-10)."""
+        if attempt is not None:
+            attempt_segment = f"redo:{attempt}" if is_redo else f"attempt:{attempt}"
+        else:
+            attempt_segment = "redo" if is_redo else "initial"
+        event_id = uuid5(
+            NAMESPACE_URL,
+            f"{cls.event_name}:{order_id}:{item_id}:{attempt_segment}",
+        )
         return cls(
-            eventId=uuid4(),
+            eventId=event_id,
             orderId=order_id,
             itemId=item_id,
             offerId=offer_id,
@@ -874,8 +899,16 @@ class PaymentCompletedMessage(BaseModel):
     session_id: UUID | None = Field(default=None, alias="sessionId")
     payment_id: str | None = Field(default=None, alias="paymentId")
     payment_method: str | None = Field(default=None, alias="paymentMethod")
-    total_amount: Decimal | None = Field(default=None, alias="montoTotal")
-    total_paid: Decimal | None = Field(default=None, alias="totalPaid")
+    total_amount: Decimal | None = Field(
+        default=None,
+        alias="montoTotal",
+        ge=Decimal("0.00"),
+    )
+    total_paid: Decimal | None = Field(
+        default=None,
+        alias="totalPaid",
+        ge=Decimal("0.00"),
+    )
     status: str | None = Field(default=None)
 
     @model_validator(mode="before")

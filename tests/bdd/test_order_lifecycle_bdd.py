@@ -156,7 +156,7 @@ def waiter_adds_items(bdd_context: dict[str, object], count: int, path_template:
     ][:count]
     resp = cast(TestClient, bdd_context["client"]).patch(
         resolve_bdd_path(path_template, order),
-        headers=auth_header("waiter"),
+        headers=auth_header("waiter", cast(UUID, bdd_context["waiter_user_id"])),
         json={"items": items_payload},
     )
     bdd_context["last_response"] = resp
@@ -173,7 +173,10 @@ def verify_item_count(bdd_context: dict[str, object], count: int) -> None:
 def waiter_confirms_order(bdd_context: dict[str, object], path_template: str) -> None:
     order = _persisted_order(bdd_context)
     path = path_template.replace("POST ", "").replace("{orderId}", str(order.public_id))
-    resp = cast(TestClient, bdd_context["client"]).post(path, headers=auth_header("waiter"))
+    resp = cast(TestClient, bdd_context["client"]).post(
+        path,
+        headers=auth_header("waiter", cast(UUID, bdd_context["waiter_user_id"])),
+    )
     bdd_context["last_response"] = resp
     assert resp.status_code == 200
 

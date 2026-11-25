@@ -19,6 +19,7 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from app.api.dependencies.auth import AuthContext
 from app.api.schemas.order import KitchenRejectItemInput
+from app.core.config import get_auth_settings
 from app.db.models import Order, OrderItem
 from app.db.session import get_session
 from app.domain.access import (
@@ -31,6 +32,7 @@ from app.domain.access import (
     START_PREPARATION,
     VOID_ADMIN,
     VOID_KITCHEN_ERROR,
+    WILDCARD_PERMISSION,
     AccessPolicy,
 )
 from app.domain.errors import (
@@ -42,6 +44,7 @@ from app.domain.errors import (
     VersionConflictError,
 )
 from app.domain.order_status import ItemStatus, OrderStatus
+from app.domain.roles import Role, parse_actor_uuid
 from app.messaging.events import (
     BillRequestedEvent,
     ChargeRequestedEvent,
@@ -136,10 +139,32 @@ def _consolidate_order_items(items: list[OrderItem]) -> list[OrderCreatedItem]:
 
 
 def _validate_order_items(items: list[OrderItem]) -> None:
-    """Ensure each item has an assigned dish_id and quantity >= 1."""
-    for item in items:
+    """Ensure at least one active item exists and each has dish_id and quantity >= 1."""
+    active_items = [item for item in items if item.status != ItemStatus.CANCELLED]
+    if not active_items:
+        raise InvalidOrderItemError("Cannot confirm an order without active items.")
+    for item in active_items:
         if item.dish_id is None or item.quantity < 1:
             raise InvalidOrderItemError()
+
+
+def ensure_waiter_order_ownership(order: Order, auth: AuthContext) -> None:
+    """Enforce BOLA ownership so a waiter cannot mutate another waiter's order (OBS-04)."""
+    if not get_auth_settings().enforce_waiter_ownership:
+        return
+    if order.responsible_waiter_id is None:
+        return
+    if Role.ADMIN in auth.effective_roles or auth.has_permission(WILDCARD_PERMISSION):
+        return
+    caller_uuid = parse_actor_uuid(auth.user_id)
+    if caller_uuid != order.responsible_waiter_id:
+        logger.warning(
+            "waiter ownership violation on order %s: caller=%s owner=%s",
+            order.public_id,
+            caller_uuid,
+            order.responsible_waiter_id,
+        )
+        raise ForbiddenRoleError("Cannot modify, transfer, or cancel another waiter's order.")
 
 
 def _build_charge_items(items: list[OrderItem]) -> list[ChargeRequestedItem]:
@@ -230,6 +255,7 @@ class OrderService:
         raw_offer_id = getattr(item, "offer_id", None)
         effective_offer_id = raw_offer_id or dish_id
         effective_plate_id = dish_id or raw_offer_id
+        attempt = item.version if is_redo and (item.version or 0) > 1 else None
         self._outbox.add(
             DishPreparedEvent.for_item(
                 order.public_id,
@@ -239,6 +265,7 @@ class OrderService:
                 source_id=effective_plate_id,
                 quantity=item.quantity,
                 is_redo=is_redo,
+                attempt=attempt,
             )
         )
 
@@ -330,6 +357,7 @@ class OrderService:
             source_id=effective_plate_id,
             quantity=item.quantity,
             reason=reason,
+            attempt=item.version or 1,
         )
         payload = redo_event.model_dump(mode="json", by_alias=True)
         validate_event_payload(redo_event.event_name, payload)
@@ -464,6 +492,7 @@ class OrderService:
                 source_id=dish_id,
                 quantity=target_item.quantity,
                 reason=item_reason,
+                attempt=order.version or 1,
             )
             payload = event.model_dump(mode="json", by_alias=True)
             validate_event_payload(event.event_name, payload)
@@ -585,11 +614,15 @@ class OrderService:
         order_id: UUID,
         new_table_number: int,
         expected_version: int | None = None,
+        auth: AuthContext | None = None,
     ) -> Order:
         """Transfer an active order to a different table (RF-16, RNF-09)."""
         order = await self._orders.get_by_public_id(order_id, for_update=True)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
+
+        if auth is not None:
+            ensure_waiter_order_ownership(order, auth)
 
         if order.status in _NON_TRANSFERABLE_STATUSES:
             raise InvalidStateTransitionError(order.status, "TRANSFER")
@@ -621,6 +654,8 @@ class OrderService:
         order = await self._orders.get_by_public_id(order_id, for_update=True)
         if order is None:
             raise OrderNotFoundError(f"Order with id={order_id} not found.")
+
+        ensure_waiter_order_ownership(order, auth)
 
         if order.status not in _ALLOWED_CANCEL_STATUSES:
             raise InvalidStateTransitionError(order.status, OrderStatus.CANCELLED)
@@ -709,11 +744,13 @@ class OrderService:
     ) -> Order:
         """Administratively void an order in IN_PREPARATION status (RF-26, RF-27, ADR-0012).
 
-        When ``charge_customer`` is True, transitions the order from IN_PREPARATION to
-        WASTED (awaiting settlement) and stages ChargeRequestedEvent into the outbox.
-        When ``charge_customer`` is False, transitions the order to terminal VOIDED
-        status and stages OrderWastedEvent into the outbox without charging the customer.
-        Only users with 'admin' role or administrative void permission are permitted.
+        Always stages ``ordenes.comanda.mermada`` (``OrderWastedEvent``) so Inventory records
+        the kitchen waste movement for consumed ingredients. When ``charge_customer`` is True
+        (default per RF-27), transitions the order to ``WASTED`` and stages
+        ``ordenes.cobro.solicitado`` (``ChargeRequestedEvent``) in the same database
+        transaction. When ``charge_customer`` is False (explicit admin charge waiver, RF-38),
+        transitions the order to terminal ``VOIDED`` status without staging a charge event.
+        Only users with ``admin`` role or administrative void permission are permitted.
         """
         self._verify_policy(
             auth,
@@ -729,6 +766,7 @@ class OrderService:
         if order.status != OrderStatus.IN_PREPARATION:
             raise InvalidStateTransitionError(order.status, target_status)
 
+        clean_reason = reason.strip() if reason and reason.strip() else None
         logger.info(
             "Order %s administratively voided (%s, charge=%s) by actor %s (role=%s). Reason: %s",
             order.public_id,
@@ -736,11 +774,17 @@ class OrderService:
             charge_customer,
             auth.user_id,
             auth.role,
-            reason or _NO_REASON_PROVIDED,
+            clean_reason or _NO_REASON_PROVIDED,
         )
 
         if charge_customer:
             order.mark_wasted()
+            self._stage_order_wasted(
+                order,
+                reason="ADMINISTRATIVE",
+                motivo="administrativo",
+                note=clean_reason,
+            )
             await self._stage_payment_request(order, ChargeRequestedEvent)
         else:
             order.mark_voided()
@@ -748,6 +792,7 @@ class OrderService:
                 order,
                 reason="ADMINISTRATIVE",
                 motivo="administrativo",
+                note=clean_reason,
             )
 
         self._orders.save(order)

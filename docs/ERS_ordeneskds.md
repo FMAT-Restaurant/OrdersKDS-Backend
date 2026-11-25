@@ -100,7 +100,7 @@ stateDiagram-v2
 
 - Creación de comandas para mesa o para llevar (`POST /orders`), opcionalmente vinculadas a `diningSessionId` (relación 1:N sesiones→órdenes).
 - Edición de ítems, cantidades, modificadores y notas (`PATCH /orders/{orderId}/items`) únicamente cuando la orden está en `CREATED` (sin confirmar) o en `REJECTED` (reabriéndola a `CREATED`), validando disponibilidad en Redis y congelando precios unitarios.
-- Trazabilidad mediante identidad extraída del API Gateway (`x-user-id`, `x-staff-id`, `x-user-roles`, `x-user-role`, `x-user-permissions`, `x-user-type`) o claims JWT sin verificación local de firma (ADR-0011), aplicando políticas PBAC (`AccessPolicy`, 16 permisos) y respaldo RBAC (`MESERO`, `COCINERO`, `CHEF_MASTER`, `ADMINISTRADOR` / `ADMIN`).
+- Trazabilidad mediante identidad verificada criptográficamente en JWT (`HS256`/`RS256` con `exp` obligatorio) o cabeceras del API Gateway autenticadas por secreto compartido (`X-Gateway-Secret`, ADR-0011), aplicando políticas PBAC (`AccessPolicy`, 16 permisos), propiedad por mesero (`ENFORCE_WAITER_ORDER_OWNERSHIP`) y respaldo RBAC (`MESERO`, `COCINERO`, `CHEF_MASTER`, `ADMINISTRADOR` / `ADMIN`).
 - Transferencia de orden entre mesas (`PATCH /orders/{orderId}/transfer`) con bloqueo optimista por columna `version` y encabezado `If-Match` (`409 VERSION_CONFLICT` ante concurrencia).
 
 ## 6. Sincronización en tiempo real, cobros y rehechuras
@@ -113,7 +113,7 @@ stateDiagram-v2
 ## 7. Cancelación y anulaciones (Mermas)
 
 - **Cancelación libre (`PATCH/POST /orders/{orderId}/cancel`):** permitida mientras la orden esté en `CREATED`, `RESERVED` o `REJECTED`; transiciona a `CANCELLED` y publica `ordenes.orden.cancelada`.
-- **Anulación administrativa (`PATCH/POST /orders/{orderId}/void`):** restringida a `ADMIN` (`orders:orders:void_admin`) sobre órdenes en `IN_PREPARATION`; transiciona a `WASTED`. Si `chargeCustomer` es `true` (default), publica `ordenes.cobro.solicitado`; si es `false`, publica `ordenes.comanda.mermada` (`reason="ADMINISTRATIVE"`).
+- **Anulación administrativa (`PATCH/POST /orders/{orderId}/void`):** restringida a `ADMIN` (`orders:orders:void_admin`) sobre órdenes en `IN_PREPARATION`. Siempre publica `ordenes.comanda.mermada` (`reason="ADMINISTRATIVE"`) para registrar la merma de insumos consumidos en Inventario; además, si `chargeCustomer` es `true` (default), transiciona a `WASTED` y publica conjuntamente `ordenes.cobro.solicitado` en la misma transacción (`RF-27`), mientras que si `chargeCustomer` es `false` transiciona a `VOIDED` sin emitir evento de cobro.
 - **Anulación por error de cocina (`PATCH/POST /orders/{orderId}/void-kitchen-error`):** restringida a `ADMIN` o `CHEF` (`kitchen:orders:void_error`) sobre órdenes en `IN_PREPARATION` con `note` obligatoria; transiciona toda la orden a `VOIDED` y publica `ordenes.comanda.mermada` (`reason="KITCHEN_ERROR"`, `motivo="error_cocina"`) sin emitir evento de cobro.
 
 ## 8. Saga de Inventario, Catálogo y Sala

@@ -87,6 +87,10 @@ def _build_env_content() -> str:
         "JWT_SECRET": secrets.token_urlsafe(32),
         "JWT_ALGORITHMS": "HS256,HS384,HS512,RS256,ES256",
         "TRUST_GATEWAY_HEADERS": "false",
+        "CORS_ALLOWED_ORIGINS": (
+            "http://localhost:5173,http://localhost:5174,"
+            "http://localhost:5177,http://localhost:5179,http://localhost:3000"
+        ),
     }
 
     example_path = Path(".env.example")

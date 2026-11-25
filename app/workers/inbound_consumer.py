@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 Sleeper = Callable[[float], Awaitable[None]]
 
 DEFAULT_INBOUND_QUEUE = "orders.inventory.inbound"
+DEFAULT_DLX_EXCHANGE = "orders.dlx"
 DEFAULT_INVENTORY_EXCHANGE = "inventory.topic"
 DEFAULT_MENU_EXCHANGE = "menu.topic"
 DEFAULT_FLOOR_EXCHANGE = "sala.events"
@@ -55,6 +56,7 @@ class InboundConsumerWorker:
         url: str,
         vhost: str = "/",
         queue_name: str | None = None,
+        dlx_exchange: str | None = None,
         inventory_exchange: str | None = None,
         menu_exchange: str | None = None,
         floor_exchange: str | None = None,
@@ -66,6 +68,9 @@ class InboundConsumerWorker:
         self._vhost = vhost
         self._queue_name: str = (
             queue_name or os.getenv("RABBITMQ_INBOUND_QUEUE") or DEFAULT_INBOUND_QUEUE
+        )
+        self._dlx_exchange: str = (
+            dlx_exchange or os.getenv("RABBITMQ_DLX_EXCHANGE") or DEFAULT_DLX_EXCHANGE
         )
         self._inventory_exchange: str = (
             inventory_exchange
@@ -84,10 +89,15 @@ class InboundConsumerWorker:
         self._sleeper = sleeper
         self._connection: AbstractRobustConnection | None = None
 
+    @property
+    def dlq_queue_name(self) -> str:
+        """Return the durable dead-letter queue name bound for this worker queue."""
+        return f"{self._queue_name}.dlq"
+
     async def _setup_topology(
         self, channel: aio_pika.abc.AbstractRobustChannel
     ) -> aio_pika.abc.AbstractRobustQueue:
-        """Declare durable exchanges, queue, and bindings."""
+        """Declare durable topic exchanges, DLX + *.dlq queue, inbound queue, and bindings."""
         exchange_names = {
             DEFAULT_INVENTORY_EXCHANGE: self._inventory_exchange,
             DEFAULT_MENU_EXCHANGE: self._menu_exchange,
@@ -102,7 +112,23 @@ class InboundConsumerWorker:
                     type=aio_pika.ExchangeType.TOPIC,
                     durable=True,
                 )
-        queue = await channel.declare_queue(self._queue_name, durable=True)
+
+        dlx = await channel.declare_exchange(
+            name=self._dlx_exchange,
+            type=aio_pika.ExchangeType.DIRECT,
+            durable=True,
+        )
+        dlq = await channel.declare_queue(self.dlq_queue_name, durable=True)
+        await dlq.bind(dlx, routing_key=self.dlq_queue_name)
+
+        queue = await channel.declare_queue(
+            self._queue_name,
+            durable=True,
+            arguments={
+                "x-dead-letter-exchange": self._dlx_exchange,
+                "x-dead-letter-routing-key": self.dlq_queue_name,
+            },
+        )
 
         for exchange_name, binding_key in INBOUND_BINDINGS:
             resolved_name = exchange_names.get(exchange_name, exchange_name)
@@ -111,19 +137,35 @@ class InboundConsumerWorker:
         return queue
 
     async def _handle_message(self, message: AbstractIncomingMessage) -> None:
-        """Process a single incoming broker message with dispatcher and automatic ACK."""
-        async with message.process():
-            routing_key = message.routing_key or ""
-            logger.debug(
-                "Received inbound message on %s (id=%s)",
-                routing_key,
-                message.message_id,
-            )
-            await self._dispatcher.dispatch_raw(
+        """Dispatch incoming broker message; ACK valid payloads or NACK(requeue=False) to DLQ."""
+        routing_key = message.routing_key or ""
+        logger.debug(
+            "Received inbound message on %s (id=%s)",
+            routing_key,
+            message.message_id,
+        )
+        try:
+            outcome = await self._dispatcher.dispatch_with_outcome(
                 raw_message=message.body,
                 queue_name=self._queue_name,
                 event_type=routing_key,
             )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception(
+                "Unhandled inbound dispatch failure on %s (id=%s); dead-lettering: %s",
+                routing_key,
+                message.message_id,
+                exc,
+            )
+            await message.nack(requeue=False)
+            return
+
+        if outcome.dead_lettered:
+            await message.nack(requeue=False)
+            return
+        await message.ack()
 
     async def run(self, stop_event: asyncio.Event) -> None:
         """Run consumer loop until stop_event is set."""

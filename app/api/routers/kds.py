@@ -7,7 +7,9 @@ Satisfies: RF-01, RF-02, RF-03, RF-04, RF-08, RF-09, RF-10, RF-11, RNF-03,
 OP-08, OP-09, OP-11 (TASK-12, TASK-13)
 """
 
+import asyncio
 import logging
+from collections.abc import Mapping, Sequence
 from typing import Annotated
 from uuid import UUID
 
@@ -33,7 +35,11 @@ from app.domain.access import (
     START_PREPARATION,
 )
 from app.repositories.orders import OrderRepository
-from app.services.catalog import get_catalog_info_mock, normalize_station_name
+from app.services.catalog import (
+    CatalogValidatorProtocol,
+    get_catalog_validator,
+    normalize_station_name,
+)
 from app.services.orders import OrderService, get_order_service
 
 logger = logging.getLogger(__name__)
@@ -65,16 +71,56 @@ OrderIdPath = Annotated[UUID, Path(alias="orderId", description="Public order id
 ItemIdPath = Annotated[UUID, Path(alias="itemId", description="Public order item identifier.")]
 
 
-def _resolve_catalog_info(item: OrderItem) -> dict[str, str | None]:
-    item_key = item.dish_id or str(item.public_id)
-    info = get_catalog_info_mock(item_key)
-    if info.get("station") is not None:
-        return info
-    if item.dish_id and item.dish_id != str(item.public_id):
-        fallback = get_catalog_info_mock(str(item.public_id))
-        if fallback.get("station") is not None:
-            return fallback
-    return info
+_EMPTY_CATALOG_INFO: dict[str, str | None] = {
+    "station": None,
+    "preparation_time_text": None,
+}
+
+
+def _item_lookup_keys(item: OrderItem) -> list[str]:
+    """Return ordered candidate catalog identifiers for an order item."""
+    keys: list[str] = []
+    for candidate in (
+        item.dish_id,
+        getattr(item, "offer_id", None),
+        str(item.public_id),
+    ):
+        if candidate and candidate not in keys:
+            keys.append(candidate)
+    return keys
+
+
+async def _prefetch_catalog_info(
+    orders: Sequence[Order],
+    catalog: CatalogValidatorProtocol,
+) -> dict[str, dict[str, str | None]]:
+    """Fetch station and preparation time concurrently from Redis catalog for unique IDs."""
+    unique_keys: list[str] = []
+    seen: set[str] = set()
+    for order in orders:
+        for item in order.items:
+            for key in _item_lookup_keys(item):
+                if key not in seen:
+                    seen.add(key)
+                    unique_keys.append(key)
+    if not unique_keys:
+        return {}
+    fetched = await asyncio.gather(*(catalog.get_catalog_info(key) for key in unique_keys))
+    return dict(zip(unique_keys, fetched, strict=True))
+
+
+def _resolve_catalog_info(
+    item: OrderItem,
+    catalog_map: Mapping[str, dict[str, str | None]],
+) -> dict[str, str | None]:
+    fallback_info: dict[str, str | None] = _EMPTY_CATALOG_INFO
+    for idx, key in enumerate(_item_lookup_keys(item)):
+        info = catalog_map.get(key, _EMPTY_CATALOG_INFO)
+        if idx == 0:
+            fallback_info = info
+        if info.get("station") is not None or info.get("preparation_time_text") is not None:
+            return info
+    return fallback_info
 
 
 def _matches_station(
@@ -92,10 +138,11 @@ def _matches_station(
 def _filter_order_items(
     order: Order,
     normalized_target_station: str | None,
+    catalog_map: Mapping[str, dict[str, str | None]],
 ) -> list[OrderItemResponse]:
     valid_items: list[OrderItemResponse] = []
     for item in order.items:
-        catalog_info = _resolve_catalog_info(item)
+        catalog_info = _resolve_catalog_info(item, catalog_map)
         raw_station = catalog_info.get("station")
         norm_item_station = normalize_station_name(raw_station)
         if not _matches_station(normalized_target_station, raw_station, norm_item_station):
@@ -131,6 +178,10 @@ async def get_kds_queue(
         Query(ge=0, description="Number of matching orders to skip."),
     ] = 0,
     session: Annotated[AsyncSession, Depends(get_session)] = None,  # type: ignore[assignment]
+    catalog: Annotated[
+        CatalogValidatorProtocol,
+        Depends(get_catalog_validator),
+    ] = None,  # type: ignore[assignment]
 ) -> list[OrderResponse]:
     """Retrieve orders for the KDS display.
 
@@ -142,27 +193,31 @@ async def get_kds_queue(
         limit: Maximum number of orders to return.
         offset: Number of matching orders to skip.
         session: Active database session.
+        catalog: Redis-backed catalog projection reader.
 
     Returns:
         List of OrderResponse objects ordered by elapsed preparation time.
     """
     repo = OrderRepository(session)
+    active_catalog = catalog if catalog is not None else get_catalog_validator()
     normalized_target_station = (
         normalize_station_name(station) if station and station.strip() else None
     )
 
     if normalized_target_station is None:
         orders = await repo.get_kds_queue(view=view, limit=limit, offset=offset)
+        catalog_map = await _prefetch_catalog_info(orders, active_catalog)
         return [
             OrderResponse.from_model(order, items=valid_items)
             for order in orders
-            if (valid_items := _filter_order_items(order, None))
+            if (valid_items := _filter_order_items(order, None, catalog_map))
         ]
 
     orders = await repo.get_kds_queue(view=view, limit=_MAX_STATION_FILTER_SCAN, offset=0)
+    catalog_map = await _prefetch_catalog_info(orders, active_catalog)
     queue: list[OrderResponse] = []
     for order in orders:
-        valid_items = _filter_order_items(order, normalized_target_station)
+        valid_items = _filter_order_items(order, normalized_target_station, catalog_map)
         if valid_items:
             queue.append(OrderResponse.from_model(order, items=valid_items))
 
