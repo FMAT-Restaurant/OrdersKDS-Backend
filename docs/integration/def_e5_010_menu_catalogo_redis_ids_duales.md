@@ -1,117 +1,77 @@
-# DEF-E5-010 — Validación Estricta de Catálogo en Redis, IDs Duales y Enriquecimiento KDS
+# DEF-E5-010 — Validación Estricta de Catálogo en Redis, IDs Duales y Enriquecimiento KDS (`INT-04`)
 
 **Módulo contraparte:** Menú (`Menu-Backend` y `Menu-Frontend`)  
 **Responsable contraparte:** Líder Técnico de Menú  
-**Referencia de auditoría:** Auditoría Equipo 6 — `DEF-E5-009`, `DEF-E5-010` (`CP-023`), `DEF-E5-013` (`CP-032`) / `TASK-45`  
-**Estado en `orders-backend`:** Implementado y activo (`CatalogRepository` en Redis + `CatalogConsumer` + `CatalogSyncWorker`)
+**Referencia de auditoría:** Auditoría Equipo 6 — `DEF-E5-009`, `DEF-E5-010` (`CP-023`), `DEF-E5-013` (`CP-032`) / `TASK-45` + `INT-04`  
+**Estado en `orders-backend`:** Implementado y adaptado en `INT-04` (`CatalogRepository` + `CatalogConsumer` + `CatalogReconciliationWorker`)
 
 ---
 
 ## 1. Contexto y Comportamiento Actual en `orders-backend`
 
-A raíz de los hallazgos `DEF-E5-009`, `DEF-E5-010` y `DEF-E5-013`, `orders-backend` endureció tres reglas críticas que dependen directamente de los datos sincronizados desde Menú hacia la caché Redis (`orders:catalog`):
+A raíz de los hallazgos `DEF-E5-009`, `DEF-E5-010`, `DEF-E5-013` y la integración `INT-04`, `orders-backend` ejecuta el siguiente flujo sobre Redis (`catalog:platillo:{id}`):
 
 1. **Validación estricta de existencia y disponibilidad (`DEF-E5-010` / `CP-023`):**
    - En `PATCH /api/v1/orders/{orderId}/items` y `PATCH /api/v1/orders/{orderId}/items/{itemId}/redo`, `orders-backend` exige que tanto `dishId`/`sourceId` como `offerId` (si es distinto) **existan en Redis y tengan `available = true`**.
-   - Si el hash de Redis no contiene el identificador o está marcado `available = false`, la petición responde **`422 Unprocessable Entity` con `error.code = "DISH_UNAVAILABLE"`** (ya no permite pasar platillos desconocidos ni usa mocks en producción).
+   - Si el hash de Redis no contiene el identificador o está marcado `available = false`, responde **`422 Unprocessable Entity` con `error.code = "DISH_UNAVAILABLE"`**.
 2. **Precio autoritativo desde Redis (`DEF-E5-009`):**
    - Al agregar ítems, `orders-backend` consulta `catalog_prices.get(offerId) or catalog_prices.get(dishId)` en Redis.
    - Si existe precio autoritativo en catálogo (`price > 0`), **ignora el `unitPrice` enviado por el cliente** y congela el precio del catálogo en BD y en eventos hacia Pagos.
-3. **Estación y tiempo de preparación en KDS (`DEF-E5-013` / `CP-032`):**
-   - `GET /api/v1/kds/queue?station=...` lee `station` y `preparationTimeText` directamente de `CatalogRepository` en Redis (clave `dishId` con fallback `offerId`). El mock estático de estaciones dejó de usarse en producción.
+3. **Estación y tiempo de preparación en KDS (`DEF-E5-013` / `CP-032` + `INT-04`):**
+   - `GET /api/v1/kds/queue?station=...` lee `station` y `preparationTimeText` directamente desde `CatalogRepository` en Redis (clave `dishId` con fallback `offerId`), sin mocks estáticos en producción.
+   - `CatalogConsumer.infer_station_from_menu_item` resuelve `station`/`estacion` explícitos o, en su defecto, infiere la estación (`parrilla`, `barra`, `fria`, `general`) desde `composition.slots[].station|course|name` o `categoryName`.
+4. **Adaptación a Menú v1 y propagación fuente → oferta (`INT-04`):**
+   - `CatalogReconciliationWorker` soporta de forma nativa respuestas paginadas anidadas de `Menu-Backend` (`GET /api/v1/menu/catalog` con `meta.totalPages`, consulta complementaria a `/catalog/categories` y `/offers/{offerId}`), así como resúmenes en `/menu/offers`.
+   - Expande tanto la **oferta comercial** (`offerId`, guardando `_source_ids`) como sus **fuentes físicas** (`recipeId`, `inventoryItemId`, `optionId` activos en `composition.slots[].options[]`, guardando `_linked_offers`).
+   - Autenticación hacia Menú configurada vía `CATALOG_SYNC_URL` + `CATALOG_SYNC_TOKEN` (o JWT de servicio efímero firmado con `JWT_SECRET` y permisos `menu:catalog:read`, `menu:offers:read`, `menu:categories:read`).
+   - `CatalogConsumer` proyecta eventos asíncronos de fuentes y ofertas (`menu.source.*`, `menu.offer.*`, `menu.item.*`, `menu.catalogo.actualizado`, además de eventos de disponibilidad desde Inventario), propaga cambios de disponibilidad de fuente física hacia sus ofertas vinculadas (`propagate_source_availability`) y `InboundConsumerWorker` soporta fallback de encabezado `X-Event-Type` cuando `routing_key` viene vacío.
 
 ---
 
-## 2. Brechas Detectadas entre `orders-backend` y `Menu-Backend` / `Menu-Frontend`
+## 2. Brechas Restantes con `Menu-Backend` y `Menu-Frontend`
 
-Al inspeccionar `Menu-Backend` y `Menu-Frontend`, se detectaron las siguientes diferencias de contrato:
+Con la adaptación `INT-04` en `orders-backend`, la brecha ya **no** requiere un endpoint plano exclusivo ni `sourceId` en raíz en `GET /api/v1/menu/catalog`. Los puntos pendientes por confirmar/alinear con Menú son:
 
-### A. Mensajería RabbitMQ (`Menu-Backend/docs/messaging.md`)
-- `Menu-Backend` documenta únicamente los eventos `menu.source.created`, `menu.source.updated` y `menu.source.deleted` sobre el exchange `menu.topic` con payload reducido:
-  ```json
-  { "sourceId": "...", "name": "...", "items": [{ "id": "...", "quantity": 1 }] }
-  ```
-- **Faltan campos esenciales en esos eventos (o en un evento de catálogo):** `offerId`, `basePrice` / `price`, `isAvailable` / `available`, `station` (estación de cocina) y `preparationTimeText` (tiempo estimado).
+### A. Campo `preparationTimeText` y estación explícita
+- `GET /api/v1/menu/catalog` y `/offers/{offerId}` en `Menu-Backend` actualmente **no exponen `preparationTimeText` (`tiempoPreparacion`)** ni un campo `station` explícito por oferta/slot; `orders-backend` infiere la estación por palabras clave de `course`/`name`/`categoryName` y deja `preparationTimeText = null` si Menú no lo incluye.
 
-### B. Endpoint REST de sincronización inicial (`CatalogController.java`)
-- `CatalogSyncWorker` en `orders-backend` intenta sincronizar catálogo inicial desde REST.
-- Actualmente `Menu-Backend` expone `GET /api/v1/menu/catalog` con estructura anidada por producto/marca y ofertas:
-  ```json
-  {
-    "data": [
-      {
-        "id": "brand-or-product-id",
-        "brandName": "...",
-        "isAvailable": true,
-        "offers": [
-          {
-            "id": "offer-id",
-            "presentationTag": "...",
-            "basePrice": 165.00,
-            "isAvailable": true,
-            "composition": { "slots": [...] }
-          }
-        ]
-      }
-    ],
-    "meta": { ... }
-  }
-  ```
-- **Faltantes en el JSON REST:** no expone `sourceId` (el ID físico que necesita Inventario para reserva FEFO), ni `station` ni `preparationTimeText` (que necesita Cocina/KDS), y no existe un endpoint plano `/menu/catalogo/completo`.
+### B. Emisión en vivo de eventos RabbitMQ desde `Menu-Backend`
+- Verificar en ambiente integrado que `Menu-Backend` publique en `menu.topic` (o `ordenes.topic`) los eventos `menu.source.created|updated|deleted` y/o `menu.offer.*` con `occurredOn` / `updatedAt` (e Idealmente `X-Event-Type` o `routing_key` estándar) para mantener Redis sincronizado en tiempo real entre reconciliaciones.
 
-### C. Integración con `Menu-Frontend` / `Orders-Frontend`
-- `orders-backend` soporta identificadores duales (`dishId` / `sourceId` para el insumo/receta física de Inventario + `offerId` para la oferta comercial/precio), y ahora valida ambos en Redis. Si el frontend envía solo `offerId` sin `sourceId`, o envía un `sourceId` que nunca fue proyectado a Redis, `orders-backend` rechazará la orden con `422 DISH_UNAVAILABLE`.
+### C. Envío de IDs duales desde `Menu-Frontend` / `Orders-Frontend`
+- Al llamar `PATCH /api/v1/orders/{orderId}/items`, el cliente debe enviar `offerId` (ID de la oferta comercial) y `dishId`/`sourceId` consistentes con las claves proyectadas en Redis (`recipeId` / `inventoryItemId` / `optionId` de la opción seleccionada, u `offerId` cuando aplique), para que:
+  1. `validate_dish_available` encuentre ambos IDs disponibles en Redis y no responda `422 DISH_UNAVAILABLE`.
+  2. `orders-backend` envíe el `sourceId`/`plateId` físico correcto a Inventario en `ordenes.orden.creada`.
 
 ---
 
-## 3. Riesgo en Integración Real (End-to-End)
+## 3. Contratos Soportados Actualmente por `orders-backend`
 
-Sin alinear este contrato antes de pruebas integrales:
-1. Toda creación/edición de ítems vía `PATCH /orders/{id}/items` fallará con **`422 DISH_UNAVAILABLE`** porque el Redis de Órdenes no recibirá las claves de `offerId` y `sourceId`.
-2. Aunque se precargue un ID parcialmente, faltarán `basePrice` (precio autoritativo), `station` (filtro por estación en KDS `/kds/queue?station=...`) y `preparationTimeText`.
-3. Inventario necesita el `sourceId` físico en `ordenes.pedido.creado` para reservar stock correctamente.
+### 3.1 Reconciliación REST (`CATALOG_SYNC_URL`)
+`CatalogReconciliationWorker` acepta ambos formatos:
+- **Formato real de `Menu-Backend`:** `GET /api/v1/menu/catalog` (paginado con `data[]` y `meta.totalPages`), complementado automáticamente con `GET /api/v1/menu/catalog/categories` y `GET /api/v1/menu/offers/{offerId}`.
+- **Formato plano legado/alternativo:** `{ "items": [{ "offerId": "...", "sourceId": "...", "basePrice": 165.00, "isAvailable": true, "station": "parrilla", "preparationTimeText": "12 min" }] }`.
 
----
-
-## 4. Contrato Propuesto para Alinear con Menú
-
-### Opción recomendada: enriquecer evento de catálogo + endpoint REST alineado
-
-#### 4.1 Evento RabbitMQ (exchange `menu.topic`)
-Publicar en `menu.catalogo.actualizado` (o incluir en los eventos de catálogo/oferta de `Menu-Backend`):
-
+### 3.2 Eventos RabbitMQ consumidos (`menu.topic` / `ordenes.topic` con `menu.#`)
 ```json
 {
   "eventId": "33333333-4444-4555-8666-777777777777",
-  "eventType": "menu.catalogo.actualizado",
-  "sourceId": "PLATE-BURGER-01",
-  "offerId": "OFFER-BURGER-01",
-  "name": "Hamburguesa Clásica",
+  "sourceId": "RECIPE-OR-INVENTORY-UUID",
+  "offerId": "OFFER-UUID",
   "basePrice": 165.00,
   "isAvailable": true,
   "station": "parrilla",
-  "preparationTimeText": "12 min",
-  "timestamp": "2026-11-25T18:00:00Z"
+  "tiempoPreparacion": "12 min",
+  "occurredOn": "2026-11-25T18:00:00Z"
 }
 ```
-
-> Nota: `orders-backend` (`CatalogConsumer`) ya soporta también formato por lotes (`items` / `offers` / `platillos`) e indexa tanto por `sourceId`/`plateId` como por `offerId`.
-
-#### 4.2 Snapshot inicial REST (`GET /api/v1/menu/catalog` o `/menu/catalogo/completo`)
-Incluir por cada oferta visible o registro de catálogo:
-- `sourceId` (UUID/ID físico vinculado con Inventario)
-- `offerId` (UUID/ID de la oferta comercial)
-- `basePrice` (decimal positivo)
-- `isAvailable` (boolean)
-- `station` (string, ej. `"parrilla"`, `"cocina_caliente"`, `"barra"`, `"postres"`)
-- `preparationTimeText` (string, ej. `"12 min"`)
+> También soporta los eventos individuales de fuente de `Menu-Backend`: `menu.source.created`, `menu.source.updated` y `menu.source.deleted` (propagando automáticamente disponibilidad/agotamiento a las ofertas vinculadas).
 
 ---
 
-## 5. Checklist de Acuerdos a Cerrar con el Líder de Menú
+## 4. Checklist de Acuerdos a Cerrar con el Líder de Menú
 
-- [ ] Definir el routing key exacto que emitirá `Menu-Backend` (`menu.catalogo.actualizado` vs. enriquecer `menu.source.*` / `menu.offer.*`).
-- [ ] Confirmar inclusión de `sourceId` (para Inventario), `offerId`, `basePrice`, `isAvailable`, `station` y `preparationTimeText` tanto en el evento RabbitMQ como en el endpoint REST de catálogo.
-- [ ] Validar el formato exacto de `GET /api/v1/menu/catalog` (o ruta dedicada para sync interno) para ajustar el parser de `CatalogSyncWorker` en `orders-backend` si permanece anidado.
-- [ ] Confirmar con `Menu-Frontend` y `Orders-Frontend` que al agregar ítems a una orden se envíen `dishId` / `sourceId` y `offerId` coherentes con el catálogo publicado.
-- [ ] Acordar el set canónico de nombres de estación (`station`) entre Menú y Cocina (KDS).
+- [ ] Confirmar URL de despliegue para `CATALOG_SYNC_URL` (p. ej. `http://menu-backend:8080/api/v1/menu/catalog`), `CATALOG_RECONCILIATION_INTERVAL_SECONDS` y esquema de token/permisos (`menu:catalog:read`, `menu:offers:read`, `menu:categories:read`).
+- [ ] Confirmar si `Menu-Backend` agregará `preparationTimeText` (`tiempoPreparacion`) y `station` explícito en `/offers/{offerId}` o si se mantiene la inferencia por `course`/`categoryName` acordando los nombres canónicos (`parrilla`, `barra`, `fria`, `general`).
+- [ ] Validar en pruebas E2E la publicación en RabbitMQ (`menu.topic`) de `menu.source.created|updated|deleted` y cambios de disponibilidad de ofertas.
+- [ ] Verificar con `Menu-Frontend` / `Orders-Frontend` que al añadir ítems envíen `offerId` y `dishId`/`sourceId` alineados con la composición de cada oferta.

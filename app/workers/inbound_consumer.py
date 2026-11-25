@@ -42,7 +42,7 @@ INBOUND_BINDINGS: tuple[tuple[str, str], ...] = (
     (DEFAULT_ORDERS_EXCHANGE, "pago.#"),
     (DEFAULT_ORDERS_EXCHANGE, "sala.#"),
     (DEFAULT_ORDERS_EXCHANGE, "dining.#"),
-    (DEFAULT_ORDERS_EXCHANGE, "menu.*"),
+    (DEFAULT_ORDERS_EXCHANGE, "menu.#"),
 )
 
 
@@ -138,7 +138,8 @@ class InboundConsumerWorker:
 
     async def _handle_message(self, message: AbstractIncomingMessage) -> None:
         """Dispatch incoming broker message; ACK valid payloads or NACK(requeue=False) to DLQ."""
-        routing_key = message.routing_key or ""
+        header_event = (message.headers or {}).get("X-Event-Type")
+        routing_key = message.routing_key or (str(header_event) if header_event else "")
         logger.debug(
             "Received inbound message on %s (id=%s)",
             routing_key,

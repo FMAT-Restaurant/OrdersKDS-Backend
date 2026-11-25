@@ -782,6 +782,9 @@ async def test_obs02_payment_completed_rejects_unsettled_status_and_underpayment
     uow.orders = order_repo
     uow.processed_events = proc_repo
 
+    def _current_status() -> OrderStatus:
+        return order.status
+
     # 1. Non-settled payment status ignored
     failed_msg = PaymentCompletedMessage(
         eventId=uuid4(),
@@ -790,7 +793,7 @@ async def test_obs02_payment_completed_rejects_unsettled_status_and_underpayment
         status="FAILED",
     )
     assert await handle_payment_completed(failed_msg, uow) is False
-    assert order.status is OrderStatus.DELIVERED
+    assert _current_status() == OrderStatus.DELIVERED
 
     # 2. Partial/underpaid settlement ignored
     underpaid_msg = PaymentCompletedMessage(
@@ -800,7 +803,7 @@ async def test_obs02_payment_completed_rejects_unsettled_status_and_underpayment
         status="PAID",
     )
     assert await handle_payment_completed(underpaid_msg, uow) is False
-    assert order.status is OrderStatus.DELIVERED
+    assert _current_status() == OrderStatus.DELIVERED
 
     # 3. Exact or tipped settlement transitions order to PAID
     valid_msg = PaymentCompletedMessage(
@@ -810,7 +813,7 @@ async def test_obs02_payment_completed_rejects_unsettled_status_and_underpayment
         status="COMPLETED",
     )
     assert await handle_payment_completed(valid_msg, uow) is True
-    assert order.status is OrderStatus.PAID
+    assert _current_status() == OrderStatus.PAID
 
 
 # ---------------------------------------------------------------------------

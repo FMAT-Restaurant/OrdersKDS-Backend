@@ -163,31 +163,41 @@ class CatalogRepository:
         key = self.key(dish_id)
         await self._redis.hset(key, mapping={"available": str(available).lower()})
 
-    async def upsert(
-        self,
-        dish_id: UUID | str,
-        *,
-        price: Decimal | str | int | float | None = None,
-        available: bool | None = None,
-        category: str | None = None,
-        station: str | None = None,
-        preparation_time_text: str | None = None,
-        updated_at: str | None = None,
-        menu_version: int | str | None = None,
-    ) -> bool:
-        """Update an item unless the event is older than the cached version."""
-        key = self.key(dish_id)
-        current = await self.get(dish_id)
-        if _is_stale(current, updated_at=updated_at, menu_version=menu_version):
-            return False
+    @staticmethod
+    def _merge_linked_offers(current_links: str, incoming_links: str) -> str:
+        merged = [part for part in current_links.split(",") if part]
+        for offer_ref in (part for part in incoming_links.split(",") if part):
+            if offer_ref not in merged:
+                merged.append(offer_ref)
+        return ",".join(merged)
 
+    @classmethod
+    def _build_upsert_mapping(
+        cls,
+        current: Mapping[str, str],
+        *,
+        price: Decimal | str | int | float | None,
+        available: bool | None,
+        category: str | None,
+        station: str | None,
+        preparation_time_text: str | None,
+        updated_at: str | None,
+        menu_version: int | str | None,
+        source_ids: str | None,
+        linked_offers: str | None,
+    ) -> dict[str, str]:
         mapping: dict[str, str] = {}
-        if price is not None:
-            mapping["price"] = str(price)
-        if available is not None:
-            mapping["available"] = str(available).lower()
-        if category is not None:
-            mapping["category"] = category
+        scalar_fields: tuple[tuple[str, object], ...] = (
+            ("price", str(price) if price is not None else None),
+            ("available", str(available).lower() if available is not None else None),
+            ("category", category),
+            ("updated_at", updated_at),
+            ("menu_version", str(menu_version) if menu_version is not None else None),
+            ("source_ids", source_ids),
+        )
+        for field_name, val in scalar_fields:
+            if isinstance(val, str):
+                mapping[field_name] = val
         if station is not None:
             mapping["station"] = normalize_station(station) or ""
         if preparation_time_text is not None:
@@ -199,11 +209,80 @@ class CatalogRepository:
                 )
                 or ""
             )
-        if updated_at is not None:
-            mapping["updated_at"] = updated_at
-        if menu_version is not None:
-            mapping["menu_version"] = str(menu_version)
+        if linked_offers is not None:
+            mapping["linked_offers"] = cls._merge_linked_offers(
+                current.get("linked_offers", ""),
+                linked_offers,
+            )
+        return mapping
+
+    async def upsert(
+        self,
+        dish_id: UUID | str,
+        *,
+        price: Decimal | str | int | float | None = None,
+        available: bool | None = None,
+        category: str | None = None,
+        station: str | None = None,
+        preparation_time_text: str | None = None,
+        updated_at: str | None = None,
+        menu_version: int | str | None = None,
+        source_ids: str | None = None,
+        linked_offers: str | None = None,
+    ) -> bool:
+        """Update an item unless the event is older than the cached version."""
+        key = self.key(dish_id)
+        current = await self.get(dish_id)
+        if _is_stale(current, updated_at=updated_at, menu_version=menu_version):
+            return False
+
+        mapping = self._build_upsert_mapping(
+            current,
+            price=price,
+            available=available,
+            category=category,
+            station=station,
+            preparation_time_text=preparation_time_text,
+            updated_at=updated_at,
+            menu_version=menu_version,
+            source_ids=source_ids,
+            linked_offers=linked_offers,
+        )
         if not mapping:
             return False
         await self._redis.hset(key, mapping=mapping)
         return True
+
+    async def _are_all_offer_sources_available(
+        self,
+        offer_id: str,
+        updated_source_id: UUID | str,
+    ) -> bool:
+        """Return True when every peer source required by ``offer_id`` is available."""
+        offer_entry = await self.get(offer_id)
+        raw_sources = offer_entry.get("source_ids", "")
+        required_sources = [part.strip() for part in raw_sources.split(",") if part.strip()]
+        for req_source in required_sources:
+            if str(req_source) == str(updated_source_id):
+                continue
+            peer = await self.get(req_source)
+            if peer.get("available", "true").lower() != "true":
+                return False
+        return True
+
+    async def propagate_source_availability(
+        self,
+        source_id: UUID | str,
+        available: bool,
+    ) -> None:
+        """Propagate a source's availability change to any reconciled commercial offers."""
+        source_entry = await self.get(source_id)
+        raw_links = source_entry.get("linked_offers", "")
+        if not raw_links:
+            return
+        offer_ids = [part.strip() for part in raw_links.split(",") if part.strip()]
+        for offer_id in offer_ids:
+            if not available:
+                await self.set_availability(offer_id, False)
+            elif await self._are_all_offer_sources_available(offer_id, source_id):
+                await self.set_availability(offer_id, True)

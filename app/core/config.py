@@ -44,6 +44,7 @@ class CatalogReconciliationSettings:
 
     sync_url: str | None
     interval_seconds: int | None
+    sync_token: str | None = None
 
 
 DEFAULT_SAGA_WATCHER_INTERVAL_SECONDS = 5.0
@@ -55,10 +56,14 @@ DEFAULT_JWT_ALGORITHMS: Final[tuple[str, ...]] = ("HS256", "HS384", "HS512", "RS
 DEFAULT_CORS_ALLOWED_ORIGINS: Final[tuple[str, ...]] = (
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:5174",
     "http://127.0.0.1:5174",
+    "http://localhost:5175",
+    "http://127.0.0.1:5175",
     "http://localhost:5176",
     "http://127.0.0.1:5176",
     "http://localhost:5177",
@@ -186,9 +191,11 @@ def get_catalog_reconciliation_settings() -> CatalogReconciliationSettings:
                 "CATALOG_SYNC_URL is required when "
                 "CATALOG_RECONCILIATION_INTERVAL_SECONDS is configured"
             )
+    raw_token = os.getenv("CATALOG_SYNC_TOKEN", "").strip()
     return CatalogReconciliationSettings(
         sync_url=sync_url,
         interval_seconds=interval,
+        sync_token=raw_token or None,
     )
 
 

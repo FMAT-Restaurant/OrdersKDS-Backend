@@ -127,6 +127,7 @@ async def main() -> None:
                 catalog_repository,
                 sync_url=catalog_settings.sync_url,
                 interval_seconds=catalog_settings.interval_seconds,
+                sync_token=catalog_settings.sync_token,
             )
             workers.append(catalog_worker.run(stop_event=stop_event))
         await asyncio.gather(*workers)
