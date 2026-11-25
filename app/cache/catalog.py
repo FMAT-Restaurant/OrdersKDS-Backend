@@ -253,6 +253,23 @@ class CatalogRepository:
         await self._redis.hset(key, mapping=mapping)
         return True
 
+    async def _are_all_offer_sources_available(
+        self,
+        offer_id: str,
+        updated_source_id: UUID | str,
+    ) -> bool:
+        """Return True when every peer source required by ``offer_id`` is available."""
+        offer_entry = await self.get(offer_id)
+        raw_sources = offer_entry.get("source_ids", "")
+        required_sources = [part.strip() for part in raw_sources.split(",") if part.strip()]
+        for req_source in required_sources:
+            if str(req_source) == str(updated_source_id):
+                continue
+            peer = await self.get(req_source)
+            if peer.get("available", "true").lower() != "true":
+                return False
+        return True
+
     async def propagate_source_availability(
         self,
         source_id: UUID | str,
@@ -267,20 +284,5 @@ class CatalogRepository:
         for offer_id in offer_ids:
             if not available:
                 await self.set_availability(offer_id, False)
-                continue
-            offer_entry = await self.get(offer_id)
-            raw_sources = offer_entry.get("source_ids", "")
-            required_sources = [part.strip() for part in raw_sources.split(",") if part.strip()]
-            if not required_sources:
-                await self.set_availability(offer_id, True)
-                continue
-            all_available = True
-            for req_source in required_sources:
-                if str(req_source) == str(source_id):
-                    continue
-                peer = await self.get(req_source)
-                if peer.get("available", "true").lower() != "true":
-                    all_available = False
-                    break
-            if all_available:
+            elif await self._are_all_offer_sources_available(offer_id, source_id):
                 await self.set_availability(offer_id, True)

@@ -368,7 +368,8 @@ async def test_live_rabbitmq_dlq_routes_poison_messages_and_keeps_worker_healthy
                 if refreshed is not None and refreshed.status is OrderStatus.RESERVED:
                     break
             await asyncio.sleep(0.2)
-        assert refreshed is not None and refreshed.status is OrderStatus.RESERVED
+        assert refreshed is not None
+        assert refreshed.status is OrderStatus.RESERVED
     finally:
         stop_event.set()
         await asyncio.wait_for(worker_task, timeout=10.0)
@@ -420,15 +421,19 @@ async def test_deployed_container_websocket_smoke_and_sec03_sec04() -> None:
     async with websockets.connect(f"{ws_base}/ws/waiter?token={waiter_token}") as ws_waiter:
         await ws_waiter.send(json.dumps({"action": "subscribe", "channel": "floor"}))
 
+    async def _connect_and_expect_close(ws_uri: str) -> None:
+        async with websockets.connect(ws_uri) as ws_conn:
+            await asyncio.wait_for(ws_conn.recv(), timeout=5.0)
+
     with pytest.raises(ConnectionClosed) as unauth_ws:
-        async with websockets.connect(f"{ws_base}/ws/kds") as ws_bad:
-            await asyncio.wait_for(ws_bad.recv(), timeout=5.0)
-    assert unauth_ws.value.rcvd is not None and unauth_ws.value.rcvd.code == 4401
+        await _connect_and_expect_close(f"{ws_base}/ws/kds")
+    assert unauth_ws.value.rcvd is not None
+    assert unauth_ws.value.rcvd.code == 4401
 
     with pytest.raises(ConnectionClosed) as forbidden_ws:
-        async with websockets.connect(f"{ws_base}/ws/kds?token={waiter_token}") as ws_wrong_role:
-            await asyncio.wait_for(ws_wrong_role.recv(), timeout=5.0)
-    assert forbidden_ws.value.rcvd is not None and forbidden_ws.value.rcvd.code == 4403
+        await _connect_and_expect_close(f"{ws_base}/ws/kds?token={waiter_token}")
+    assert forbidden_ws.value.rcvd is not None
+    assert forbidden_ws.value.rcvd.code == 4403
 
     # 2. SEC-03 & SEC-04 logical security checks over live HTTP (OBS-08)
     async with httpx.AsyncClient(base_url=base_url, timeout=10.0) as client:

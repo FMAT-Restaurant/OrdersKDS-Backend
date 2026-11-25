@@ -130,6 +130,33 @@ def _iter_active_composition_options(composition: object) -> Iterator[Mapping[st
                 yield option
 
 
+def _extract_primary_source(option: Mapping[str, Any]) -> str | None:
+    """Return the primary physical source identifier for a composition option."""
+    src_type = str(option.get("sourceType", "")).upper()
+    primary = option.get("recipeId") if src_type == "RECIPE" else option.get("optionId")
+    return str(primary) if primary is not None else None
+
+
+def _collect_option_sources(
+    option: Mapping[str, Any],
+    seen: set[str],
+) -> list[tuple[str, bool | None]]:
+    """Collect unique (source_id, is_available) pairs referenced by a single option."""
+    raw_opt_avail = option.get("isAvailable")
+    opt_avail = raw_opt_avail if isinstance(raw_opt_avail, bool) else None
+    pairs: list[tuple[str, bool | None]] = []
+    # Project recipeId, inventoryItemId, and optionId (Menu's sourceId for INVENTORY_ITEM)
+    for key in ("recipeId", "inventoryItemId", "optionId"):
+        candidate = option.get(key)
+        if candidate is None:
+            continue
+        sid = str(candidate).strip()
+        if sid and sid not in seen:
+            seen.add(sid)
+            pairs.append((sid, opt_avail))
+    return pairs
+
+
 def _extract_sources_from_composition(
     composition: object,
 ) -> tuple[list[tuple[str, bool | None]], list[str]]:
@@ -138,21 +165,10 @@ def _extract_sources_from_composition(
     primary_sources: list[str] = []
     seen: set[str] = set()
     for option in _iter_active_composition_options(composition):
-        raw_opt_avail = option.get("isAvailable")
-        opt_avail = raw_opt_avail if isinstance(raw_opt_avail, bool) else None
-        src_type = str(option.get("sourceType", "")).upper()
-        primary = option.get("recipeId") if src_type == "RECIPE" else option.get("optionId")
-        if primary is not None and str(primary) not in primary_sources:
-            primary_sources.append(str(primary))
-
-        # Project recipeId, inventoryItemId, and optionId (Menu's sourceId for INVENTORY_ITEM)
-        for key in ("recipeId", "inventoryItemId", "optionId"):
-            candidate = option.get(key)
-            if candidate is not None:
-                sid = str(candidate).strip()
-                if sid and sid not in seen:
-                    seen.add(sid)
-                    discovered.append((sid, opt_avail))
+        primary = _extract_primary_source(option)
+        if primary is not None and primary not in primary_sources:
+            primary_sources.append(primary)
+        discovered.extend(_collect_option_sources(option, seen))
     return discovered, primary_sources
 
 
@@ -313,6 +329,49 @@ class CatalogReconciliationWorker:
             return dict(body["data"])
         return None
 
+    @staticmethod
+    def _resolve_entry_category_name(
+        entry: Mapping[str, Any],
+        categories: Mapping[str, str],
+    ) -> str | None:
+        cat_ids = entry.get("categoryIds")
+        if not isinstance(cat_ids, list):
+            return None
+        return next((categories[str(cid)] for cid in cat_ids if str(cid) in categories), None)
+
+    async def _expand_single_entry_offers(
+        self,
+        client: httpx.AsyncClient,
+        entry: Mapping[str, Any],
+        cat_name: str | None,
+        menu_root: str | None,
+        headers: Mapping[str, str],
+    ) -> list[Mapping[str, Any]]:
+        offers = entry.get("offers")
+        if not isinstance(offers, list):
+            return []
+        entry_avail = bool(entry.get("isAvailable", True))
+        projected: list[Mapping[str, Any]] = []
+        for offer in offers:
+            if not isinstance(offer, Mapping):
+                continue
+            oid = offer.get("id")
+            detail = (
+                await self._fetch_offer_detail(client, menu_root, str(oid), headers)
+                if oid is not None
+                else None
+            )
+            effective_offer: Mapping[str, Any] = detail if detail is not None else offer
+            offer_avail = entry_avail and bool(effective_offer.get("isAvailable", True))
+            projected.extend(
+                _expand_offer_projection_items(
+                    effective_offer,
+                    offer_available=offer_avail,
+                    category_name=cat_name,
+                )
+            )
+        return projected
+
     async def _expand_catalog_entries(
         self,
         client: httpx.AsyncClient,
@@ -323,34 +382,16 @@ class CatalogReconciliationWorker:
         categories = await self._fetch_category_names(client, menu_root, headers)
         projected: list[Mapping[str, Any]] = []
         for entry in entries:
-            entry_avail = bool(entry.get("isAvailable", True))
-            cat_ids = entry.get("categoryIds")
-            cat_name = (
-                next((categories[str(cid)] for cid in cat_ids if str(cid) in categories), None)
-                if isinstance(cat_ids, list)
-                else None
+            cat_name = self._resolve_entry_category_name(entry, categories)
+            projected.extend(
+                await self._expand_single_entry_offers(
+                    client,
+                    entry,
+                    cat_name,
+                    menu_root,
+                    headers,
+                )
             )
-            offers = entry.get("offers")
-            if not isinstance(offers, list):
-                continue
-            for offer in offers:
-                if not isinstance(offer, Mapping):
-                    continue
-                oid = offer.get("id")
-                detail = (
-                    await self._fetch_offer_detail(client, menu_root, str(oid), headers)
-                    if oid is not None
-                    else None
-                )
-                effective_offer: Mapping[str, Any] = detail if detail is not None else offer
-                offer_avail = entry_avail and bool(effective_offer.get("isAvailable", True))
-                projected.extend(
-                    _expand_offer_projection_items(
-                        effective_offer,
-                        offer_available=offer_avail,
-                        category_name=cat_name,
-                    )
-                )
         return projected
 
     async def _expand_offer_summaries(

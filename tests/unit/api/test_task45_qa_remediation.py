@@ -407,7 +407,9 @@ def test_cp025_confirm_order_without_active_items_returns_422(
 def test_cp028_openapi_documents_adr0012_cancel_states() -> None:
     cancel_op = app.openapi()["paths"]["/orders/{orderId}/cancel"]["patch"]
     desc = cancel_op["description"]
-    assert "CREATED" in desc and "RESERVED" in desc and "REJECTED" in desc
+    assert "CREATED" in desc
+    assert "RESERVED" in desc
+    assert "REJECTED" in desc
     assert "ADR-0012" in desc
 
 
