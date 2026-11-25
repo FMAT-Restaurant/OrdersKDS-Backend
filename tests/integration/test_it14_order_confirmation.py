@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import json
 from collections.abc import AsyncGenerator
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from threading import Lock
 from typing import Any
 from uuid import UUID, uuid4
 
+import jwt
 import pytest
 from fastapi.testclient import TestClient
 
@@ -19,6 +18,7 @@ from app.db.models import Order, OrderItem, Outbox
 from app.db.session import get_session
 from app.domain.order_status import OrderStatus
 from app.main import app
+from tests.conftest import TEST_JWT_SECRET
 
 
 class ConfirmationDatabase:
@@ -56,21 +56,17 @@ class ConfirmationSession:
             self.lock_acquired = False
 
 
-def _jwt_segment(payload: dict[str, str | int]) -> str:
-    serialized = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    return base64.urlsafe_b64encode(serialized).rstrip(b"=").decode("ascii")
-
-
 def _auth_header() -> dict[str, str]:
-    header = _jwt_segment({"alg": "HS256", "typ": "JWT"})
-    claims = _jwt_segment(
+    token = jwt.encode(
         {
             "user_id": str(uuid4()),
             "role": "waiter",
-            "exp": int(datetime.now(UTC).timestamp()) + 300,
-        }
+            "exp": int((datetime.now(UTC) + timedelta(seconds=300)).timestamp()),
+        },
+        TEST_JWT_SECRET,
+        algorithm="HS256",
     )
-    return {"Authorization": f"Bearer {header}.{claims}.c2ln"}
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.mark.integration
@@ -116,7 +112,9 @@ def test_concurrent_confirm_requests_stage_exactly_one_event(
     assert order.confirmed_at is not None
     assert order.confirmed_by is not None
     assert len(database.outbox_rows) == 1
-    assert database.outbox_rows[0].payload["items"] == [{"offerId": "dish-1", "quantity": 1}]
+    assert database.outbox_rows[0].payload["items"] == [
+        {"offerId": "dish-1", "plateId": "dish-1", "sourceId": "dish-1", "quantity": 1}
+    ]
 
 
 @pytest.mark.integration

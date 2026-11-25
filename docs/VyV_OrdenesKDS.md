@@ -177,7 +177,7 @@ Fuente: ERS v4 (§2–§9) y Arquitectura/Comunicaciones (marcados *Arq.*). Los 
 | RF-21 | Pasar a `PAID` **solo** al consumir `pagos.pago.completado` | ERS §6 |
 | RF-22 | Rehacer un platillo `DELIVERED → PENDING` con nota obligatoria | ERS §6 |
 | RF-23 | Modificar platillos solo en `CREATED` | ERS §7 |
-| RF-24 | Cancelar comanda solo en `CREATED` | ERS §7 |
+| RF-24 | Cancelar comanda en `CREATED`, `RESERVED` o `REJECTED` (antes de `IN_PREPARATION`, `ADR-0012`) | ERS §7 / ADR-0012 |
 | RF-25 | Publicar `ordenes.orden.cancelada` y pasar a `CANCELLED` (sin cobro) | ERS §7 |
 | RF-26 | Solo `admin` anula en `IN_PREPARATION` por razón administrativa → `WASTED` | ERS §7 |
 | RF-27 | `WASTED`: publicar `comanda.mermada` + `cobro.solicitado`; se cobra como entrega normal | ERS §7 |
@@ -789,7 +789,7 @@ Se ejecutan contra el stack levantado con `docker compose` (API + PostgreSQL + R
 | CT-03 | `PATCH /orders/{id}/items` | `200` en `CREATED`; `409` fuera de `CREATED`; `DISH_UNAVAILABLE` | RF-14, RF-17, RF-23 |
 | CT-04 | `PATCH /orders/{id}/transfer` | `200`, mesa cambiada | RF-16 |
 | CT-05 | `POST /orders/{id}/confirm` | `200`, sin esperar a Inventario | RF-32 |
-| CT-06 | `PATCH /orders/{id}/cancel` | `200` en `CREATED`; `409` si no | RF-24, RF-25 |
+| CT-06 | `PATCH /orders/{id}/cancel` | `200` en `CREATED`/`RESERVED`/`REJECTED` (`ADR-0012`); `409` en `IN_PREPARATION` o terminales | RF-24, RF-25 |
 | CT-07 | `PATCH /orders/{id}/items/{itemId}/redo` | `422`/`NOTE_REQUIRED` sin `note`; `200` con `note` | RF-22 |
 | CT-08 | `POST /orders/{id}/request-bill` | `200`; evento con precios congelados | RF-20 |
 | CT-09 | `GET /kds/queue?station=` | Orden por prioridad/cronología; filtro por estación; excluye `PAID` | RF-01…RF-04, RF-08 |

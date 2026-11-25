@@ -17,7 +17,11 @@ from app.db.models import Order, OrderItem
 from app.db.session import get_session
 from app.domain.errors import DishUnavailableError
 from app.main import app
-from app.services.catalog import CatalogValidatorProtocol, get_catalog_validator
+from app.services.catalog import (
+    CatalogValidatorProtocol,
+    get_catalog_info_mock,
+    get_catalog_validator,
+)
 from app.services.notifications import OrderNotifier, get_order_notifier
 from app.services.orders import OrderService, get_order_service
 from app.services.shifts import ShiftService, get_shift_service
@@ -56,6 +60,9 @@ class FakeCatalogValidator(CatalogValidatorProtocol):
     async def get_dish_price(self, dish_id: str) -> Decimal | None:
         price = self.prices.get(dish_id)
         return price if price is not None and price > Decimal("0.00") else None
+
+    async def get_catalog_info(self, dish_id: str) -> dict[str, str | None]:
+        return get_catalog_info_mock(dish_id)
 
 
 class SpyOrderNotifier(OrderNotifier):

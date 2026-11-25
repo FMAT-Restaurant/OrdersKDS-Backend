@@ -23,12 +23,7 @@ line-length = 99
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "N", "S", "ASYNC", "C90", "SIM"]
-ignore = [
-    # S101: use of assert — needed in tests; suppressed project-wide because
-    # ruff S rules flag pytest assertions.  Only suppress in tests directory
-    # via per-file ignores below.
-    "S101",
-]
+ignore = []
 
 [tool.ruff.lint.per-file-ignores]
 # Tests may use assert, print, and hardcoded credentials for fixtures.

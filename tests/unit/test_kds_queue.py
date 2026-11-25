@@ -26,8 +26,10 @@ from app.domain.roles import Role
 from app.main import app
 from app.repositories.orders import build_kds_queue_query
 from app.services.catalog import (
+    DefaultCatalogValidator,
     clear_catalog_mock,
     get_catalog_info_mock,
+    get_catalog_validator,
     normalize_station_name,
     register_catalog_mock,
 )
@@ -129,15 +131,18 @@ def fake_session(test_db: dict[UUID, Order]) -> FakeKdsAsyncSession:
 @pytest.fixture(autouse=True)
 def override_kds_dependencies(fake_session: FakeKdsAsyncSession) -> Any:
     clear_catalog_mock()
+    default_catalog = DefaultCatalogValidator()
 
     async def _get_test_session() -> Any:
         yield fake_session
 
     app.dependency_overrides[get_session] = _get_test_session
+    app.dependency_overrides[get_catalog_validator] = lambda: default_catalog
     try:
         yield
     finally:
         app.dependency_overrides.pop(get_session, None)
+        app.dependency_overrides.pop(get_catalog_validator, None)
         clear_catalog_mock()
 
 

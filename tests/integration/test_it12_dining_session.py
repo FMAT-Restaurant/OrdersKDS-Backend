@@ -34,6 +34,7 @@ class InMemoryDiningSessionUnitOfWork:
         self.orders = orders
         self.processed_events = Mock()
         self.session = Mock()
+        self.session.scalar = AsyncMock(return_value=None)
         self.session.flush = AsyncMock()
         self.commit = AsyncMock()
 

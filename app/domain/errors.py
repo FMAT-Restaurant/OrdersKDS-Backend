@@ -80,13 +80,16 @@ class DishUnavailableError(DomainError):
 
 
 class InvalidOrderItemError(DomainError):
-    """Raised when an order item cannot be represented in the Inventory event."""
+    """Raised when an order lacks active items or an item cannot be sent to Inventory."""
 
     code: ErrorCode = ErrorCode.VALIDATION_ERROR
     http_status: int = 422
 
-    def __init__(self) -> None:
-        super().__init__("Order contains an item that cannot be sent to Inventory.")
+    def __init__(
+        self,
+        message: str = "Order contains an item that cannot be sent to Inventory.",
+    ) -> None:
+        super().__init__(message)
 
 
 class NoteRequiredError(DomainError):

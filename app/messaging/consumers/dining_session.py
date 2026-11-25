@@ -21,8 +21,8 @@ async def handle_dining_session_created(
 ) -> bool:
     """Create one CREATED order for a dining session, ignoring redelivery."""
     async with uow:
-        assert uow.orders is not None
-        assert uow.processed_events is not None
+        if uow.orders is None or uow.processed_events is None:
+            raise RuntimeError("UnitOfWork repositories are not initialized")
 
         existing = await uow.orders.get_by_dining_session_id(message.session_id)
         if existing is not None:

@@ -124,14 +124,28 @@ def test_void_administrative_publishes_charge_requested_when_charged(
     # Verify DB state
     assert test_db[order_id].status == OrderStatus.WASTED
 
-    # Verify staged events in outbox (only charge requested, no duplicate merma)
-    assert len(fake_session.outbox_rows) == 1
+    # Verify staged events in outbox (merma + charge requested in same transaction per RF-27)
+    assert len(fake_session.outbox_rows) == 2
     event_types = [entry.event_type for entry in fake_session.outbox_rows]
+    assert "ordenes.comanda.mermada" in event_types
     assert "ordenes.cobro.solicitado" in event_types
-    assert "ordenes.comanda.mermada" not in event_types
+
+    wasted_entry = next(
+        entry
+        for entry in fake_session.outbox_rows
+        if entry.event_type == "ordenes.comanda.mermada"
+    )
+    assert wasted_entry.payload["orderId"] == str(order_id)
+    assert wasted_entry.payload["motivo"] == "administrativo"
+    assert wasted_entry.payload["reason"] == "ADMINISTRATIVE"
+    assert wasted_entry.payload["note"] == "Deserción del comensal"
 
     # Verify ordenes.cobro.solicitado payload
-    charge_entry = fake_session.outbox_rows[0]
+    charge_entry = next(
+        entry
+        for entry in fake_session.outbox_rows
+        if entry.event_type == "ordenes.cobro.solicitado"
+    )
     assert charge_entry.payload["orderId"] == str(order_id)
     assert charge_entry.payload["status"] == "WASTED"
     assert charge_entry.payload["totalAmount"] == 150.0

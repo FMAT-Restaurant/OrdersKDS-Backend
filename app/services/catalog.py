@@ -77,7 +77,7 @@ def get_catalog_info_mock(item_id: str) -> dict[str, str | None]:
 
 
 class CatalogValidatorProtocol(Protocol):
-    """Protocol for checking and updating catalog dish availability."""
+    """Protocol for checking and updating catalog dish availability and metadata."""
 
     async def validate_dish_available(self, dish_id: str) -> None:
         """Raise DishUnavailableError if dish_id is not available or inactive."""
@@ -91,9 +91,13 @@ class CatalogValidatorProtocol(Protocol):
         """Return the positive authoritative catalog price for ``dish_id`` if present."""
         ...
 
+    async def get_catalog_info(self, dish_id: str) -> dict[str, str | None]:
+        """Return projected station and preparation_time_text for ``dish_id``."""
+        ...
+
 
 class CatalogRepositoryValidator:
-    """Adapt the Redis catalog projection to the order API validator contract."""
+    """Adapt the Redis catalog projection to the order and KDS API contract."""
 
     def __init__(self, repository: CatalogRepository) -> None:
         self._repository = repository
@@ -106,6 +110,9 @@ class CatalogRepositoryValidator:
 
     async def get_dish_price(self, dish_id: str) -> Decimal | None:
         return await self._repository.get_price(dish_id)
+
+    async def get_catalog_info(self, dish_id: str) -> dict[str, str | None]:
+        return await self._repository.get_catalog_info(dish_id)
 
 
 class DefaultCatalogValidator:
@@ -155,6 +162,10 @@ class DefaultCatalogValidator:
         await asyncio.sleep(0)
         price = self.prices.get(dish_id)
         return price if price is not None and price > Decimal("0.00") else None
+
+    async def get_catalog_info(self, dish_id: str) -> dict[str, str | None]:
+        await asyncio.sleep(0)
+        return get_catalog_info_mock(dish_id)
 
 
 _default_catalog_validator = DefaultCatalogValidator()

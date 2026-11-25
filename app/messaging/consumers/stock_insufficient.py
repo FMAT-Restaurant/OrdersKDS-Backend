@@ -100,8 +100,8 @@ async def handle_stock_insufficient(
         return False
 
     async with uow:
-        assert uow.processed_events is not None
-        assert uow.orders is not None
+        if uow.processed_events is None or uow.orders is None:
+            raise RuntimeError("UnitOfWork repositories are not initialized")
 
         if await uow.processed_events.exists(message.event_id, message.order_id):
             logger.info(

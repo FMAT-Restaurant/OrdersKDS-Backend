@@ -134,9 +134,24 @@ class CatalogRepository:
             return None
         return parsed if parsed > Decimal("0.00") else None
 
-    async def validate_dish_available(self, dish_id: str) -> None:
-        """Raise the domain error when the projected item is unavailable."""
+    async def get_catalog_info(self, dish_id: UUID | str) -> dict[str, str | None]:
+        """Return projected station and preparation_time_text for ``dish_id`` from Redis."""
         values = await self.get(dish_id)
+        station = values.get("station")
+        prep_time = values.get("preparation_time_text")
+        return {
+            "station": station if station else None,
+            "preparation_time_text": prep_time if prep_time else None,
+        }
+
+    async def validate_dish_available(self, dish_id: str) -> None:
+        """Raise DishUnavailableError when the item is absent or unavailable in Redis."""
+        values = await self.get(dish_id)
+        if not values:
+            raise DishUnavailableError(
+                dish_id=dish_id,
+                reason="Dish not found in catalog",
+            )
         if values.get("available", "true").lower() != "true":
             raise DishUnavailableError(
                 dish_id=dish_id,

@@ -164,6 +164,48 @@ jobs:
     needs: unit-tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ordenes
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: ordenes
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U ordenes"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - "6379:6379"
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      rabbitmq:
+        image: rabbitmq:3.13-alpine
+        ports:
+          - "5672:5672"
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q check_port_connectivity"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://ordenes@127.0.0.1:5432/ordenes
+      LIVE_DATABASE_URL: postgresql+asyncpg://ordenes@127.0.0.1:5432/ordenes
+      REDIS_URL: redis://127.0.0.1:6379/0
+      LIVE_REDIS_URL: redis://127.0.0.1:6379/0
+      RABBITMQ_URL: amqp://guest:guest@127.0.0.1:5672/
+      LIVE_RABBITMQ_URL: amqp://guest:guest@127.0.0.1:5672/
+      RABBITMQ_EXCHANGE: ordenes.topic
+      RABBITMQ_VHOST: /
+      SAGA_TIMEOUT_SECONDS: "60"
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -175,18 +217,82 @@ jobs:
           cache: "pip"
           cache-dependency-path: "requirements/dev.lock.txt"
           
-      - name: Install dependencies
+      - name: Install dependencies & migrate database
         run: |
           pip install --only-binary :all: --require-hashes -r requirements/dev.lock.txt
+          alembic upgrade head
+          python scripts/seed_demo.py --reset --fixed-ids
+
+      - name: Build and start production Docker container for WS & SEC-03/04 smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          IT_SECRET=$(python -c "import secrets; print(secrets.token_hex(32))")
+          echo "::add-mask::$IT_SECRET"
+          {
+            echo "LIVE_JWT_SECRET=$IT_SECRET"
+            echo "DEPLOYED_API_BASE_URL=http://127.0.0.1:18080"
+            echo "LIVE_INFRA_REQUIRED=1"
+          } >> "$GITHUB_ENV"
+          docker build -t orders-kds-backend:ci-smoke .
+          docker run -d --name orders-kds-ci-smoke --network host \
+            -e DATABASE_URL="postgresql+asyncpg://ordenes@127.0.0.1:5432/ordenes" \
+            -e REDIS_URL="redis://127.0.0.1:6379/0" \
+            -e RABBITMQ_URL="amqp://guest:guest@127.0.0.1:5672/" \
+            -e RABBITMQ_EXCHANGE="ordenes.topic" \
+            -e RABBITMQ_VHOST="/" \
+            -e SAGA_TIMEOUT_SECONDS="60" \
+            -e JWT_SECRET="$IT_SECRET" \
+            -e TRUST_GATEWAY_HEADERS="false" \
+            orders-kds-backend:ci-smoke \
+            uvicorn app.main:app --host 127.0.0.1 --port 18080
+          for attempt in {1..45}; do
+            if curl --fail --silent http://127.0.0.1:18080/health > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs orders-kds-ci-smoke
+          exit 1
         
-      - name: Run Smoke Tests (Testcontainers)
-        run: pytest tests/integration/test_smoke.py
+      - name: Run Integration, PostgreSQL, RabbitMQ DLQ & Container WS Smoke Tests
+        run: pytest tests/integration --junitxml=reports/integration.xml
+
+      - name: Stop smoke container
+        if: always()
+        run: docker rm -f orders-kds-ci-smoke || true
 
   api-and-contract:
     name: API & Contract Tests
     needs: [sonarcloud, integration-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ordenes
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: ordenes
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U ordenes"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - "6379:6379"
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql+asyncpg://ordenes@127.0.0.1:5432/ordenes
+      REDIS_URL: redis://127.0.0.1:6379/0
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -198,15 +304,21 @@ jobs:
           cache: "pip"
           cache-dependency-path: "requirements/dev.lock.txt"
 
-      - name: Install dependencies
+      - name: Install dependencies, migrate & seed deterministic demo data
         run: |
           pip install --only-binary :all: --require-hashes -r requirements/dev.lock.txt
+          alembic upgrade head
+          python scripts/seed_demo.py --reset --fixed-ids
 
-      - name: Start FastAPI for API contracts
+      - name: Generate ephemeral JWT signing material & Start FastAPI
         shell: bash
         run: |
           set -euo pipefail
-          uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/uvicorn-contract.log 2>&1 &
+          CONTRACT_SECRET=$(python -c "import secrets; print(secrets.token_hex(32))")
+          echo "::add-mask::$CONTRACT_SECRET"
+          echo "CONTRACT_JWT_SECRET=$CONTRACT_SECRET" >> "$GITHUB_ENV"
+          JWT_SECRET="$CONTRACT_SECRET" TRUST_GATEWAY_HEADERS="false" \
+            uvicorn app.main:app --host 127.0.0.1 --port 8000 > /tmp/uvicorn-contract.log 2>&1 &
           echo $! > /tmp/uvicorn-contract.pid
 
       - name: Wait for FastAPI
@@ -226,12 +338,13 @@ jobs:
           cat /tmp/uvicorn-contract.log
           exit 1
 
-      - name: Run Newman API contract collection
+      - name: Run Newman API contract collection (CT-01..CT-22, SEC-03, SEC-04)
         run: |
           mkdir -p reports
           npm ci --prefix tests/api/postman --ignore-scripts
           ./tests/api/postman/node_modules/.bin/newman run tests/api/postman/orders-kds.postman_collection.json \
             -e tests/api/postman/ci.postman_environment.json \
+            --env-var "jwtSecret=$CONTRACT_JWT_SECRET" \
             --reporters cli,junit \
             --reporter-junit-export reports/newman.xml
 
