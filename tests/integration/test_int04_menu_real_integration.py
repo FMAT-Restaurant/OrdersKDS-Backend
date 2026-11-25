@@ -332,7 +332,9 @@ def _assert_dual_ids_and_kds_stations(validator: CatalogRepositoryValidator) -> 
 
             r_confirm = client.post(f"/orders/{oid}/confirm", headers=headers)
             assert r_confirm.status_code == 200
-            assert fake_sess.outbox_rows[0].payload["items"][0] == {
+            outbox_items = fake_sess.outbox_rows[0].payload["items"]
+            assert isinstance(outbox_items, list)
+            assert outbox_items[0] == {
                 "offerId": _OFFER_BURGER,
                 "plateId": _RECIPE_BURGER,
                 "sourceId": _RECIPE_BURGER,
@@ -687,9 +689,10 @@ async def test_int04_live_menu_backend_it13_and_it14_e2e(
             pytest.fail(f"LIVE_MENU_REQUIRED=1 but Menu-Backend unreachable at {menu_base}")
         pytest.skip(f"Real Menu-Backend not running at {menu_base}; skipping live Menu E2E")
 
-    db_url = os.getenv(
-        "LIVE_DATABASE_URL",
-        os.getenv("DATABASE_URL", "postgresql+asyncpg://ordenes:ordenes@127.0.0.1:5432/ordenes"),
+    db_url = (
+        os.getenv("LIVE_DATABASE_URL", "").strip()
+        or os.getenv("DATABASE_URL", "").strip()
+        or "postgresql+asyncpg://ordenes@127.0.0.1:5432/ordenes"
     )
     redis_url = os.getenv("LIVE_REDIS_URL", os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"))
     amqp_url = os.getenv(
