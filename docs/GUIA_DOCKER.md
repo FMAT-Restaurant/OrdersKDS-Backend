@@ -126,6 +126,8 @@ En la pestaña **Containers** aparecen `ordenes-postgres`, `ordenes-redis` y `or
 | `connection refused` en `localhost:5432` | El contenedor aún no está *healthy* | `docker compose ps` y esperar |
 | `password authentication failed for user "ordenes"` | `.env` distinto al compose o volumen creado con otras credenciales | Alinear `.env` o ejecutar `docker compose down -v` |
 | Las pruebas de integración no arrancan | Testcontainers necesita Docker activo | Abrir Docker Desktop |
+| `401 Unauthorized` (`jwt rejected` / `ValueError` o `InvalidSignatureError`) | Falta `JWT_SECRET` en `.env` o el token fue firmado con otro secreto | Definir `JWT_SECRET` (≥32 bytes) en `.env`, recrear `api` y `workers` y regenerar el token con `python scripts/dev_token.py --role admin --user-id 00000000-0000-0000-0000-000000000001` |
+| `500` o bloqueo aparente de CORS en el navegador (`Connect call failed ('127.0.0.1', 5433)` o `6379`) | Se levantó `api`/`workers` sin sobrescribir `$env:DATABASE_URL` y `$env:REDIS_URL` a `postgres:5432` y `redis:6379` en la sesión de PowerShell | Definir `$env:DATABASE_URL` y `$env:REDIS_URL` hacia la red interna de Docker y recrear con `docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --no-deps api workers` |
 
 ---
 
@@ -168,10 +170,12 @@ Si deseas levantar **todo el backend dentro de contenedores Docker** (API + *wor
 3. El `healthcheck` de `api` usa Python estándar (`python -c "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health')"`), por lo que **no requiere `curl`** dentro de `python:3.12-slim` para pasar a `healthy` y desbloquear el arranque de `workers`.
 
 ```powershell
+# Asegura que .env tenga JWT_SECRET (32+ bytes) antes de levantar la API
 # Levantar los 6 contenedores con variables internas de la red Docker
 $env:DATABASE_URL="postgresql+asyncpg://ordenes:ordenes@postgres:5432/ordenes"
 $env:REDIS_URL="redis://redis:6379/0"
 $env:RABBITMQ_URL="amqp://ordenes:ordenes@rabbitmq:5672/"
+$env:RABBITMQ_VHOST="/"
 $env:SAGA_TIMEOUT_SECONDS="60"
 # Si tienes PostgreSQL local en 5432:
 # $env:POSTGRES_PORT="5433"
@@ -187,7 +191,24 @@ docker exec ordenes-api-ci alembic upgrade head
 python scripts/seed_demo.py --reset
 ```
 
-Para probar flujos con **RabbitMQ real** (automáticos con `stubs` o publicando mensajes JSON manuales desde `http://localhost:15672`), sigue [QUICKSTART.md §8 — Paso 6](../QUICKSTART.md).
+Para probar flujos con **RabbitMQ local** (automáticos con `stubs` o publicando mensajes JSON manuales desde `http://localhost:15672`), sigue [QUICKSTART.md §8 — Paso 6](../QUICKSTART.md).
+
+#### Variante contra RabbitMQ real/externo (ej. CloudAMQP, sin `rabbitmq` ni `stubs` locales)
+
+```powershell
+# 1. Verifica que tu .env ya tenga RABBITMQ_URL, RABBITMQ_VHOST, RABBITMQ_EXCHANGE y JWT_SECRET
+docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d postgres redis
+
+# 2. Sobrescribe SOLO los hosts internos de BD y Redis en esta sesión de PowerShell
+$env:DATABASE_URL="postgresql+asyncpg://ordenes:ordenes@postgres:5432/ordenes"
+$env:REDIS_URL="redis://redis:6379/0"
+
+# 3. Levanta api y workers sin iniciar rabbitmq ni stubs locales, y corre migraciones
+docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build --no-deps api workers
+docker exec ordenes-api-ci alembic upgrade head
+```
+
+> **Recordatorio de cierre de sprint:** antes de cerrar cualquier sprint o entregar a Auth/Staging, realiza siempre una verificación completa corriendo sobre los contenedores Docker finales (`orders-backend` y `orders-frontend`).
 
 ### 7.5 Usar contenedores de otros equipos
 
@@ -208,6 +229,12 @@ python scripts/seed_demo.py --reset
 docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build
 docker exec ordenes-api-ci alembic upgrade head
 python scripts/seed_demo.py --reset
+
+# Opción C: Backend en Docker hacia RabbitMQ real (CloudAMQP en .env, sin stubs)
+docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d postgres redis
+$env:DATABASE_URL="postgresql+asyncpg://ordenes:ordenes@postgres:5432/ordenes"; $env:REDIS_URL="redis://redis:6379/0"
+docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build --no-deps api workers
+docker exec ordenes-api-ci alembic upgrade head
 
 # Apagar al terminar (conserva datos)
 docker compose -f docker-compose.yml -f docker-compose.ci.yml stop

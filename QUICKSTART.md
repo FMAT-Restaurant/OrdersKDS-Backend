@@ -406,6 +406,9 @@ Combining `docker-compose.yml` and `docker-compose.ci.yml` builds **3 applicatio
 ```powershell
 cd C:\path\to\orders-backend
 
+# 0. Ensure JWT_SECRET (32+ bytes) exists in .env so ordenes-api-ci verifies HS256 JWTs
+#    (If missing, generate one: python -c "import secrets; print(secrets.token_urlsafe(32))")
+
 # 1. Export internal Docker-network connection variables for Compose
 #    Why: Docker Compose interpolates .env first; if your local .env uses
 #    127.0.0.1:5433 or an external AMQP URL, containers would fail to reach
@@ -413,6 +416,7 @@ cd C:\path\to\orders-backend
 $env:DATABASE_URL="postgresql+asyncpg://ordenes:ordenes@postgres:5432/ordenes"
 $env:REDIS_URL="redis://redis:6379/0"
 $env:RABBITMQ_URL="amqp://ordenes:ordenes@rabbitmq:5672/"
+$env:RABBITMQ_VHOST="/"
 $env:SAGA_TIMEOUT_SECONDS="60"
 # Uncomment if a local PostgreSQL server occupies host port 5432:
 # $env:POSTGRES_PORT="5433"
@@ -430,6 +434,30 @@ docker exec ordenes-api-ci alembic upgrade head
 > - Run `alembic upgrade head` inside the API container (`docker exec ordenes-api-ci alembic upgrade head`).
 > - Run `python scripts/seed_demo.py --reset` and `python scripts/dev_token.py` from your **host `.venv`** against the exposed ports (`localhost:5432` or `5433`, and `localhost:6379`), as shown in Step 3.
 > - If you run **Mode B**, skip Step 4 (the API, workers, and stubs are already running in Docker on port `8000`).
+
+##### Mode C — Docker Backend Connected to Real/External RabbitMQ (CloudAMQP, NO local `rabbitmq` or `stubs`)
+
+Use this mode for live integration testing against other teams (e.g., Inventory/Payments on CloudAMQP) while running `api` and `workers` inside Docker:
+
+1. Ensure `.env` defines the real `RABBITMQ_URL`, `RABBITMQ_VHOST`, `RABBITMQ_EXCHANGE`, `SAGA_TIMEOUT_SECONDS=60`, and `JWT_SECRET` (32+ bytes).
+2. Start only PostgreSQL and Redis:
+   ```powershell
+   docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d postgres redis
+   ```
+3. Override **only** the internal Docker hosts for PostgreSQL and Redis in your current PowerShell session (leaving CloudAMQP and `JWT_SECRET` untouched from `.env`):
+   ```powershell
+   $env:DATABASE_URL="postgresql+asyncpg://ordenes:ordenes@postgres:5432/ordenes"
+   $env:REDIS_URL="redis://redis:6379/0"
+   ```
+4. Start `api` and `workers` with `--no-deps` (so local `rabbitmq` and `stubs` are not started) and run migrations:
+   ```powershell
+   docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build --no-deps api workers
+   docker exec ordenes-api-ci alembic upgrade head
+   ```
+
+> **Important (PowerShell session overrides & host scripts):**
+> - Whenever you recreate `api` or `workers` from a new PowerShell window, re-export `$env:DATABASE_URL` and `$env:REDIS_URL`; otherwise Compose reads `127.0.0.1` from `.env`, causing HTTP `500` DB/Redis connection failures inside the containers (which browsers may report as a misleading CORS error).
+> - To run `alembic` or `python scripts/seed_demo.py --reset` from Windows afterward in the same terminal, clear the overrides first (`Remove-Item Env:DATABASE_URL, Env:REDIS_URL`) or use a separate terminal so host scripts read `127.0.0.1` from `.env`.
 
 #### Step 3 — Run Migrations & Seed Demo Data
 
@@ -470,11 +498,15 @@ python scripts/seed_demo.py --reset
 #### Step 4 — Generate Dev JWT Tokens & Start API + Workers (Mode A)
 
 ```powershell
-# 1. Generate 24-hour development JWT tokens
+# 1. Generate 24-hour development JWT tokens (automatically signed with JWT_SECRET from .env)
 python scripts/dev_token.py --role waiter --ttl 86400
 python scripts/dev_token.py --role kitchen --ttl 86400
 python scripts/dev_token.py --role chef --ttl 86400
 python scripts/dev_token.py --role admin --ttl 86400
+
+# When testing with orders-frontend, pass --user-id matching DEFAULT_WAITER_ID in seed_demo.py
+# so /ws/waiter allows subscribing to user:00000000-0000-0000-0000-000000000001
+python scripts/dev_token.py --role admin --user-id 00000000-0000-0000-0000-000000000001 --ttl 86400
 
 # 2. Terminal 1 — Start FastAPI (REST + WebSockets /ws/kds and /ws/waiter)
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
@@ -575,6 +607,9 @@ python -m app.workers.run_all
        }
        ```
    - Verify the transition via `GET /orders/{orderId}` and inspect `processed_events` in PostgreSQL (re-publishing with the exact same `eventId` is ignored idempotently).
+
+> [!IMPORTANT]
+> **Mandatory Pre-Sprint-Close Verification in Docker:** Local terminal runs (`Mode A` + frontend `pnpm dev`) are recommended for fast daily iteration. However, **before closing any sprint or delivering to Auth/Staging**, you must verify against the **final Docker images** (`orders-backend` in Docker + `orders-frontend` Docker image) to validate container packaging, Alembic migrations, healthchecks, CORS, and cryptographic JWT enforcement.
 
 ---
 ---
@@ -939,6 +974,9 @@ Al combinar `docker-compose.yml` y `docker-compose.ci.yml`, Docker construye **3
 ```powershell
 cd C:\ruta\a\orders-backend
 
+# 0. Asegúrate de tener JWT_SECRET (32+ bytes) en .env para que ordenes-api-ci valide firmas HS256
+#    (Si falta, genera uno: python -c "import secrets; print(secrets.token_urlsafe(32))")
+
 # 1. Definir en consola las URLs internas de la red Docker para Compose
 #    Por qué: Docker Compose lee primero tu .env; si tu .env local apunta a
 #    127.0.0.1:5433 o a una URL externa de AMQP, los contenedores fallarían al
@@ -946,6 +984,7 @@ cd C:\ruta\a\orders-backend
 $env:DATABASE_URL="postgresql+asyncpg://ordenes:ordenes@postgres:5432/ordenes"
 $env:REDIS_URL="redis://redis:6379/0"
 $env:RABBITMQ_URL="amqp://ordenes:ordenes@rabbitmq:5672/"
+$env:RABBITMQ_VHOST="/"
 $env:SAGA_TIMEOUT_SECONDS="60"
 # Descomenta esta línea si un PostgreSQL local ocupa el puerto 5432 en tu máquina:
 # $env:POSTGRES_PORT="5433"
@@ -963,6 +1002,30 @@ docker exec ordenes-api-ci alembic upgrade head
 > - Ejecuta `alembic upgrade head` dentro del contenedor (`docker exec ordenes-api-ci alembic upgrade head`).
 > - Ejecuta `python scripts/seed_demo.py --reset` y `python scripts/dev_token.py` desde el **`.venv` de tu máquina host** contra los puertos expuestos (`localhost:5432` o `5433`, y `localhost:6379`), como indica el Paso 3.
 > - Si utilizas el **Modo B**, omite el Paso 4 siguiente (API, workers y stubs ya están corriendo en Docker en el puerto `8000`).
+
+##### Modo C — Backend en Docker Conectado a RabbitMQ Real/Externo (CloudAMQP, SIN `rabbitmq` ni `stubs` locales)
+
+Usa este modo para pruebas de integración en vivo con otros equipos (por ejemplo Inventario o Pagos sobre CloudAMQP) manteniendo `api` y `workers` dentro de Docker:
+
+1. Verifica que tu `.env` ya tenga configurados `RABBITMQ_URL`, `RABBITMQ_VHOST`, `RABBITMQ_EXCHANGE`, `SAGA_TIMEOUT_SECONDS=60` y `JWT_SECRET` (32+ bytes).
+2. Levanta únicamente PostgreSQL y Redis:
+   ```powershell
+   docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d postgres redis
+   ```
+3. Sobrescribe **únicamente** los hosts internos de la red Docker para BD y Redis en tu sesión actual de PowerShell (manteniendo intactos CloudAMQP y `JWT_SECRET` de `.env`):
+   ```powershell
+   $env:DATABASE_URL="postgresql+asyncpg://ordenes:ordenes@postgres:5432/ordenes"
+   $env:REDIS_URL="redis://redis:6379/0"
+   ```
+4. Levanta `api` y `workers` con `--no-deps` (para no iniciar `rabbitmq` ni `stubs` locales) y aplica migraciones:
+   ```powershell
+   docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build --no-deps api workers
+   docker exec ordenes-api-ci alembic upgrade head
+   ```
+
+> **Importante (variables en sesión PowerShell y scripts en host):**
+> - Siempre que recrees `api` o `workers` desde una terminal nueva de PowerShell, vuelve a definir `$env:DATABASE_URL` y `$env:REDIS_URL`; de lo contrario Compose leerá `127.0.0.1` desde `.env` y la API fallará con error `500` al conectarse a BD/Redis (que el navegador puede reportar como un falso error de CORS).
+> - Si después quieres correr `alembic` o `python scripts/seed_demo.py --reset` desde Windows en la misma terminal, limpia primero esas variables (`Remove-Item Env:DATABASE_URL, Env:REDIS_URL`) o usa otra terminal para que lean `127.0.0.1` desde `.env`.
 
 #### Paso 3 — Ejecutar Migraciones y Cargar Datos Demo
 
@@ -1003,11 +1066,15 @@ python scripts/seed_demo.py --reset
 #### Paso 4 — Generar Tokens JWT de Desarrollo y Arrancar API + Workers (Modo A)
 
 ```powershell
-# 1. Generar tokens JWT de desarrollo válidos por 24 horas
+# 1. Generar tokens JWT de desarrollo válidos por 24 horas (firmados automáticamente con JWT_SECRET de .env)
 python scripts/dev_token.py --role waiter --ttl 86400
 python scripts/dev_token.py --role kitchen --ttl 86400
 python scripts/dev_token.py --role chef --ttl 86400
 python scripts/dev_token.py --role admin --ttl 86400
+
+# Al probar junto con orders-frontend, pasa --user-id alineado a DEFAULT_WAITER_ID de seed_demo.py
+# para que /ws/waiter permita suscribirse al canal user:00000000-0000-0000-0000-000000000001
+python scripts/dev_token.py --role admin --user-id 00000000-0000-0000-0000-000000000001 --ttl 86400
 
 # 2. Terminal 1 — Levantar FastAPI (REST + WebSockets /ws/kds y /ws/waiter)
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
@@ -1108,3 +1175,6 @@ python -m app.workers.run_all
        }
        ```
    - Consulta `GET /orders/{orderId}` para confirmar la transición y revisa `processed_events` en PostgreSQL (si reenvías exactamente el mismo `eventId`, se descarta por idempotencia).
+
+> [!IMPORTANT]
+> **Verificación Obligatoria en Docker Antes de Cerrar Sprint:** Ejecutar en terminal local (`Modo A` + `pnpm dev` en frontend) agiliza el trabajo diario, pero **antes de cerrar cualquier sprint o entregar a Auth/Staging debes probar sobre las imágenes finales de Docker** (`orders-backend` en Docker + imagen Docker de `orders-frontend`) para validar empaquetado, migraciones, healthchecks, CORS y verificación criptográfica JWT.
