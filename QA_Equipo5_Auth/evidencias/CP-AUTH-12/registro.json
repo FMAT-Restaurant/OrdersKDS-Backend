@@ -1,0 +1,46 @@
+{
+  "casoId": "CP-AUTH-12",
+  "titulo": "Consulta de sesión activa GET /api/v1/auth/me y proyección de allowedViews",
+  "requisitos": [
+    "REQ-AUTH-014",
+    "REQ-AUTH-021"
+  ],
+  "ejecutadoEnUtc": "2026-11-28T03:13:30.037Z",
+  "commits": {
+    "Auth-Backend": {
+      "commit": "a3844c97c7cc151c169369546a32f2054cfe6ed8",
+      "branch": "main"
+    },
+    "Auth-Frontend": {
+      "commit": "330f16d236e8bbd101761da0ac57f609711255a0",
+      "branch": "main"
+    },
+    "Auth-Documentation": {
+      "commit": "8b1fc349de850f87e59618516fb9bfaef559c47c",
+      "branch": "main"
+    },
+    "OrdersKDS-Backend-QA": {
+      "commit": "7a728c2ce94785acf683bd3afadb9653fe008e0f"
+    }
+  },
+  "estadoGlobal": "PASA",
+  "resumenVerificaciones": {
+    "total": 1,
+    "pasan": 1,
+    "fallan": 0
+  },
+  "verificaciones": [
+    {
+      "id": "NEWMAN-1",
+      "origen": "newman",
+      "nombre": "CP-AUTH-12: GET /api/v1/auth/me (allowedViews coherente)",
+      "estado": "PASA",
+      "statusCode": 200,
+      "tiempoMs": 4,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    }
+  ],
+  "nota": null,
+  "evidenciaAdicional": {}
+}

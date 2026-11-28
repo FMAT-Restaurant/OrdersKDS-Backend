@@ -1,0 +1,76 @@
+{
+  "casoId": "CP-AUTH-04",
+  "titulo": "Alta de personal y generación automática de StaffID ^[A-Z][0-9]{6}$ por prefijo",
+  "requisitos": [
+    "REQ-AUTH-003",
+    "BR-AUTH-004",
+    "INV-AUTH-002"
+  ],
+  "ejecutadoEnUtc": "2026-11-28T03:13:30.037Z",
+  "commits": {
+    "Auth-Backend": {
+      "commit": "a3844c97c7cc151c169369546a32f2054cfe6ed8",
+      "branch": "main"
+    },
+    "Auth-Frontend": {
+      "commit": "330f16d236e8bbd101761da0ac57f609711255a0",
+      "branch": "main"
+    },
+    "Auth-Documentation": {
+      "commit": "8b1fc349de850f87e59618516fb9bfaef559c47c",
+      "branch": "main"
+    },
+    "OrdersKDS-Backend-QA": {
+      "commit": "7a728c2ce94785acf683bd3afadb9653fe008e0f"
+    }
+  },
+  "estadoGlobal": "PASA",
+  "resumenVerificaciones": {
+    "total": 3,
+    "pasan": 3,
+    "fallan": 0
+  },
+  "verificaciones": [
+    {
+      "id": "NEWMAN-1",
+      "origen": "newman",
+      "nombre": "CP-AUTH-04: POST /staff crea colaborador desechable #1 (prefijo E)",
+      "estado": "PASA",
+      "statusCode": 201,
+      "tiempoMs": 186,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-2",
+      "origen": "newman",
+      "nombre": "CP-AUTH-04: POST /staff crea colaborador desechable #2 (prefijo M)",
+      "estado": "PASA",
+      "statusCode": 201,
+      "tiempoMs": 174,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "PREFIX-SEED-01",
+      "origen": "seed-verificacion",
+      "nombre": "Todos los colaboradores sembrados (H/A/G/M/C/J/E) cumplen prefijo por rol y ^[A-Z][0-9]{6}$",
+      "estado": "PASA",
+      "esperado": "Prefijo exacto según rol base y rol dinámico E",
+      "observado": {
+        "customPbac": "E000002",
+        "host": "H000003",
+        "almacenista": "A000004",
+        "gestorMenu": "G000005",
+        "mesero": "M000006",
+        "chef": "C000007",
+        "cajero": "J000008",
+        "tempOne": "M000009",
+        "tempTwo": "C000010",
+        "inactiveOne": "M000011"
+      }
+    }
+  ],
+  "nota": null,
+  "evidenciaAdicional": {}
+}

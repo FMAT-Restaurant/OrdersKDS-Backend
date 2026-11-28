@@ -1,0 +1,693 @@
+[
+  {
+    "description": "  Como usuario del ecosistema del restaurante\n  Quiero iniciar sesión según mi canal exclusivo ADMIN o STAFF sin revelar existencia de cuentas\n  Para garantizar el acceso seguro acorde a REQ-AUTH-001, REQ-AUTH-002 y REQ-AUTH-009",
+    "elements": [
+      {
+        "description": "",
+        "id": "bootstrap-inicial-de-administrador-y-autenticación-dual-anti-enumeración;sistema-ya-inicializado-rechaza-segundo-bootstrap-de-gerente",
+        "keyword": "Escenario",
+        "line": 7,
+        "name": "Sistema ya inicializado rechaza segundo bootstrap de Gerente",
+        "steps": [
+          {
+            "arguments": [],
+            "keyword": "Cuando ",
+            "line": 8,
+            "name": "consulto el estado público de inicialización",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:7"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 24874500
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Entonces ",
+            "line": 9,
+            "name": "la respuesta HTTP debe ser 200 y el campo \"configured\" debe ser verdadero",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:11"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 107459
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Cuando ",
+            "line": 10,
+            "name": "intento ejecutar un segundo setup-admin con correo \"intruso@fmat.edu.mx\"",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:16"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 11142708
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Entonces ",
+            "line": 11,
+            "name": "la respuesta HTTP debe ser 409",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:23"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 94208
+            }
+          },
+          {
+            "keyword": "After",
+            "hidden": true,
+            "result": {
+              "status": "passed",
+              "duration": 67374
+            }
+          }
+        ],
+        "tags": [],
+        "type": "scenario"
+      },
+      {
+        "description": "",
+        "id": "bootstrap-inicial-de-administrador-y-autenticación-dual-anti-enumeración;autenticación-dual-exitosa-y-bloqueo-de-cruce-de-canales",
+        "keyword": "Escenario",
+        "line": 13,
+        "name": "Autenticación dual exitosa y bloqueo de cruce de canales",
+        "steps": [
+          {
+            "arguments": [],
+            "keyword": "Cuando ",
+            "line": 14,
+            "name": "inicio sesión \"ADMIN\" con el correo del administrador sembrado y contraseña válida",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:27"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 188384666
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Entonces ",
+            "line": 15,
+            "name": "la respuesta HTTP debe ser 200 y entregar un AccessToken JWT de tipo \"ADMIN\"",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:34"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 3887875
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Cuando ",
+            "line": 16,
+            "name": "inicio sesión \"STAFF\" con el StaffID del Mesero sembrado y contraseña válida",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:45"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 172260291
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Entonces ",
+            "line": 17,
+            "name": "la respuesta HTTP debe ser 200 y entregar un AccessToken JWT de tipo \"STAFF\"",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:34"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 4134625
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Cuando ",
+            "line": 18,
+            "name": "intento iniciar sesión \"ADMIN\" enviando el StaffID \"ADM000001\"",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:54"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 170419041
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Entonces ",
+            "line": 19,
+            "name": "la respuesta HTTP debe ser 401 rechazando el cruce de canal sin acceso",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:70"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 236041
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Cuando ",
+            "line": 20,
+            "name": "intento iniciar sesión \"STAFF\" enviando el correo \"mesero@fmat.edu.mx\"",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:62"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 170404665
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Entonces ",
+            "line": 21,
+            "name": "la respuesta HTTP debe ser 401 rechazando el cruce de canal sin acceso",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:70"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 134458
+            }
+          },
+          {
+            "keyword": "After",
+            "hidden": true,
+            "result": {
+              "status": "passed",
+              "duration": 118832
+            }
+          }
+        ],
+        "tags": [],
+        "type": "scenario"
+      },
+      {
+        "description": "",
+        "id": "bootstrap-inicial-de-administrador-y-autenticación-dual-anti-enumeración;respuesta-homogénea-anti-enumeración-en-cuenta-inexistente,-contraseña-errónea-e-inactiva",
+        "keyword": "Escenario",
+        "line": 23,
+        "name": "Respuesta homogénea anti-enumeración en cuenta inexistente, contraseña errónea e inactiva",
+        "steps": [
+          {
+            "arguments": [],
+            "keyword": "Cuando ",
+            "line": 24,
+            "name": "intento login \"STAFF\" con credenciales inexistentes \"Q999999\"",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:76"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 509977166
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Entonces ",
+            "line": 25,
+            "name": "el rechazo 401 debe coincidir exactamente con el de contraseña incorrecta y cuenta inactiva",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:106"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 113500
+            }
+          },
+          {
+            "keyword": "After",
+            "hidden": true,
+            "result": {
+              "status": "passed",
+              "duration": 54458
+            }
+          }
+        ],
+        "tags": [],
+        "type": "scenario"
+      }
+    ],
+    "id": "bootstrap-inicial-de-administrador-y-autenticación-dual-anti-enumeración",
+    "line": 2,
+    "keyword": "Característica",
+    "name": "Bootstrap inicial de administrador y autenticación dual anti-enumeración",
+    "tags": [],
+    "uri": "bdd/features/01_bootstrap_and_login.feature"
+  },
+  {
+    "description": "  Como administrador de seguridad\n  Quiero que toda cuenta creada o restablecida permanezca aislada en estado TEMPORARY hasta cambiar su clave\n  Para cumplir REQ-AUTH-012, REQ-AUTH-013, INV-AUTH-002 e INV-AUTH-006",
+    "elements": [
+      {
+        "description": "",
+        "id": "contención-temporal-de-contraseña-y-transición-irreversible-a-active;colaborador-nuevo-temporary-queda-bloqueado-en-endpoints-operativos-y-activa-su-cuenta-con-bva-válido",
+        "keyword": "Escenario",
+        "line": 7,
+        "name": "Colaborador nuevo TEMPORARY queda bloqueado en endpoints operativos y activa su cuenta con BVA válido",
+        "steps": [
+          {
+            "arguments": [],
+            "keyword": "Dado ",
+            "line": 8,
+            "name": "que el administrador crea un colaborador temporal BDD con rol \"CAJERO\"",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:114"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 358950041
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Cuando ",
+            "line": 9,
+            "name": "ese colaborador inicia sesión por primera vez con su contraseña temporal",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:127"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 171078917
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Entonces ",
+            "line": 10,
+            "name": "el claim JWT \"mustChangePassword\" debe ser verdadero",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:140"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 727750
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Cuando ",
+            "line": 11,
+            "name": "ese colaborador temporal consulta \"GET /api/v1/staff\"",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:145"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 2877166
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Entonces ",
+            "line": 12,
+            "name": "debe recibir código HTTP 403 con código de error \"PASSWORD_CHANGE_REQUIRED\"",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:150"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 169624
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Cuando ",
+            "line": 13,
+            "name": "ese colaborador intenta establecer la contraseña límite inválida \"[REDACTED_TEST_PASSWORD]\" de 7 caracteres",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:155"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 3184916
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Entonces ",
+            "line": 14,
+            "name": "la respuesta HTTP debe ser 400",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:23"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 94832
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Cuando ",
+            "line": 15,
+            "name": "ese colaborador cambia su contraseña inicial por una válida compleja de 8 caracteres \"[REDACTED_TEST_PASSWORD]\"",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:163"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 365487540
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Entonces ",
+            "line": 16,
+            "name": "la respuesta HTTP debe ser 200 y su estado en \"/api/v1/auth/me\" debe pasar a \"ACTIVE\" conservando el mismo staffId",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:174"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 2977417
+            }
+          },
+          {
+            "keyword": "After",
+            "hidden": true,
+            "result": {
+              "status": "passed",
+              "duration": 4698750
+            }
+          }
+        ],
+        "tags": [],
+        "type": "scenario"
+      }
+    ],
+    "id": "contención-temporal-de-contraseña-y-transición-irreversible-a-active",
+    "line": 2,
+    "keyword": "Característica",
+    "name": "Contención temporal de contraseña y transición irreversible a ACTIVE",
+    "tags": [],
+    "uri": "bdd/features/02_temporary_password_containment.feature"
+  },
+  {
+    "description": "  Como gerente de restaurante y controlador PBAC\n  Quiero crear roles dinámicos sin privilegios administrativos ni roles vacíos\n  Para garantizar REQ-AUTH-003, REQ-AUTH-004, REQ-AUTH-005, REQ-AUTH-006, INV-AUTH-003 e INV-AUTH-005",
+    "elements": [
+      {
+        "description": "",
+        "id": "control-de-acceso-pbac,-prefijos-de-staffid-y-bloqueo-anti-escalación;bloqueo-de-escalación-a-administrador-o-wildcard-y-creación-de-rol-personalizado-con-prefijo-e",
+        "keyword": "Escenario",
+        "line": 7,
+        "name": "Bloqueo de escalación a ADMINISTRADOR o wildcard y creación de rol personalizado con prefijo E",
+        "steps": [
+          {
+            "arguments": [],
+            "keyword": "Dado ",
+            "line": 8,
+            "name": "que estoy autenticado como administrador principal",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:182"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 170133166
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Cuando ",
+            "line": 9,
+            "name": "intento crear un rol dinámico con permiso wildcard \"*\"",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:186"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 4012416
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Entonces ",
+            "line": 10,
+            "name": "la respuesta HTTP debe ser 400",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:23"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 53542
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Cuando ",
+            "line": 11,
+            "name": "intento crear un colaborador con roles vacíos",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:194"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 2363000
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Entonces ",
+            "line": 12,
+            "name": "la respuesta HTTP debe ser 400",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:23"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 59458
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Cuando ",
+            "line": 13,
+            "name": "intento crear un colaborador asignando el rol reservado \"ADMINISTRADOR\"",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:202"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 2282000
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Entonces ",
+            "line": 14,
+            "name": "la respuesta HTTP debe ser 400",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:23"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 46000
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Cuando ",
+            "line": 15,
+            "name": "creo el rol dinámico \"ROL_EVENTOS_BDD\" con permiso \"staff:view\" y un colaborador asignado",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:210"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 172262291
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Entonces ",
+            "line": 16,
+            "name": "la respuesta HTTP debe ser 201 y el staffId generado debe iniciar con \"E\" cumpliendo \"^[A-Z][0-9]{6}$\"",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:229"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 278459
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Cuando ",
+            "line": 17,
+            "name": "un colaborador \"MESERO\" autenticado consulta \"GET /api/v1/staff\"",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:236"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 171319875
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Entonces ",
+            "line": 18,
+            "name": "la respuesta HTTP debe ser 200 sin exponer el campo \"passwordHash\"",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:250"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 455875
+            }
+          },
+          {
+            "keyword": "After",
+            "hidden": true,
+            "result": {
+              "status": "passed",
+              "duration": 6141165
+            }
+          }
+        ],
+        "tags": [],
+        "type": "scenario"
+      }
+    ],
+    "id": "control-de-acceso-pbac,-prefijos-de-staffid-y-bloqueo-anti-escalación",
+    "line": 2,
+    "keyword": "Característica",
+    "name": "Control de acceso PBAC, prefijos de StaffID y bloqueo anti-escalación",
+    "tags": [],
+    "uri": "bdd/features/03_staff_pbac_and_roles.feature"
+  },
+  {
+    "description": "  Como servicio de autorización centralizado\n  Quiero rotar tokens opacos con detección de reuso y revocar sesiones activas al instante\n  Para cumplir REQ-AUTH-010, REQ-AUTH-011, REQ-AUTH-015 e INV-AUTH-007",
+    "elements": [
+      {
+        "description": "",
+        "id": "rotación-de-refreshtoken,-detección-de-replay-y-revocación-inmediata-por-desactivación;rotación-de-refreshtoken-e-invalidez-inmediata-tras-desactivación",
+        "keyword": "Escenario",
+        "line": 7,
+        "name": "Rotación de RefreshToken e invalidez inmediata tras desactivación",
+        "steps": [
+          {
+            "arguments": [],
+            "keyword": "Dado ",
+            "line": 8,
+            "name": "que el administrador crea y activa un colaborador temporal BDD de sesión corta",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:255"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 845334750
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Cuando ",
+            "line": 9,
+            "name": "el colaborador activo rota su sesión con \"/api/v1/auth/refresh\"",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:286"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 5391000
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Entonces ",
+            "line": 10,
+            "name": "la rotación debe devolver HTTP 200 con un nuevo par de tokens distinto al anterior",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:293"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 199957
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Cuando ",
+            "line": 11,
+            "name": "un atacante reutiliza el RefreshToken previo ya rotado",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:301"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 2622667
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Entonces ",
+            "line": 12,
+            "name": "el replay attack debe responder HTTP 401",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:308"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 247292
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Cuando ",
+            "line": 13,
+            "name": "el administrador desactiva al colaborador vía \"PATCH /api/v1/staff/:id/status\"",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:312"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 5491290
+            }
+          },
+          {
+            "arguments": [],
+            "keyword": "Entonces ",
+            "line": 14,
+            "name": "el AccessToken previamente emitido debe responder HTTP 401 en \"/api/v1/auth/me\"",
+            "match": {
+              "location": "file:/Users/diancie/OrdersKDS-Backend/QA_Equipo5_Auth/bdd/steps/auth_steps.mjs:325"
+            },
+            "result": {
+              "status": "passed",
+              "duration": 3299125
+            }
+          },
+          {
+            "keyword": "After",
+            "hidden": true,
+            "result": {
+              "status": "passed",
+              "duration": 4406167
+            }
+          }
+        ],
+        "tags": [],
+        "type": "scenario"
+      }
+    ],
+    "id": "rotación-de-refreshtoken,-detección-de-replay-y-revocación-inmediata-por-desactivación",
+    "line": 2,
+    "keyword": "Característica",
+    "name": "Rotación de RefreshToken, detección de replay y revocación inmediata por desactivación",
+    "tags": [],
+    "uri": "bdd/features/04_token_rotation_and_revocation.feature"
+  }
+]

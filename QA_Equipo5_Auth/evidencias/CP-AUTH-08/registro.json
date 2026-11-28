@@ -1,0 +1,147 @@
+{
+  "casoId": "CP-AUTH-08",
+  "titulo": "Análisis de Valores Límite (BVA) y complejidad en contraseñas (8..72 chars)",
+  "requisitos": [
+    "REQ-AUTH-013",
+    "BR-AUTH-011",
+    "BR-AUTH-012"
+  ],
+  "ejecutadoEnUtc": "2026-11-28T03:13:30.037Z",
+  "commits": {
+    "Auth-Backend": {
+      "commit": "a3844c97c7cc151c169369546a32f2054cfe6ed8",
+      "branch": "main"
+    },
+    "Auth-Frontend": {
+      "commit": "330f16d236e8bbd101761da0ac57f609711255a0",
+      "branch": "main"
+    },
+    "Auth-Documentation": {
+      "commit": "8b1fc349de850f87e59618516fb9bfaef559c47c",
+      "branch": "main"
+    },
+    "OrdersKDS-Backend-QA": {
+      "commit": "7a728c2ce94785acf683bd3afadb9653fe008e0f"
+    }
+  },
+  "estadoGlobal": "PASA",
+  "resumenVerificaciones": {
+    "total": 11,
+    "pasan": 11,
+    "fallan": 0
+  },
+  "verificaciones": [
+    {
+      "id": "NEWMAN-1",
+      "origen": "newman",
+      "nombre": "CP-AUTH-08 BVA: 7 caracteres -> 400",
+      "estado": "PASA",
+      "statusCode": 400,
+      "tiempoMs": 5,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-2",
+      "origen": "newman",
+      "nombre": "CP-AUTH-08 BVA: 73 caracteres -> 400",
+      "estado": "PASA",
+      "statusCode": 400,
+      "tiempoMs": 3,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-3",
+      "origen": "newman",
+      "nombre": "CP-AUTH-08 BVA: espacios laterales -> 400",
+      "estado": "PASA",
+      "statusCode": 400,
+      "tiempoMs": 5,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-4",
+      "origen": "newman",
+      "nombre": "CP-AUTH-08 BVA: sin mayuscula -> 400",
+      "estado": "PASA",
+      "statusCode": 400,
+      "tiempoMs": 4,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-5",
+      "origen": "newman",
+      "nombre": "CP-AUTH-08 BVA: sin minuscula -> 400",
+      "estado": "PASA",
+      "statusCode": 400,
+      "tiempoMs": 4,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-6",
+      "origen": "newman",
+      "nombre": "CP-AUTH-08 BVA: sin digito -> 400",
+      "estado": "PASA",
+      "statusCode": 400,
+      "tiempoMs": 4,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-7",
+      "origen": "newman",
+      "nombre": "CP-AUTH-08 BVA: sin simbolo -> 400",
+      "estado": "PASA",
+      "statusCode": 400,
+      "tiempoMs": 6,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-8",
+      "origen": "newman",
+      "nombre": "CP-AUTH-08 BVA: igual a staffId -> 400",
+      "estado": "PASA",
+      "statusCode": 400,
+      "tiempoMs": 5,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-9",
+      "origen": "newman",
+      "nombre": "CP-AUTH-08/09 BVA: 8 caracteres complejo valido -> 200 (TEMPORARY -> ACTIVE)",
+      "estado": "PASA",
+      "statusCode": 200,
+      "tiempoMs": 357,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-10",
+      "origen": "newman",
+      "nombre": "CP-AUTH-08 BVA: Login colaborador #2 TEMPORARY y cambio a 72 chars valido -> 200",
+      "estado": "PASA",
+      "statusCode": 200,
+      "tiempoMs": 182,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-11",
+      "origen": "newman",
+      "nombre": "CP-AUTH-08 BVA: 72 caracteres complejo valido -> 200",
+      "estado": "PASA",
+      "statusCode": 200,
+      "tiempoMs": 342,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    }
+  ],
+  "nota": null,
+  "evidenciaAdicional": {}
+}

@@ -1,0 +1,23 @@
+[
+  {
+    "RuleID": "generic-api-key",
+    "Description": "Detected a Generic API Key, potentially exposing access to various services and sensitive operations.",
+    "StartLine": 82,
+    "EndLine": 82,
+    "StartColumn": 11,
+    "EndColumn": 62,
+    "Match": "SECRET = 'REDACTED'",
+    "Secret": "REDACTED",
+    "File": "src/common/guards/guards.spec.ts",
+    "SymlinkFile": "",
+    "Commit": "964ce9bb0eda9ef42319bdd1b82d589f08b6f7cd",
+    "Link": "https://github.com/FMAT-Restaurant/Auth-Backend/blob/964ce9bb0eda9ef42319bdd1b82d589f08b6f7cd/src/common/guards/guards.spec.ts#L82",
+    "Entropy": 3.5632195,
+    "Author": "[REDACTED_AUTHOR]",
+    "Email": "[REDACTED_PERSONAL_EMAIL]",
+    "Date": "2026-11-12T03:49:39Z",
+    "Message": "fix(seguridad): setup-admin, contraseñas temporales, revocación de tokens y rate limit por cuenta",
+    "Tags": [],
+    "Fingerprint": "964ce9bb0eda9ef42319bdd1b82d589f08b6f7cd:src/common/guards/guards.spec.ts:generic-api-key:82"
+  }
+]

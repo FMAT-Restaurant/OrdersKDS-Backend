@@ -1,0 +1,241 @@
+{
+  "auditedAtUtc": "2026-11-28T03:23:35.348Z",
+  "methodology": {
+    "scope": "src/**/*.{ts,tsx} excluding *.spec.*, *.test.* and *.d.ts",
+    "algorithm": "Per-function McCabe cyclomatic complexity via TypeScript AST (base=1 plus If/For/ForIn/ForOf/While/Do/Case/Catch/Conditional/?:/&&/||/??, excluding nested function bodies)",
+    "threshold": "CC <= 10 per function",
+    "sonarLimitNote": "SonarCloud public measures/component_tree API exposes aggregated file complexity and S3776 Cognitive Complexity (>15) issues, not individual McCabe CC per function."
+  },
+  "commits": {
+    "Auth-Backend": {
+      "commit": "a3844c97c7cc151c169369546a32f2054cfe6ed8",
+      "branch": "main"
+    },
+    "Auth-Frontend": {
+      "commit": "330f16d236e8bbd101761da0ac57f609711255a0",
+      "branch": "main"
+    }
+  },
+  "repositories": {
+    "Auth-Backend": {
+      "totalFunctions": 195,
+      "maxCc": 16,
+      "functionsOverCc10Count": 6,
+      "meetsCcLe10PerFunction": false,
+      "functionsOverCc10": [
+        {
+          "file": "src/auth/auth.service.ts",
+          "line": 170,
+          "name": "login",
+          "cc": 16
+        },
+        {
+          "file": "src/staff/staff.service.ts",
+          "line": 292,
+          "name": "updateStaff",
+          "cc": 16
+        },
+        {
+          "file": "src/common/guards/roles.guard.ts",
+          "line": 11,
+          "name": "canActivate",
+          "cc": 12
+        },
+        {
+          "file": "src/common/security/security.config.ts",
+          "line": 36,
+          "name": "isPrivateAddress",
+          "cc": 12
+        },
+        {
+          "file": "src/staff/staff.service.ts",
+          "line": 516,
+          "name": "getRolePrefix",
+          "cc": 12
+        },
+        {
+          "file": "src/common/validation/password.validation.ts",
+          "line": 46,
+          "name": "validateStrongPassword",
+          "cc": 11
+        }
+      ],
+      "sonarCognitiveComplexityIssues": [
+        {
+          "issueId": "AaHjaPQqN6cM84pIl3Ce",
+          "rule": "typescript:S3776",
+          "severity": "CRITICAL",
+          "component": "FMAT-Restaurant_Auth-Backend:src/auth/auth.service.ts",
+          "line": 512,
+          "message": "Refactor this function to reduce its Cognitive Complexity from 18 to the 15 allowed."
+        }
+      ]
+    },
+    "Auth-Frontend": {
+      "totalFunctions": 438,
+      "maxCc": 25,
+      "functionsOverCc10Count": 18,
+      "meetsCcLe10PerFunction": false,
+      "functionsOverCc10": [
+        {
+          "file": "src/components/ui/Input.tsx",
+          "line": 13,
+          "name": "Input",
+          "cc": 25
+        },
+        {
+          "file": "src/components/admin/StaffDetailDrawer.tsx",
+          "line": 15,
+          "name": "StaffDetailDrawer",
+          "cc": 23
+        },
+        {
+          "file": "src/services/authApi.ts",
+          "line": 451,
+          "name": "getMe",
+          "cc": 23
+        },
+        {
+          "file": "src/components/auth/LoginForm.tsx",
+          "line": 11,
+          "name": "LoginForm",
+          "cc": 21
+        },
+        {
+          "file": "src/services/authStorage.ts",
+          "line": 67,
+          "name": "sanitizeSession",
+          "cc": 21
+        },
+        {
+          "file": "src/components/admin/StaffManagementView.tsx",
+          "line": 14,
+          "name": "StaffManagementView",
+          "cc": 20
+        },
+        {
+          "file": "src/components/profile/ProfileSettingsView.tsx",
+          "line": 50,
+          "name": "ProfileSettingsView",
+          "cc": 19
+        },
+        {
+          "file": "src/components/admin/StaffManagementView.tsx",
+          "line": 90,
+          "name": "handleCreateStaff",
+          "cc": 17
+        },
+        {
+          "file": "src/components/admin/RoleDetailDrawer.tsx",
+          "line": 28,
+          "name": "RoleDetailDrawer",
+          "cc": 15
+        },
+        {
+          "file": "src/components/auth/LoginForm.tsx",
+          "line": 57,
+          "name": "handleSubmit",
+          "cc": 15
+        },
+        {
+          "file": "src/services/authApi.ts",
+          "line": 288,
+          "name": "login",
+          "cc": 15
+        },
+        {
+          "file": "src/utils/passwordValidation.ts",
+          "line": 33,
+          "name": "validateStrongPassword",
+          "cc": 13
+        },
+        {
+          "file": "src/components/admin/StaffManagementView.tsx",
+          "line": 558,
+          "name": "<anonymous>",
+          "cc": 12
+        },
+        {
+          "file": "src/components/auth/SetupAdminForm.tsx",
+          "line": 30,
+          "name": "handleSubmit",
+          "cc": 12
+        },
+        {
+          "file": "src/components/layout/Sidebar.tsx",
+          "line": 33,
+          "name": "Sidebar",
+          "cc": 12
+        },
+        {
+          "file": "src/App.tsx",
+          "line": 253,
+          "name": "renderActiveModuleContent",
+          "cc": 11
+        },
+        {
+          "file": "src/components/admin/RolesManagementView.tsx",
+          "line": 21,
+          "name": "RolesManagementView",
+          "cc": 11
+        },
+        {
+          "file": "src/components/admin/ServiceFilterButton.tsx",
+          "line": 12,
+          "name": "ServiceFilterButton",
+          "cc": 11
+        }
+      ],
+      "sonarCognitiveComplexityIssues": [
+        {
+          "issueId": "AaIG57zGZoDwFCuM37np",
+          "rule": "typescript:S3776",
+          "severity": "CRITICAL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/auth/LoginForm.tsx",
+          "line": 57,
+          "message": "Refactor this function to reduce its Cognitive Complexity from 16 to the 15 allowed."
+        },
+        {
+          "issueId": "AaF-KAiXPXn2e6EuLu20",
+          "rule": "typescript:S3776",
+          "severity": "CRITICAL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/auth/LoginForm.tsx",
+          "line": 14,
+          "message": "Refactor this function to reduce its Cognitive Complexity from 16 to the 15 allowed."
+        },
+        {
+          "issueId": "AaFKoBFrRfHCON15YYGS",
+          "rule": "typescript:S3776",
+          "severity": "CRITICAL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/admin/StaffManagementView.tsx",
+          "line": 90,
+          "message": "Refactor this function to reduce its Cognitive Complexity from 27 to the 15 allowed."
+        },
+        {
+          "issueId": "AaFKoBFrRfHCON15YYGQ",
+          "rule": "typescript:S3776",
+          "severity": "CRITICAL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/admin/StaffManagementView.tsx",
+          "line": 14,
+          "message": "Refactor this function to reduce its Cognitive Complexity from 16 to the 15 allowed."
+        },
+        {
+          "issueId": "AaFKoBF2RfHCON15YYGX",
+          "rule": "typescript:S3776",
+          "severity": "CRITICAL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/admin/StaffDetailDrawer.tsx",
+          "line": 23,
+          "message": "Refactor this function to reduce its Cognitive Complexity from 19 to the 15 allowed."
+        },
+        {
+          "issueId": "AaFKoBFURfHCON15YYGI",
+          "rule": "typescript:S3776",
+          "severity": "CRITICAL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/ui/Input.tsx",
+          "line": 26,
+          "message": "Refactor this function to reduce its Cognitive Complexity from 20 to the 15 allowed."
+        }
+      ]
+    }
+  }
+}

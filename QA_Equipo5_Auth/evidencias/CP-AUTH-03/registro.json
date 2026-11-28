@@ -1,0 +1,99 @@
+{
+  "casoId": "CP-AUTH-03",
+  "titulo": "Anti-enumeración en login (401 uniforme y comparación en tiempo constante)",
+  "requisitos": [
+    "REQ-AUTH-009",
+    "BR-AUTH-016",
+    "NFR-AUTH-SEC-003"
+  ],
+  "ejecutadoEnUtc": "2026-11-28T03:13:30.037Z",
+  "commits": {
+    "Auth-Backend": {
+      "commit": "a3844c97c7cc151c169369546a32f2054cfe6ed8",
+      "branch": "main"
+    },
+    "Auth-Frontend": {
+      "commit": "330f16d236e8bbd101761da0ac57f609711255a0",
+      "branch": "main"
+    },
+    "Auth-Documentation": {
+      "commit": "8b1fc349de850f87e59618516fb9bfaef559c47c",
+      "branch": "main"
+    },
+    "OrdersKDS-Backend-QA": {
+      "commit": "7a728c2ce94785acf683bd3afadb9653fe008e0f"
+    }
+  },
+  "estadoGlobal": "PASA",
+  "resumenVerificaciones": {
+    "total": 5,
+    "pasan": 5,
+    "fallan": 0
+  },
+  "verificaciones": [
+    {
+      "id": "NEWMAN-1",
+      "origen": "newman",
+      "nombre": "CP-AUTH-03: Anti-enumeracion usuario inexistente",
+      "estado": "PASA",
+      "statusCode": 401,
+      "tiempoMs": 183,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-2",
+      "origen": "newman",
+      "nombre": "CP-AUTH-03: Anti-enumeracion password incorrecta",
+      "estado": "PASA",
+      "statusCode": 401,
+      "tiempoMs": 211,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-3",
+      "origen": "newman",
+      "nombre": "CP-AUTH-03: Anti-enumeracion cuenta inactiva",
+      "estado": "PASA",
+      "statusCode": 401,
+      "tiempoMs": 174,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "ANTI-ENUM-01",
+      "origen": "timing-script",
+      "nombre": "Anti-enumeración 15 muestras (5 inexistente, 5 pass incorrecto, 5 inactiva): código 401 y mensaje idéntico",
+      "estado": "PASA",
+      "esperado": "401 + mensaje idéntico en las 3 ramas",
+      "observado": {
+        "nonExistent": [
+          "Credenciales inválidas o cuenta deshabilitada"
+        ],
+        "wrongPassword": [
+          "Credenciales inválidas o cuenta deshabilitada"
+        ],
+        "inactiveAccount": [
+          "Credenciales inválidas o cuenta deshabilitada"
+        ]
+      }
+    },
+    {
+      "id": "ANTI-ENUM-02",
+      "origen": "timing-script",
+      "nombre": "Verificación indicativa de latencia (5 muestras/rama; compatible con bcrypt $2b$12$, no prueba estadística definitiva de tiempo constante)",
+      "estado": "PASA",
+      "esperado": "Muestra exploratoria compatible con hashing bcrypt en las 3 ramas (sin reemplazar prueba estadística k6)",
+      "observado": {
+        "avgNonExistentMs": 168.85,
+        "avgWrongPassMs": 170.24,
+        "avgInactiveMs": 171.9,
+        "spreadMs": 3.05,
+        "statisticalCaveat": "Muestra exploratoria de 5 peticiones por rama (15 totales); no constituye prueba estadística definitiva de tiempo constante. La evaluación estadística bajo carga corresponde a Grafana k6 (Iteración 6)."
+      }
+    }
+  ],
+  "nota": null,
+  "evidenciaAdicional": {}
+}

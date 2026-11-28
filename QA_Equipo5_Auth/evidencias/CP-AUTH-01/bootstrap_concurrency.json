@@ -1,0 +1,131 @@
+{
+  "executedAtUtc": "2026-11-28T03:13:07.025Z",
+  "baseUrl": "http://localhost:4000",
+  "healthCheck": {
+    "status": 200,
+    "body": {
+      "status": "healthy",
+      "timestamp": "2026-11-28T03:13:06.740Z",
+      "uptime": 2,
+      "dependencies": {
+        "rabbitmq": "connected"
+      }
+    }
+  },
+  "setupStatusBefore": {
+    "status": 200,
+    "body": {
+      "configured": false
+    }
+  },
+  "concurrentRequests": 12,
+  "count201": 1,
+  "count409": 11,
+  "otherStatuses": [],
+  "createdAdminStaffId": "ADM000001",
+  "setupStatusAfter": {
+    "status": 200,
+    "body": {
+      "configured": true
+    }
+  },
+  "results": [
+    {
+      "requestIndex": 1,
+      "status": 201,
+      "elapsedMs": 237.36,
+      "staffId": "ADM000001",
+      "code": null,
+      "message": "Cuenta de Administrador inicial configurada exitosamente"
+    },
+    {
+      "requestIndex": 2,
+      "status": 409,
+      "elapsedMs": 225.36,
+      "staffId": null,
+      "code": null,
+      "message": "El administrador inicial ya ha sido configurado en el sistema"
+    },
+    {
+      "requestIndex": 3,
+      "status": 409,
+      "elapsedMs": 247.97,
+      "staffId": null,
+      "code": null,
+      "message": "El administrador inicial ya ha sido configurado en el sistema"
+    },
+    {
+      "requestIndex": 4,
+      "status": 409,
+      "elapsedMs": 239.77,
+      "staffId": null,
+      "code": null,
+      "message": "El administrador inicial ya ha sido configurado en el sistema"
+    },
+    {
+      "requestIndex": 5,
+      "status": 409,
+      "elapsedMs": 243.85,
+      "staffId": null,
+      "code": null,
+      "message": "El administrador inicial ya ha sido configurado en el sistema"
+    },
+    {
+      "requestIndex": 6,
+      "status": 409,
+      "elapsedMs": 251.78,
+      "staffId": null,
+      "code": null,
+      "message": "El administrador inicial ya ha sido configurado en el sistema"
+    },
+    {
+      "requestIndex": 7,
+      "status": 409,
+      "elapsedMs": 261.49,
+      "staffId": null,
+      "code": null,
+      "message": "El administrador inicial ya ha sido configurado en el sistema"
+    },
+    {
+      "requestIndex": 8,
+      "status": 409,
+      "elapsedMs": 255.44,
+      "staffId": null,
+      "code": null,
+      "message": "El administrador inicial ya ha sido configurado en el sistema"
+    },
+    {
+      "requestIndex": 9,
+      "status": 409,
+      "elapsedMs": 263.74,
+      "staffId": null,
+      "code": null,
+      "message": "El administrador inicial ya ha sido configurado en el sistema"
+    },
+    {
+      "requestIndex": 10,
+      "status": 409,
+      "elapsedMs": 229,
+      "staffId": null,
+      "code": null,
+      "message": "El administrador inicial ya ha sido configurado en el sistema"
+    },
+    {
+      "requestIndex": 11,
+      "status": 409,
+      "elapsedMs": 234.43,
+      "staffId": null,
+      "code": null,
+      "message": "El administrador inicial ya ha sido configurado en el sistema"
+    },
+    {
+      "requestIndex": 12,
+      "status": 409,
+      "elapsedMs": 259.27,
+      "staffId": null,
+      "code": null,
+      "message": "El administrador inicial ya ha sido configurado en el sistema"
+    }
+  ],
+  "passed": true
+}

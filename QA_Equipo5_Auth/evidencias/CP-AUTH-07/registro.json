@@ -1,0 +1,212 @@
+{
+  "casoId": "CP-AUTH-07",
+  "titulo": "Contención estricta TEMPORARY (TemporaryPasswordGuard) y Header Spoofing directo :4000",
+  "requisitos": [
+    "REQ-AUTH-012",
+    "REQ-AUTH-013",
+    "NFR-AUTH-SEC-004",
+    "INV-AUTH-006"
+  ],
+  "ejecutadoEnUtc": "2026-11-28T03:13:30.037Z",
+  "commits": {
+    "Auth-Backend": {
+      "commit": "a3844c97c7cc151c169369546a32f2054cfe6ed8",
+      "branch": "main"
+    },
+    "Auth-Frontend": {
+      "commit": "330f16d236e8bbd101761da0ac57f609711255a0",
+      "branch": "main"
+    },
+    "Auth-Documentation": {
+      "commit": "8b1fc349de850f87e59618516fb9bfaef559c47c",
+      "branch": "main"
+    },
+    "OrdersKDS-Backend-QA": {
+      "commit": "7a728c2ce94785acf683bd3afadb9653fe008e0f"
+    }
+  },
+  "estadoGlobal": "FALLA_PARCIAL",
+  "resumenVerificaciones": {
+    "total": 12,
+    "pasan": 10,
+    "fallan": 2
+  },
+  "verificaciones": [
+    {
+      "id": "NEWMAN-1",
+      "origen": "newman",
+      "nombre": "CP-AUTH-07: Login colaborador #1 TEMPORARY",
+      "estado": "PASA",
+      "statusCode": 200,
+      "tiempoMs": 178,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-2",
+      "origen": "newman",
+      "nombre": "CP-AUTH-07: TEMPORARY bloqueado en GET /api/v1/staff -> 403 PASSWORD_CHANGE_REQUIRED",
+      "estado": "PASA",
+      "statusCode": 403,
+      "tiempoMs": 3,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-3",
+      "origen": "newman",
+      "nombre": "CP-AUTH-07: TEMPORARY bloqueado en GET /api/v1/roles -> 403 PASSWORD_CHANGE_REQUIRED",
+      "estado": "PASA",
+      "statusCode": 403,
+      "tiempoMs": 8,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "ABUSE-SPOOF-01-NOTOKEN-STAFF",
+      "origen": "security-abuse",
+      "nombre": "Header spoofing X-User-* sin Bearer token en GET /api/v1/staff -> 401",
+      "estado": "PASA",
+      "esperado": 401,
+      "observado": {
+        "actualStatus": 401,
+        "actualCode": null,
+        "body": {
+          "message": "Unauthorized",
+          "statusCode": 401
+        }
+      }
+    },
+    {
+      "id": "ABUSE-SPOOF-02-NOTOKEN-ROLES",
+      "origen": "security-abuse",
+      "nombre": "Header spoofing X-User-* sin Bearer token en GET /api/v1/roles -> 401",
+      "estado": "PASA",
+      "esperado": 401,
+      "observado": {
+        "actualStatus": 401,
+        "actualCode": null,
+        "body": {
+          "message": "Unauthorized",
+          "statusCode": 401
+        }
+      }
+    },
+    {
+      "id": "ABUSE-SPOOF-03-MESERO-ROLES",
+      "origen": "security-abuse",
+      "nombre": "Header spoofing X-User-Roles: ADMINISTRADOR con JWT de MESERO en GET /api/v1/roles -> 403",
+      "estado": "PASA",
+      "esperado": 403,
+      "observado": {
+        "actualStatus": 403,
+        "actualCode": null,
+        "body": {
+          "message": "Acceso denegado: Se requiere uno de los roles [ADMINISTRADOR]",
+          "error": "Forbidden",
+          "statusCode": 403
+        }
+      }
+    },
+    {
+      "id": "ABUSE-SPOOF-04-MESERO-CREATE-STAFF",
+      "origen": "security-abuse",
+      "nombre": "Header spoofing con JWT de MESERO en POST /api/v1/staff -> 403",
+      "estado": "PASA",
+      "esperado": 403,
+      "observado": {
+        "actualStatus": 403,
+        "actualCode": null,
+        "body": {
+          "message": "Acceso denegado: Se requiere uno de los roles [ADMINISTRADOR]",
+          "error": "Forbidden",
+          "statusCode": 403
+        }
+      }
+    },
+    {
+      "id": "ABUSE-SPOOF-05-MESERO-SELF-ROLES",
+      "origen": "security-abuse",
+      "nombre": "Header spoofing con JWT de MESERO en PUT /api/v1/staff/:id/roles -> 403",
+      "estado": "PASA",
+      "esperado": 403,
+      "observado": {
+        "actualStatus": 403,
+        "actualCode": null,
+        "body": {
+          "message": "Acceso denegado: Se requiere uno de los roles [ADMINISTRADOR]",
+          "error": "Forbidden",
+          "statusCode": 403
+        }
+      }
+    },
+    {
+      "id": "ABUSE-TEMP-01-GET-STAFF",
+      "origen": "security-abuse",
+      "nombre": "TEMPORARY bloqueado directo en :4000 GET /api/v1/staff -> 403 PASSWORD_CHANGE_REQUIRED",
+      "estado": "PASA",
+      "esperado": "403 + code=PASSWORD_CHANGE_REQUIRED",
+      "observado": {
+        "actualStatus": 403,
+        "actualCode": "PASSWORD_CHANGE_REQUIRED",
+        "body": {
+          "statusCode": 403,
+          "error": "Forbidden",
+          "code": "PASSWORD_CHANGE_REQUIRED",
+          "message": "Debe cambiar su contraseña temporal antes de acceder a operaciones del sistema."
+        }
+      }
+    },
+    {
+      "id": "ABUSE-TEMP-02-GET-ROLES",
+      "origen": "security-abuse",
+      "nombre": "TEMPORARY bloqueado directo en :4000 GET /api/v1/roles -> 403 PASSWORD_CHANGE_REQUIRED",
+      "estado": "PASA",
+      "esperado": "403 + code=PASSWORD_CHANGE_REQUIRED",
+      "observado": {
+        "actualStatus": 403,
+        "actualCode": "PASSWORD_CHANGE_REQUIRED",
+        "body": {
+          "statusCode": 403,
+          "error": "Forbidden",
+          "code": "PASSWORD_CHANGE_REQUIRED",
+          "message": "Debe cambiar su contraseña temporal antes de acceder a operaciones del sistema."
+        }
+      }
+    },
+    {
+      "id": "ABUSE-TEMP-03-PATCH-PROFILE",
+      "origen": "security-abuse",
+      "nombre": "TEMPORARY en PATCH /api/v1/auth/profile -> esperado 403 PASSWORD_CHANGE_REQUIRED (TemporaryPasswordGuard)",
+      "estado": "FALLA",
+      "esperado": "403 + code=PASSWORD_CHANGE_REQUIRED",
+      "observado": {
+        "actualStatus": 403,
+        "actualCode": null,
+        "body": {
+          "message": "Solo el Administrador tiene permisos para editar información de perfil",
+          "error": "Forbidden",
+          "statusCode": 403
+        }
+      }
+    },
+    {
+      "id": "ABUSE-TEMP-04-DELETE-ACCOUNT",
+      "origen": "security-abuse",
+      "nombre": "TEMPORARY en DELETE /api/v1/auth/account -> esperado 403 PASSWORD_CHANGE_REQUIRED (TemporaryPasswordGuard)",
+      "estado": "FALLA",
+      "esperado": "403 + code=PASSWORD_CHANGE_REQUIRED",
+      "observado": {
+        "actualStatus": 403,
+        "actualCode": null,
+        "body": {
+          "message": "Acceso denegado: El personal operativo no puede eliminar su cuenta. Solo el Administrador puede gestionar bajas.",
+          "error": "Forbidden",
+          "statusCode": 403
+        }
+      }
+    }
+  ],
+  "nota": null,
+  "evidenciaAdicional": {}
+}

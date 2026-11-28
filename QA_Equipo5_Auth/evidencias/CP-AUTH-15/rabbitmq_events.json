@@ -1,0 +1,132 @@
+{
+  "executedAtUtc": "2026-11-28T03:13:30.027Z",
+  "exchange": "restaurant.staff.events",
+  "managementExchange": {
+    "name": "restaurant.staff.events",
+    "type": "topic",
+    "durable": true,
+    "auto_delete": false
+  },
+  "totalEventsCaptured": 4,
+  "triggers": {
+    "createStaffStatus": 201,
+    "eventsAfterCreateCount": 1,
+    "patchStaffStatus": 200,
+    "eventsAfterPatchStaffCount": 0,
+    "putRolesStatus": 200,
+    "eventsAfterPutRolesCount": 1,
+    "patchStatusHttp": 200,
+    "eventsAfterPatchStatusCount": 1,
+    "deleteStatus": 200,
+    "eventsAfterDeleteCount": 1
+  },
+  "hallazgos": {
+    "H-AUTH-B01": {
+      "descripcion": "PATCH /api/v1/staff/:id cambiando roles e isActive emite evento RabbitMQ",
+      "corregido": false,
+      "estado": "ABIERTO",
+      "eventosEmitidosEnPatchStaff": 0
+    },
+    "H-AUTH-B04": {
+      "descripcion": "CloudEvent data incluye permissions y roleLabel conforme a architecture.md",
+      "corregido": false,
+      "estado": "ABIERTO",
+      "clavesObservadasEnData": [
+        "userId",
+        "staffId",
+        "firstName",
+        "lastName",
+        "roles",
+        "isActive"
+      ]
+    }
+  },
+  "capturedEvents": [
+    {
+      "receivedAtUtc": "2026-11-28T03:13:23.640Z",
+      "routingKey": "staff.created",
+      "deliveryMode": 2,
+      "payload": {
+        "specversion": "1.0",
+        "type": "urn:fmat:event:staff:member-created",
+        "source": "urn:fmat:service:auth",
+        "id": "evt_1795835603637_81e455f4",
+        "time": "2026-11-28T03:13:23.637Z",
+        "datacontenttype": "application/json",
+        "data": {
+          "userId": "13fbe3dd-481c-488f-a89f-44cca053959f",
+          "staffId": "M000012",
+          "firstName": "Rabbit",
+          "lastName": "Audit",
+          "roles": [
+            "MESERO"
+          ],
+          "isActive": true
+        }
+      }
+    },
+    {
+      "receivedAtUtc": "2026-11-28T03:13:26.376Z",
+      "routingKey": "staff.roles.updated",
+      "deliveryMode": 2,
+      "payload": {
+        "specversion": "1.0",
+        "type": "urn:fmat:event:staff:roles-updated",
+        "source": "urn:fmat:service:auth",
+        "id": "evt_1795835606372_898bc1c6",
+        "time": "2026-11-28T03:13:26.373Z",
+        "datacontenttype": "application/json",
+        "data": {
+          "userId": "13fbe3dd-481c-488f-a89f-44cca053959f",
+          "staffId": "M000012",
+          "firstName": "RabbitPatch",
+          "lastName": "Audit",
+          "roles": [
+            "MESERO"
+          ],
+          "isActive": false
+        }
+      }
+    },
+    {
+      "receivedAtUtc": "2026-11-28T03:13:27.601Z",
+      "routingKey": "staff.status.changed",
+      "deliveryMode": 2,
+      "payload": {
+        "specversion": "1.0",
+        "type": "urn:fmat:event:staff:status-changed",
+        "source": "urn:fmat:service:auth",
+        "id": "evt_1795835607597_3334fed2",
+        "time": "2026-11-28T03:13:27.597Z",
+        "datacontenttype": "application/json",
+        "data": {
+          "userId": "13fbe3dd-481c-488f-a89f-44cca053959f",
+          "staffId": "M000012",
+          "firstName": "RabbitPatch",
+          "lastName": "Audit",
+          "roles": [
+            "MESERO"
+          ],
+          "isActive": true
+        }
+      }
+    },
+    {
+      "receivedAtUtc": "2026-11-28T03:13:28.818Z",
+      "routingKey": "staff.deleted",
+      "deliveryMode": 2,
+      "payload": {
+        "specversion": "1.0",
+        "type": "urn:fmat:event:staff:member-deleted",
+        "source": "urn:fmat:service:auth",
+        "id": "evt_1795835608815_28f52992",
+        "time": "2026-11-28T03:13:28.815Z",
+        "datacontenttype": "application/json",
+        "data": {
+          "userId": "13fbe3dd-481c-488f-a89f-44cca053959f",
+          "staffId": "M000012"
+        }
+      }
+    }
+  ]
+}
