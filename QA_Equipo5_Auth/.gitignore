@@ -1,0 +1,7 @@
+node_modules/
+.env
+.env.i3
+.sut-repos/
+*.tmp
+*.log
+evidencias/.runtime_state.json

@@ -1,0 +1,209 @@
+{
+  "casoId": "CP-AUTH-21",
+  "titulo": "Auditoría persistente en audit_logs, bcrypt $2b$12$, SHA-256 y headers de seguridad HTTP",
+  "requisitos": [
+    "REQ-AUTH-022",
+    "NFR-AUTH-AUD-001",
+    "NFR-AUTH-SEC-001",
+    "NFR-AUTH-SEC-004"
+  ],
+  "ejecutadoEnUtc": "2026-11-28T03:13:30.038Z",
+  "commits": {
+    "Auth-Backend": {
+      "commit": "a3844c97c7cc151c169369546a32f2054cfe6ed8",
+      "branch": "main"
+    },
+    "Auth-Frontend": {
+      "commit": "330f16d236e8bbd101761da0ac57f609711255a0",
+      "branch": "main"
+    },
+    "Auth-Documentation": {
+      "commit": "8b1fc349de850f87e59618516fb9bfaef559c47c",
+      "branch": "main"
+    },
+    "OrdersKDS-Backend-QA": {
+      "commit": "7a728c2ce94785acf683bd3afadb9653fe008e0f"
+    }
+  },
+  "estadoGlobal": "FALLA_PARCIAL",
+  "resumenVerificaciones": {
+    "total": 7,
+    "pasan": 6,
+    "fallan": 1
+  },
+  "verificaciones": [
+    {
+      "id": "SEC-HEADERS-01",
+      "origen": "http-headers",
+      "nombre": "Headers de seguridad HTTP: ausencia X-Powered-By, Cache-Control: no-store, Pragma: no-cache, X-Frame-Options: DENY, CSP",
+      "estado": "PASA",
+      "esperado": "Todos los headers Helmet y no-store activos",
+      "observado": {
+        "x-powered-by": null,
+        "cache-control": "no-store",
+        "pragma": "no-cache",
+        "x-frame-options": "DENY",
+        "x-content-type-options": "nosniff",
+        "content-security-policy": "default-src 'none';frame-ancestors 'none'"
+      }
+    },
+    {
+      "id": "ABUSE-CORS-01-MALICIOUS",
+      "origen": "security-abuse",
+      "nombre": "CORS rechaza https://sitio-malicioso.example sin reflejar origen ni Allow-Credentials: true",
+      "estado": "PASA",
+      "esperado": "Política CORS estricta",
+      "observado": {
+        "optionsStatus": 404,
+        "getStatus": 200,
+        "allowOrigin": null,
+        "allowCredentials": null
+      }
+    },
+    {
+      "id": "ABUSE-CORS-02-COCINA-5179",
+      "origen": "security-abuse",
+      "nombre": "Verificación CORS para http://localhost:5179 (cocinaApp en docker-compose.yml)",
+      "estado": "FALLA",
+      "esperado": "Política CORS estricta",
+      "observado": {
+        "optionsStatus": 404,
+        "allowOrigin": null,
+        "note": "http://localhost:5179 omitido en CORS_ORIGINS por defecto de Auth-Backend/docker-compose.yml (solo 3000 y 5173..5178)"
+      }
+    },
+    {
+      "id": "SQL-01-MIGRATIONS",
+      "origen": "postgresql-sql",
+      "nombre": "Migraciones TypeORM ejecutadas sobre esquema public vacío",
+      "estado": "PASA",
+      "observado": {
+        "tables": [
+          "audit_logs",
+          "migrations",
+          "refresh_tokens",
+          "roles",
+          "staff_profiles",
+          "user_roles",
+          "users"
+        ],
+        "migrations": [
+          {
+            "id": 1,
+            "timestamp": "1762900000000",
+            "name": "InitialSchema1762900000000"
+          },
+          {
+            "id": 2,
+            "timestamp": "1762900000001",
+            "name": "SessionVersionAndHashedTempPasswords1762900000001"
+          }
+        ]
+      }
+    },
+    {
+      "id": "SQL-02-BCRYPT-2B-12",
+      "origen": "postgresql-sql",
+      "nombre": "100% de hashes en tabla users utilizan bcrypt $2b$12$ (NFR-AUTH-SEC-001)",
+      "estado": "PASA",
+      "observado": {
+        "total_users": 11,
+        "valid_bcrypt_2b_12": 11,
+        "invalid_or_legacy_hashes": 0
+      }
+    },
+    {
+      "id": "SQL-03-REFRESH-SHA256",
+      "origen": "postgresql-sql",
+      "nombre": "100% de refresh_tokens persistidos como hash SHA-256 hex de 64 caracteres (sin texto claro)",
+      "estado": "PASA",
+      "observado": {
+        "total_refresh_tokens": 23,
+        "valid_sha256_hashes": 23,
+        "non_sha256_tokens": 0,
+        "revoked_tokens": 9,
+        "active_tokens": 14
+      }
+    },
+    {
+      "id": "SQL-04-AUDIT-LOGS-CONTEXT",
+      "origen": "postgresql-sql",
+      "nombre": "Registros en audit_logs contienen ipAddress y userAgent no nulos (CP-AUTH-21 / NFR-AUTH-AUD-001)",
+      "estado": "PASA",
+      "observado": {
+        "summary": {
+          "total_audit_logs": 74,
+          "with_non_null_ip": 74,
+          "with_non_null_user_agent": 74,
+          "missing_network_context": 0
+        },
+        "byAction": [
+          {
+            "action": "LOGIN_SUCCESS",
+            "total": 20
+          },
+          {
+            "action": "STAFF_CREATED",
+            "total": 16
+          },
+          {
+            "action": "PASSWORD_CHANGED",
+            "total": 12
+          },
+          {
+            "action": "LOGIN_FAILED",
+            "total": 6
+          },
+          {
+            "action": "STAFF_DELETED",
+            "total": 6
+          },
+          {
+            "action": "STAFF_STATUS_CHANGED",
+            "total": 3
+          },
+          {
+            "action": "ROLE_CREATED",
+            "total": 2
+          },
+          {
+            "action": "STAFF_ROLES_UPDATED",
+            "total": 2
+          },
+          {
+            "action": "PASSWORD_RESET_BY_ADMIN",
+            "total": 1
+          },
+          {
+            "action": "PASSWORD_RESET_REQUESTED",
+            "total": 1
+          },
+          {
+            "action": "PROFILE_UPDATED",
+            "total": 1
+          },
+          {
+            "action": "ROLE_DELETED",
+            "total": 1
+          },
+          {
+            "action": "ROLE_UPDATED",
+            "total": 1
+          },
+          {
+            "action": "SETUP_ADMIN",
+            "total": 1
+          },
+          {
+            "action": "STAFF_UPDATED",
+            "total": 1
+          }
+        ]
+      }
+    }
+  ],
+  "nota": null,
+  "evidenciaAdicional": {},
+  "evidenciaSqlPath": "evidencias/CP-AUTH-21/sql_audit.json",
+  "actualizadoSqlUtc": "2026-11-28T03:13:30.099Z"
+}

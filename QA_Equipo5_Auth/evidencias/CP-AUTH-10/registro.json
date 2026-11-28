@@ -1,0 +1,208 @@
+{
+  "casoId": "CP-AUTH-10",
+  "titulo": "Manipulación criptográfica JWT (alg:none, alg:\"\", firma ajena, sin exp, URL) y claims",
+  "requisitos": [
+    "REQ-AUTH-010",
+    "NFR-AUTH-SEC-002",
+    "NFR-AUTH-SEC-004"
+  ],
+  "ejecutadoEnUtc": "2026-11-28T03:13:30.037Z",
+  "commits": {
+    "Auth-Backend": {
+      "commit": "a3844c97c7cc151c169369546a32f2054cfe6ed8",
+      "branch": "main"
+    },
+    "Auth-Frontend": {
+      "commit": "330f16d236e8bbd101761da0ac57f609711255a0",
+      "branch": "main"
+    },
+    "Auth-Documentation": {
+      "commit": "8b1fc349de850f87e59618516fb9bfaef559c47c",
+      "branch": "main"
+    },
+    "OrdersKDS-Backend-QA": {
+      "commit": "7a728c2ce94785acf683bd3afadb9653fe008e0f"
+    }
+  },
+  "estadoGlobal": "FALLA_PARCIAL",
+  "resumenVerificaciones": {
+    "total": 10,
+    "pasan": 9,
+    "fallan": 1
+  },
+  "verificaciones": [
+    {
+      "id": "JWT-CLAIMS-01",
+      "origen": "jwt-inspection",
+      "nombre": "Claims obligatorios presentes (iss, sub, aud, staffId, roles, permissions, tv, mustChangePassword, exp=900s)",
+      "estado": "PASA",
+      "esperado": "iss=urn:fmat:restaurant:auth, aud=urn:fmat:restaurant, TTL=900s",
+      "observado": {
+        "alg": "HS256",
+        "typ": "JWT",
+        "iss": "urn:fmat:restaurant:auth",
+        "sub": "642b6161-9d9c-46cd-9190-3f2bae1c3aa1",
+        "aud": "urn:fmat:restaurant",
+        "staffId": "ADM000001",
+        "roles": [
+          "ADMINISTRADOR"
+        ],
+        "permissionsCount": 1,
+        "tv": 0,
+        "mustChangePassword": false,
+        "ttlSeconds": 900
+      }
+    },
+    {
+      "id": "ABUSE-JWT-01-FOREIGN-SECRET",
+      "origen": "security-abuse",
+      "nombre": "JWT firmado con secreto ajeno",
+      "estado": "PASA",
+      "esperado": 401,
+      "observado": {
+        "actualStatus": 401,
+        "body": {
+          "message": "Unauthorized",
+          "statusCode": 401
+        }
+      }
+    },
+    {
+      "id": "ABUSE-JWT-02-GARBAGE-SIG",
+      "origen": "security-abuse",
+      "nombre": "JWT con firma basura alterada",
+      "estado": "PASA",
+      "esperado": 401,
+      "observado": {
+        "actualStatus": 401,
+        "body": {
+          "message": "Unauthorized",
+          "statusCode": 401
+        }
+      }
+    },
+    {
+      "id": "ABUSE-JWT-03-ALG-NONE",
+      "origen": "security-abuse",
+      "nombre": "JWT alg: \"none\" sin firma",
+      "estado": "PASA",
+      "esperado": 401,
+      "observado": {
+        "actualStatus": 401,
+        "body": {
+          "message": "Unauthorized",
+          "statusCode": 401
+        }
+      }
+    },
+    {
+      "id": "ABUSE-JWT-04-MISSING-ALG",
+      "origen": "security-abuse",
+      "nombre": "JWT cabecera sin campo alg",
+      "estado": "PASA",
+      "esperado": 401,
+      "observado": {
+        "actualStatus": 401,
+        "body": {
+          "message": "Unauthorized",
+          "statusCode": 401
+        }
+      }
+    },
+    {
+      "id": "ABUSE-JWT-05-EMPTY-ALG",
+      "origen": "security-abuse",
+      "nombre": "JWT cabecera con alg: \"\"",
+      "estado": "PASA",
+      "esperado": 401,
+      "observado": {
+        "actualStatus": 401,
+        "body": {
+          "message": "Unauthorized",
+          "statusCode": 401
+        }
+      }
+    },
+    {
+      "id": "ABUSE-JWT-06-EXPIRED",
+      "origen": "security-abuse",
+      "nombre": "JWT expirado (exp en el pasado)",
+      "estado": "PASA",
+      "esperado": 401,
+      "observado": {
+        "actualStatus": 401,
+        "body": {
+          "message": "Unauthorized",
+          "statusCode": 401
+        }
+      }
+    },
+    {
+      "id": "ABUSE-JWT-07-NO-EXP-CLAIM",
+      "origen": "security-abuse",
+      "nombre": "JWT sin claim exp firmado con secreto real (NFR-AUTH-SEC-002 / passport-jwt)",
+      "estado": "FALLA",
+      "esperado": 401,
+      "observado": {
+        "actualStatus": 200,
+        "body": {
+          "id": "642b6161-9d9c-46cd-9190-3f2bae1c3aa1",
+          "staffId": "ADM000001",
+          "firstName": "Admin",
+          "lastName": "Principal",
+          "phone": "",
+          "email": "admin@fmat.edu.mx",
+          "userType": "ADMIN",
+          "roles": [
+            "ADMINISTRADOR"
+          ],
+          "permissions": [
+            "*"
+          ],
+          "passwordStatus": "ACTIVE",
+          "mustChangePassword": false,
+          "allowedViews": [
+            "admin-dashboard",
+            "staff-management",
+            "sala-view",
+            "menu-view",
+            "orders-view",
+            "kitchen-view",
+            "inventory-view",
+            "billing-view"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ABUSE-JWT-08-QUERY-TOKEN",
+      "origen": "security-abuse",
+      "nombre": "JWT enviado por URL (?token=<jwt>) sin header Authorization",
+      "estado": "PASA",
+      "esperado": 401,
+      "observado": {
+        "actualStatus": 401,
+        "body": {
+          "message": "Unauthorized",
+          "statusCode": 401
+        }
+      }
+    },
+    {
+      "id": "ABUSE-JWT-09-QUERY-ACCESS-TOKEN",
+      "origen": "security-abuse",
+      "nombre": "JWT enviado por URL (?access_token=<jwt>) sin header Authorization",
+      "estado": "PASA",
+      "esperado": 401,
+      "observado": {
+        "actualStatus": 401,
+        "body": {
+          "message": "Unauthorized",
+          "statusCode": 401
+        }
+      }
+    }
+  ],
+  "nota": null,
+  "evidenciaAdicional": {}
+}

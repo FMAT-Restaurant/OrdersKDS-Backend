@@ -1,0 +1,43 @@
+services:
+  auth-db:
+    container_name: ${QA_DB_CONTAINER:-qa-i3-auth-db}
+    volumes: !reset []
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  fmat-auth-rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: ${QA_RMQ_CONTAINER:-qa-i3-auth-rabbitmq}
+    restart: unless-stopped
+    ports:
+      - "${AUTH_RMQ_PORT:-5672}:5672"
+      - "${AUTH_RMQ_MGMT_PORT:-15672}:15672"
+    tmpfs:
+      - /var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - restaurant-network
+
+  auth-backend:
+    container_name: ${QA_BE_CONTAINER:-qa-i3-auth-backend}
+    environment:
+      NODE_ENV: production
+      JWT_SECRET: ${JWT_SECRET:?Define JWT_SECRET}
+      RABBITMQ_URL: amqp://guest:guest@fmat-auth-rabbitmq:5672
+      AUTH_RATE_LIMIT: "1000"
+      AUTH_IDENTIFIER_RATE_LIMIT: "1000"
+      AUTH_IDENTIFIER_WINDOW_MINUTES: "15"
+    depends_on:
+      auth-db:
+        condition: service_healthy
+      fmat-auth-rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12

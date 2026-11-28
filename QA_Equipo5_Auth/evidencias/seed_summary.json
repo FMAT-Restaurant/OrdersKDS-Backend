@@ -1,0 +1,159 @@
+{
+  "generatedAt": "2026-11-28T03:13:13.126Z",
+  "baseUrl": "http://localhost:4000",
+  "staffIdSequenceObservation": {
+    "attemptedFirstOrderFor": "E000001",
+    "actualAssignedStaffId": "E000002",
+    "matchesE000001": false,
+    "reason": "StaffService.generateUniqueStaffId usa conteo global (count + 1) sobre staff_profiles; como ADM000001 ocupa la fila 1 tras setup-admin, el primer colaborador creado vía API recibe E000002 (prefijo E válido)."
+  },
+  "admin": {
+    "id": "642b6161-9d9c-46cd-9190-3f2bae1c3aa1",
+    "staffId": "ADM000001",
+    "email": "admin@fmat.edu.mx",
+    "roles": [
+      "ADMINISTRADOR"
+    ]
+  },
+  "customRole": {
+    "code": "ROL_ENCARGADO_OP",
+    "name": "Encargado Operativo",
+    "permissions": [
+      "inventory:items:read",
+      "orders:orders:view",
+      "staff:view"
+    ]
+  },
+  "staff": {
+    "customPbac": {
+      "id": "d58e7d6f-0363-499f-be48-7da0f1f7e5fe",
+      "staffId": "E000002",
+      "firstName": "Elena",
+      "lastName": "Encargada",
+      "roles": [
+        "ROL_ENCARGADO_OP"
+      ],
+      "expectedPrefix": "E",
+      "passwordStatus": "ACTIVE",
+      "isActive": true
+    },
+    "host": {
+      "id": "e2d6074f-f631-41ee-90b8-baa47caa899d",
+      "staffId": "H000003",
+      "firstName": "Sofia",
+      "lastName": "Host",
+      "roles": [
+        "HOST"
+      ],
+      "expectedPrefix": "H",
+      "passwordStatus": "ACTIVE",
+      "isActive": true
+    },
+    "almacenista": {
+      "id": "77d4e0a6-12c6-4348-a0f2-15b7ee017e54",
+      "staffId": "A000004",
+      "firstName": "Diego",
+      "lastName": "Almacen",
+      "roles": [
+        "ALMACENISTA"
+      ],
+      "expectedPrefix": "A",
+      "passwordStatus": "ACTIVE",
+      "isActive": true
+    },
+    "gestorMenu": {
+      "id": "9699b364-e5a9-48da-a149-0b4e10fbe514",
+      "staffId": "G000005",
+      "firstName": "Valeria",
+      "lastName": "Menu",
+      "roles": [
+        "GESTOR_MENU"
+      ],
+      "expectedPrefix": "G",
+      "passwordStatus": "ACTIVE",
+      "isActive": true
+    },
+    "mesero": {
+      "id": "0e316dfd-a442-4825-b605-a2d4b18cfb8b",
+      "staffId": "M000006",
+      "firstName": "Mateo",
+      "lastName": "Mesero",
+      "roles": [
+        "MESERO"
+      ],
+      "expectedPrefix": "M",
+      "passwordStatus": "ACTIVE",
+      "isActive": true
+    },
+    "chef": {
+      "id": "1cec7f4d-5d9c-42b6-9452-6dd80507c7d3",
+      "staffId": "C000007",
+      "firstName": "Camila",
+      "lastName": "Chef",
+      "roles": [
+        "CHEF_MASTER"
+      ],
+      "expectedPrefix": "C",
+      "passwordStatus": "ACTIVE",
+      "isActive": true
+    },
+    "cajero": {
+      "id": "5e3cb772-44db-4b33-9527-540bf99da1fd",
+      "staffId": "J000008",
+      "firstName": "Lucas",
+      "lastName": "Cajero",
+      "roles": [
+        "CAJERO"
+      ],
+      "expectedPrefix": "J",
+      "passwordStatus": "ACTIVE",
+      "isActive": true
+    },
+    "tempOne": {
+      "id": "5304f65d-d57d-4316-8aff-e44bc8e1db4e",
+      "staffId": "M000009",
+      "firstName": "Tomas",
+      "lastName": "TemporalUno",
+      "roles": [
+        "MESERO"
+      ],
+      "expectedPrefix": "M",
+      "passwordStatus": "TEMPORARY",
+      "isActive": true,
+      "initialTemporaryPassword": "[SEEDED_TEMP_REDACTADA]"
+    },
+    "tempTwo": {
+      "id": "e6f182b8-3186-49db-b1d3-64dcd9182c31",
+      "staffId": "C000010",
+      "firstName": "Nadia",
+      "lastName": "TemporalDos",
+      "roles": [
+        "CHEF_MASTER"
+      ],
+      "expectedPrefix": "C",
+      "passwordStatus": "TEMPORARY",
+      "isActive": true,
+      "initialTemporaryPassword": "[SEEDED_TEMP_REDACTADA]"
+    },
+    "inactiveOne": {
+      "id": "02a62f6b-8ed1-4d5c-b567-43df752f550f",
+      "staffId": "M000011",
+      "firstName": "Bruno",
+      "lastName": "Inactivo",
+      "roles": [
+        "MESERO"
+      ],
+      "expectedPrefix": "M",
+      "passwordStatus": "ACTIVE",
+      "isActive": false
+    }
+  },
+  "counts": {
+    "admins": 1,
+    "activeBaseRoles": 6,
+    "customPbac": 1,
+    "temporary": 2,
+    "inactive": 1,
+    "totalUsers": 11
+  }
+}

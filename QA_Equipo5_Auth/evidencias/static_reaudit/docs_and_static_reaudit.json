@@ -1,0 +1,55 @@
+{
+  "revalidatedAtUtc": "2026-11-28T02:28:30Z",
+  "repositorios": {
+    "Auth-Backend": {
+      "commit": "a3844c97c7cc151c169369546a32f2054cfe6ed8",
+      "branch": "main"
+    },
+    "Auth-Frontend": {
+      "commit": "330f16d236e8bbd101761da0ac57f609711255a0",
+      "branch": "main"
+    },
+    "Auth-Documentation": {
+      "commit": "8b1fc349de850f87e59618516fb9bfaef559c47c",
+      "branch": "main"
+    }
+  },
+  "hallazgos": {
+    "H-AUTH-B05": {
+      "estado": "PARCIAL",
+      "jestUnitSuite": {
+        "suitesPassed": 20,
+        "suitesTotal": 20,
+        "testsPassed": 266,
+        "testsTotal": 266,
+        "statementsPct": 99.79,
+        "branchesPct": 90.76,
+        "functionsPct": 100,
+        "linesPct": 99.77,
+        "durationSec": 18.226,
+        "forceExitWarningPresent": false,
+        "logFile": "evidencias/static_reaudit/jest_auth_backend.log"
+      },
+      "tsconfigStrictFlags": {
+        "strictNullChecks": false,
+        "noImplicitAny": false,
+        "estado": "ABIERTO"
+      }
+    },
+    "H-AUTH-B08": {
+      "estado": "ABIERTO",
+      "evidencia": [
+        "Auth-Documentation/README.md línea 53 continúa anunciando alcance 'REQ-AUTH-001 al REQ-AUTH-020'.",
+        "Auth-Documentation/output/ers/traceability.md llega solo a REQ-AUTH-024 (30 líneas), omite REQ-AUTH-025 y mezcla identificadores legacy BR-001/INV-001."
+      ]
+    },
+    "H-AUTH-B09": {
+      "estado": "ABIERTO",
+      "evidencia": [
+        "Auth-Documentation/output/ers/configuration.md línea 18 documenta 'CORS_ALLOWED_ORIGINS' = 'http://localhost:3000,http://localhost:5173', mientras Auth-Backend/docker-compose.yml usa 'CORS_ORIGINS' con 3000,5173..5178 y omite http://localhost:5179 (cocinaApp en PROMPT_INTEGRACION_EQUIPOS.md línea 27).",
+        "Auth-Documentation/output/ers/configuration.md líneas 11-15 documenta 'DATABASE_URL', 'JWT_ACCESS_TOKEN_TTL' y 'REFRESH_TOKEN_TTL_DAYS' vs variables reales DB_* en Auth-Backend/.env.example.",
+        "Auth-Documentation/output/ers/architecture.md líneas 246-261 especifica 'roleLabel' y 'permissions' dentro de payload.data en RabbitMQ, ausentes en la implementación viva (verificado en H-AUTH-B04)."
+      ]
+    }
+  }
+}

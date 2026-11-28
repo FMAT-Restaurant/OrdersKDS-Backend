@@ -1,0 +1,424 @@
+{
+  "executedAtUtc": "2026-11-28T03:13:30.036Z",
+  "antiEnumeration": {
+    "nonExistent": {
+      "statuses": [
+        401
+      ],
+      "messages": [
+        "Credenciales inválidas o cuenta deshabilitada"
+      ],
+      "errors": [
+        "Unauthorized"
+      ],
+      "timing": {
+        "samplesMs": [
+          170.82,
+          167.87,
+          170.54,
+          167.18,
+          167.86
+        ],
+        "minMs": 167.18,
+        "avgMs": 168.85,
+        "maxMs": 170.82
+      }
+    },
+    "wrongPassword": {
+      "statuses": [
+        401
+      ],
+      "messages": [
+        "Credenciales inválidas o cuenta deshabilitada"
+      ],
+      "errors": [
+        "Unauthorized"
+      ],
+      "timing": {
+        "samplesMs": [
+          171.85,
+          172.61,
+          169.18,
+          168.92,
+          168.64
+        ],
+        "minMs": 168.64,
+        "avgMs": 170.24,
+        "maxMs": 172.61
+      }
+    },
+    "inactiveAccount": {
+      "statuses": [
+        401
+      ],
+      "messages": [
+        "Credenciales inválidas o cuenta deshabilitada"
+      ],
+      "errors": [
+        "Unauthorized"
+      ],
+      "timing": {
+        "samplesMs": [
+          167.29,
+          186.94,
+          167.96,
+          169.15,
+          168.18
+        ],
+        "minMs": 167.29,
+        "avgMs": 171.9,
+        "maxMs": 186.94
+      }
+    },
+    "identicalStatusAndMessage": true,
+    "avgTimingSpreadMs": 3.05,
+    "indicativeLatencyConsistent": true,
+    "statisticalCaveat": "Muestra exploratoria de 5 peticiones por rama (15 totales); no constituye prueba estadística definitiva de tiempo constante. La evaluación estadística bajo carga corresponde a Grafana k6 (Iteración 6)."
+  },
+  "jwtCryptoAbuse": {
+    "claimsInspection": {
+      "alg": "HS256",
+      "typ": "JWT",
+      "iss": "urn:fmat:restaurant:auth",
+      "sub": "642b6161-9d9c-46cd-9190-3f2bae1c3aa1",
+      "aud": "urn:fmat:restaurant",
+      "staffId": "ADM000001",
+      "roles": [
+        "ADMINISTRADOR"
+      ],
+      "permissionsCount": 1,
+      "tv": 0,
+      "mustChangePassword": false,
+      "ttlSeconds": 900
+    },
+    "results": [
+      {
+        "id": "ABUSE-JWT-01-FOREIGN-SECRET",
+        "label": "JWT firmado con secreto ajeno",
+        "expectedStatus": 401,
+        "actualStatus": 401,
+        "passed": true,
+        "responseSnippet": {
+          "message": "Unauthorized",
+          "statusCode": 401
+        }
+      },
+      {
+        "id": "ABUSE-JWT-02-GARBAGE-SIG",
+        "label": "JWT con firma basura alterada",
+        "expectedStatus": 401,
+        "actualStatus": 401,
+        "passed": true,
+        "responseSnippet": {
+          "message": "Unauthorized",
+          "statusCode": 401
+        }
+      },
+      {
+        "id": "ABUSE-JWT-03-ALG-NONE",
+        "label": "JWT alg: \"none\" sin firma",
+        "expectedStatus": 401,
+        "actualStatus": 401,
+        "passed": true,
+        "responseSnippet": {
+          "message": "Unauthorized",
+          "statusCode": 401
+        }
+      },
+      {
+        "id": "ABUSE-JWT-04-MISSING-ALG",
+        "label": "JWT cabecera sin campo alg",
+        "expectedStatus": 401,
+        "actualStatus": 401,
+        "passed": true,
+        "responseSnippet": {
+          "message": "Unauthorized",
+          "statusCode": 401
+        }
+      },
+      {
+        "id": "ABUSE-JWT-05-EMPTY-ALG",
+        "label": "JWT cabecera con alg: \"\"",
+        "expectedStatus": 401,
+        "actualStatus": 401,
+        "passed": true,
+        "responseSnippet": {
+          "message": "Unauthorized",
+          "statusCode": 401
+        }
+      },
+      {
+        "id": "ABUSE-JWT-06-EXPIRED",
+        "label": "JWT expirado (exp en el pasado)",
+        "expectedStatus": 401,
+        "actualStatus": 401,
+        "passed": true,
+        "responseSnippet": {
+          "message": "Unauthorized",
+          "statusCode": 401
+        }
+      },
+      {
+        "id": "ABUSE-JWT-07-NO-EXP-CLAIM",
+        "label": "JWT sin claim exp firmado con secreto real (NFR-AUTH-SEC-002 / passport-jwt)",
+        "expectedStatus": 401,
+        "actualStatus": 200,
+        "passed": false,
+        "responseSnippet": {
+          "id": "642b6161-9d9c-46cd-9190-3f2bae1c3aa1",
+          "staffId": "ADM000001",
+          "firstName": "Admin",
+          "lastName": "Principal",
+          "phone": "",
+          "email": "admin@fmat.edu.mx",
+          "userType": "ADMIN",
+          "roles": [
+            "ADMINISTRADOR"
+          ],
+          "permissions": [
+            "*"
+          ],
+          "passwordStatus": "ACTIVE",
+          "mustChangePassword": false,
+          "allowedViews": [
+            "admin-dashboard",
+            "staff-management",
+            "sala-view",
+            "menu-view",
+            "orders-view",
+            "kitchen-view",
+            "inventory-view",
+            "billing-view"
+          ]
+        }
+      },
+      {
+        "id": "ABUSE-JWT-08-QUERY-TOKEN",
+        "label": "JWT enviado por URL (?token=<jwt>) sin header Authorization",
+        "expectedStatus": 401,
+        "actualStatus": 401,
+        "passed": true,
+        "responseSnippet": {
+          "message": "Unauthorized",
+          "statusCode": 401
+        }
+      },
+      {
+        "id": "ABUSE-JWT-09-QUERY-ACCESS-TOKEN",
+        "label": "JWT enviado por URL (?access_token=<jwt>) sin header Authorization",
+        "expectedStatus": 401,
+        "actualStatus": 401,
+        "passed": true,
+        "responseSnippet": {
+          "message": "Unauthorized",
+          "statusCode": 401
+        }
+      }
+    ]
+  },
+  "perimeterAndTempGuard": [
+    {
+      "id": "ABUSE-SPOOF-01-NOTOKEN-STAFF",
+      "label": "Header spoofing X-User-* sin Bearer token en GET /api/v1/staff -> 401",
+      "expectedStatus": 401,
+      "actualStatus": 401,
+      "passed": true,
+      "body": {
+        "message": "Unauthorized",
+        "statusCode": 401
+      }
+    },
+    {
+      "id": "ABUSE-SPOOF-02-NOTOKEN-ROLES",
+      "label": "Header spoofing X-User-* sin Bearer token en GET /api/v1/roles -> 401",
+      "expectedStatus": 401,
+      "actualStatus": 401,
+      "passed": true,
+      "body": {
+        "message": "Unauthorized",
+        "statusCode": 401
+      }
+    },
+    {
+      "id": "ABUSE-SPOOF-03-MESERO-ROLES",
+      "label": "Header spoofing X-User-Roles: ADMINISTRADOR con JWT de MESERO en GET /api/v1/roles -> 403",
+      "expectedStatus": 403,
+      "actualStatus": 403,
+      "passed": true,
+      "body": {
+        "message": "Acceso denegado: Se requiere uno de los roles [ADMINISTRADOR]",
+        "error": "Forbidden",
+        "statusCode": 403
+      }
+    },
+    {
+      "id": "ABUSE-SPOOF-04-MESERO-CREATE-STAFF",
+      "label": "Header spoofing con JWT de MESERO en POST /api/v1/staff -> 403",
+      "expectedStatus": 403,
+      "actualStatus": 403,
+      "passed": true,
+      "body": {
+        "message": "Acceso denegado: Se requiere uno de los roles [ADMINISTRADOR]",
+        "error": "Forbidden",
+        "statusCode": 403
+      }
+    },
+    {
+      "id": "ABUSE-SPOOF-05-MESERO-SELF-ROLES",
+      "label": "Header spoofing con JWT de MESERO en PUT /api/v1/staff/:id/roles -> 403",
+      "expectedStatus": 403,
+      "actualStatus": 403,
+      "passed": true,
+      "body": {
+        "message": "Acceso denegado: Se requiere uno de los roles [ADMINISTRADOR]",
+        "error": "Forbidden",
+        "statusCode": 403
+      }
+    },
+    {
+      "id": "ABUSE-TEMP-01-GET-STAFF",
+      "label": "TEMPORARY bloqueado directo en :4000 GET /api/v1/staff -> 403 PASSWORD_CHANGE_REQUIRED",
+      "expectedStatus": "403 + code=PASSWORD_CHANGE_REQUIRED",
+      "actualStatus": 403,
+      "actualCode": "PASSWORD_CHANGE_REQUIRED",
+      "passed": true,
+      "body": {
+        "statusCode": 403,
+        "error": "Forbidden",
+        "code": "PASSWORD_CHANGE_REQUIRED",
+        "message": "Debe cambiar su contraseña temporal antes de acceder a operaciones del sistema."
+      }
+    },
+    {
+      "id": "ABUSE-TEMP-02-GET-ROLES",
+      "label": "TEMPORARY bloqueado directo en :4000 GET /api/v1/roles -> 403 PASSWORD_CHANGE_REQUIRED",
+      "expectedStatus": "403 + code=PASSWORD_CHANGE_REQUIRED",
+      "actualStatus": 403,
+      "actualCode": "PASSWORD_CHANGE_REQUIRED",
+      "passed": true,
+      "body": {
+        "statusCode": 403,
+        "error": "Forbidden",
+        "code": "PASSWORD_CHANGE_REQUIRED",
+        "message": "Debe cambiar su contraseña temporal antes de acceder a operaciones del sistema."
+      }
+    },
+    {
+      "id": "ABUSE-TEMP-03-PATCH-PROFILE",
+      "label": "TEMPORARY en PATCH /api/v1/auth/profile -> esperado 403 PASSWORD_CHANGE_REQUIRED (TemporaryPasswordGuard)",
+      "expectedStatus": "403 + code=PASSWORD_CHANGE_REQUIRED",
+      "actualStatus": 403,
+      "actualCode": null,
+      "passed": false,
+      "http403Observed": true,
+      "body": {
+        "message": "Solo el Administrador tiene permisos para editar información de perfil",
+        "error": "Forbidden",
+        "statusCode": 403
+      }
+    },
+    {
+      "id": "ABUSE-TEMP-04-DELETE-ACCOUNT",
+      "label": "TEMPORARY en DELETE /api/v1/auth/account -> esperado 403 PASSWORD_CHANGE_REQUIRED (TemporaryPasswordGuard)",
+      "expectedStatus": "403 + code=PASSWORD_CHANGE_REQUIRED",
+      "actualStatus": 403,
+      "actualCode": null,
+      "passed": false,
+      "http403Observed": true,
+      "body": {
+        "message": "Acceso denegado: El personal operativo no puede eliminar su cuenta. Solo el Administrador puede gestionar bajas.",
+        "error": "Forbidden",
+        "statusCode": 403
+      }
+    }
+  ],
+  "corsSqliAndMassAssignment": [
+    {
+      "id": "ABUSE-CORS-01-MALICIOUS",
+      "label": "CORS rechaza https://sitio-malicioso.example sin reflejar origen ni Allow-Credentials: true",
+      "passed": true,
+      "observed": {
+        "optionsStatus": 404,
+        "getStatus": 200,
+        "allowOrigin": null,
+        "allowCredentials": null
+      }
+    },
+    {
+      "id": "ABUSE-CORS-02-COCINA-5179",
+      "label": "Verificación CORS para http://localhost:5179 (cocinaApp en docker-compose.yml)",
+      "passed": false,
+      "observed": {
+        "optionsStatus": 404,
+        "allowOrigin": null,
+        "note": "http://localhost:5179 omitido en CORS_ORIGINS por defecto de Auth-Backend/docker-compose.yml (solo 3000 y 5173..5178)"
+      }
+    },
+    {
+      "id": "ABUSE-MASS-ASSIGNMENT-01",
+      "label": "Mass Assignment en POST /api/v1/staff no sobreescribe userType/passwordStatus/isActive/tokenVersion/staffId",
+      "passed": true,
+      "observed": {
+        "httpStatus": 201,
+        "persistedRow": {
+          "userType": "STAFF",
+          "passwordStatus": "TEMPORARY",
+          "isActive": true,
+          "tokenVersion": 0,
+          "staffId": "M000012"
+        }
+      }
+    },
+    {
+      "id": "ABUSE-SQLI-01",
+      "label": "Payloads SQLi en login (401) y filtros GET /staff (sin 500 ni fuga de esquema SQL)",
+      "passed": true,
+      "observed": {
+        "loginStatus": 401,
+        "filterStatus": 200,
+        "filterTotalReturned": null
+      }
+    }
+  ],
+  "replayTokenVersion": {
+    "initialTv": 1,
+    "rotatedTv": 1,
+    "replayStatus": 401,
+    "replayBody": {
+      "message": "Refresh token inválido o expirado",
+      "error": "Unauthorized",
+      "statusCode": 401
+    },
+    "dbTokenVersionAfterReplay": 1,
+    "tvIncrementedOnReplay": false,
+    "rotatedAccessTokenStatusAfterReplay": 200
+  },
+  "deleteRevocation": {
+    "staffId": "M000012",
+    "meBeforeDeleteStatus": 200,
+    "deleteStatus": 200,
+    "meAfterDeleteStatus": 401,
+    "meAfterDeleteBody": {
+      "message": "La sesión ya no es válida",
+      "error": "Unauthorized",
+      "statusCode": 401
+    },
+    "passed": true
+  },
+  "securityHeaders": {
+    "noXPoweredBy": true,
+    "cacheControlNoStore": true,
+    "pragmaNoCache": true,
+    "xFrameOptionsDeny": true,
+    "xContentTypeOptionsNosniff": true,
+    "hasCsp": true,
+    "sampleHeadersMe": {
+      "x-powered-by": null,
+      "cache-control": "no-store",
+      "pragma": "no-cache",
+      "x-frame-options": "DENY",
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "default-src 'none';frame-ancestors 'none'"
+    }
+  }
+}

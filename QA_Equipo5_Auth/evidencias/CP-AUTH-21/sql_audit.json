@@ -1,0 +1,589 @@
+{
+  "executedAtUtc": "2026-11-28T03:13:30.099Z",
+  "database": "fmat_auth",
+  "tables": [
+    "audit_logs",
+    "migrations",
+    "refresh_tokens",
+    "roles",
+    "staff_profiles",
+    "user_roles",
+    "users"
+  ],
+  "migrations": [
+    {
+      "id": 1,
+      "timestamp": "1762900000000",
+      "name": "InitialSchema1762900000000"
+    },
+    {
+      "id": 2,
+      "timestamp": "1762900000001",
+      "name": "SessionVersionAndHashedTempPasswords1762900000001"
+    }
+  ],
+  "passwordHashes": {
+    "summary": {
+      "total_users": 11,
+      "valid_bcrypt_2b_12": 11,
+      "invalid_or_legacy_hashes": 0
+    },
+    "samplePrefixes": [
+      {
+        "id": "642b6161-9d9c-46cd-9190-3f2bae1c3aa1",
+        "userType": "ADMIN",
+        "passwordStatus": "ACTIVE",
+        "hash_prefix": "$2b$12$",
+        "hash_length": 60
+      },
+      {
+        "id": "d58e7d6f-0363-499f-be48-7da0f1f7e5fe",
+        "userType": "STAFF",
+        "passwordStatus": "ACTIVE",
+        "hash_prefix": "$2b$12$",
+        "hash_length": 60
+      },
+      {
+        "id": "e2d6074f-f631-41ee-90b8-baa47caa899d",
+        "userType": "STAFF",
+        "passwordStatus": "ACTIVE",
+        "hash_prefix": "$2b$12$",
+        "hash_length": 60
+      },
+      {
+        "id": "77d4e0a6-12c6-4348-a0f2-15b7ee017e54",
+        "userType": "STAFF",
+        "passwordStatus": "ACTIVE",
+        "hash_prefix": "$2b$12$",
+        "hash_length": 60
+      },
+      {
+        "id": "9699b364-e5a9-48da-a149-0b4e10fbe514",
+        "userType": "STAFF",
+        "passwordStatus": "ACTIVE",
+        "hash_prefix": "$2b$12$",
+        "hash_length": 60
+      },
+      {
+        "id": "0e316dfd-a442-4825-b605-a2d4b18cfb8b",
+        "userType": "STAFF",
+        "passwordStatus": "ACTIVE",
+        "hash_prefix": "$2b$12$",
+        "hash_length": 60
+      },
+      {
+        "id": "1cec7f4d-5d9c-42b6-9452-6dd80507c7d3",
+        "userType": "STAFF",
+        "passwordStatus": "ACTIVE",
+        "hash_prefix": "$2b$12$",
+        "hash_length": 60
+      },
+      {
+        "id": "5e3cb772-44db-4b33-9527-540bf99da1fd",
+        "userType": "STAFF",
+        "passwordStatus": "ACTIVE",
+        "hash_prefix": "$2b$12$",
+        "hash_length": 60
+      },
+      {
+        "id": "5304f65d-d57d-4316-8aff-e44bc8e1db4e",
+        "userType": "STAFF",
+        "passwordStatus": "TEMPORARY",
+        "hash_prefix": "$2b$12$",
+        "hash_length": 60
+      },
+      {
+        "id": "e6f182b8-3186-49db-b1d3-64dcd9182c31",
+        "userType": "STAFF",
+        "passwordStatus": "TEMPORARY",
+        "hash_prefix": "$2b$12$",
+        "hash_length": 60
+      },
+      {
+        "id": "02a62f6b-8ed1-4d5c-b567-43df752f550f",
+        "userType": "STAFF",
+        "passwordStatus": "ACTIVE",
+        "hash_prefix": "$2b$12$",
+        "hash_length": 60
+      }
+    ]
+  },
+  "refreshTokens": {
+    "total_refresh_tokens": 23,
+    "valid_sha256_hashes": 23,
+    "non_sha256_tokens": 0,
+    "revoked_tokens": 9,
+    "active_tokens": 14
+  },
+  "auditLogs": {
+    "summary": {
+      "total_audit_logs": 74,
+      "with_non_null_ip": 74,
+      "with_non_null_user_agent": 74,
+      "missing_network_context": 0
+    },
+    "byAction": [
+      {
+        "action": "LOGIN_SUCCESS",
+        "total": 20
+      },
+      {
+        "action": "STAFF_CREATED",
+        "total": 16
+      },
+      {
+        "action": "PASSWORD_CHANGED",
+        "total": 12
+      },
+      {
+        "action": "LOGIN_FAILED",
+        "total": 6
+      },
+      {
+        "action": "STAFF_DELETED",
+        "total": 6
+      },
+      {
+        "action": "STAFF_STATUS_CHANGED",
+        "total": 3
+      },
+      {
+        "action": "ROLE_CREATED",
+        "total": 2
+      },
+      {
+        "action": "STAFF_ROLES_UPDATED",
+        "total": 2
+      },
+      {
+        "action": "PASSWORD_RESET_BY_ADMIN",
+        "total": 1
+      },
+      {
+        "action": "PASSWORD_RESET_REQUESTED",
+        "total": 1
+      },
+      {
+        "action": "PROFILE_UPDATED",
+        "total": 1
+      },
+      {
+        "action": "ROLE_DELETED",
+        "total": 1
+      },
+      {
+        "action": "ROLE_UPDATED",
+        "total": 1
+      },
+      {
+        "action": "SETUP_ADMIN",
+        "total": 1
+      },
+      {
+        "action": "STAFF_UPDATED",
+        "total": 1
+      }
+    ],
+    "latest20": [
+      {
+        "id": "80048f3f-810a-4d9e-a453-9f83bd41e4c2",
+        "userId": "642b6161-9d9c-46cd-9190-3f2bae1c3aa1",
+        "action": "STAFF_DELETED",
+        "ipAddress": "192.168.65.1",
+        "user_agent_prefix": "node",
+        "details": "{\"targetUserId\":\"13fbe3dd-481c-488f-a89f-44cca053959f\",\"staffId\":\"M000012\"}",
+        "createdAt": "2026-11-28T09:13:28.816Z"
+      },
+      {
+        "id": "95a11534-7e43-4dc4-8fce-f8adf2ea7c45",
+        "userId": "642b6161-9d9c-46cd-9190-3f2bae1c3aa1",
+        "action": "STAFF_STATUS_CHANGED",
+        "ipAddress": "192.168.65.1",
+        "user_agent_prefix": "node",
+        "details": "{\"targetUserId\":\"13fbe3dd-481c-488f-a89f-44cca053959f\",\"staffId\":\"M000012\",\"isActive\":true,\"sessionsRevoked\":false}",
+        "createdAt": "2026-11-28T09:13:27.597Z"
+      },
+      {
+        "id": "d913019b-ec2f-46d2-a3fd-988e76b5efd4",
+        "userId": "642b6161-9d9c-46cd-9190-3f2bae1c3aa1",
+        "action": "STAFF_ROLES_UPDATED",
+        "ipAddress": "192.168.65.1",
+        "user_agent_prefix": "node",
+        "details": "{\"targetUserId\":\"13fbe3dd-481c-488f-a89f-44cca053959f\",\"staffId\":\"M000012\",\"roles\":[\"MESERO\"]}",
+        "createdAt": "2026-11-28T09:13:26.373Z"
+      },
+      {
+        "id": "13e57e44-1df9-427b-bd9c-c6d5ad69e686",
+        "userId": "642b6161-9d9c-46cd-9190-3f2bae1c3aa1",
+        "action": "STAFF_UPDATED",
+        "ipAddress": "192.168.65.1",
+        "user_agent_prefix": "node",
+        "details": "{\"targetUserId\":\"13fbe3dd-481c-488f-a89f-44cca053959f\",\"staffId\":\"M000012\",\"changedFields\":[\"firstName\",\"roles\",\"isActive\"],\"roles\":[\"CAJERO\"],\"isActive\":false}",
+        "createdAt": "2026-11-28T09:13:24.850Z"
+      },
+      {
+        "id": "89dcbf9e-832a-409f-8858-eb6ae2c61f66",
+        "userId": "642b6161-9d9c-46cd-9190-3f2bae1c3aa1",
+        "action": "STAFF_CREATED",
+        "ipAddress": "192.168.65.1",
+        "user_agent_prefix": "node",
+        "details": "{\"targetUserId\":\"13fbe3dd-481c-488f-a89f-44cca053959f\",\"staffId\":\"M000012\",\"roles\":[\"MESERO\"]}",
+        "createdAt": "2026-11-28T09:13:23.637Z"
+      },
+      {
+        "id": "d69536bd-98b8-4b30-a886-e8accce422e3",
+        "userId": "642b6161-9d9c-46cd-9190-3f2bae1c3aa1",
+        "action": "STAFF_DELETED",
+        "ipAddress": "192.168.65.1",
+        "user_agent_prefix": "node",
+        "details": "{\"targetUserId\":\"12504cd9-b0b1-4e23-a89d-2cf9aadfe96b\",\"staffId\":\"M000012\"}",
+        "createdAt": "2026-11-28T09:13:23.454Z"
+      },
+      {
+        "id": "69fe5c88-33a2-414d-86fb-a101376078d2",
+        "userId": "12504cd9-b0b1-4e23-a89d-2cf9aadfe96b",
+        "action": "LOGIN_SUCCESS",
+        "ipAddress": "192.168.65.1",
+        "user_agent_prefix": "node",
+        "details": "{\"staffId\":\"M000012\"}",
+        "createdAt": "2026-11-28T09:13:23.447Z"
+      },
+      {
+        "id": "049e194e-b7a5-47dc-9f19-efd0a85d7df2",
+        "userId": "12504cd9-b0b1-4e23-a89d-2cf9aadfe96b",
+        "action": "PASSWORD_CHANGED",
+        "ipAddress": "192.168.65.1",
+        "user_agent_prefix": "node",
+        "details": "{\"staffId\":\"M000012\"}",
+        "createdAt": "2026-11-28T09:13:23.277Z"
+      },
+      {
+        "id": "4165e4df-fd83-4044-9dfd-fe92e39f8f03",
+        "userId": "12504cd9-b0b1-4e23-a89d-2cf9aadfe96b",
+        "action": "LOGIN_SUCCESS",
+        "ipAddress": "192.168.65.1",
+        "user_agent_prefix": "node",
+        "details": "{\"staffId\":\"M000012\"}",
+        "createdAt": "2026-11-28T09:13:22.938Z"
+      },
+      {
+        "id": "4463761e-8f85-4784-a3b8-e5824657ba74",
+        "userId": "642b6161-9d9c-46cd-9190-3f2bae1c3aa1",
+        "action": "STAFF_CREATED",
+        "ipAddress": "192.168.65.1",
+        "user_agent_prefix": "node",
+        "details": "{\"targetUserId\":\"12504cd9-b0b1-4e23-a89d-2cf9aadfe96b\",\"staffId\":\"M000012\",\"roles\":[\"MESERO\"]}",
+        "createdAt": "2026-11-28T09:13:22.767Z"
+      },
+      {
+        "id": "1adb2a40-af54-4b49-a3d6-b39c350cf3c0",
+        "userId": "642b6161-9d9c-46cd-9190-3f2bae1c3aa1",
+        "action": "STAFF_DELETED",
+        "ipAddress": "192.168.65.1",
+        "user_agent_prefix": "node",
+        "details": "{\"targetUserId\":\"49728c03-d2ef-4bed-9c89-99b3b4354764\",\"staffId\":\"M000012\"}",
+        "createdAt": "2026-11-28T09:13:22.595Z"
+      },
+      {
+        "id": "73dbafa9-9f1c-4091-af4e-c9f38321f0a2",
+        "userId": "49728c03-d2ef-4bed-9c89-99b3b4354764",
+        "action": "LOGIN_SUCCESS",
+        "ipAddress": "192.168.65.1",
+        "user_agent_prefix": "node",
+        "details": "{\"staffId\":\"M000012\"}",
+        "createdAt": "2026-11-28T09:13:22.574Z"
+      },
+      {
+        "id": "47e035dd-4f41-485a-83ad-622cf0d477ef",
+        "userId": "49728c03-d2ef-4bed-9c89-99b3b4354764",
+        "action": "PASSWORD_CHANGED",
+        "ipAddress": "192.168.65.1",
+        "user_agent_prefix": "node",
+        "details": "{\"staffId\":\"M000012\"}",
+        "createdAt": "2026-11-28T09:13:22.403Z"
+      },
+      {
+        "id": "e65342ff-e710-4744-ae33-155238edfdb6",
+        "userId": "49728c03-d2ef-4bed-9c89-99b3b4354764",
+        "action": "LOGIN_SUCCESS",
+        "ipAddress": "192.168.65.1",
+        "user_agent_prefix": "node",
+        "details": "{\"staffId\":\"M000012\"}",
+        "createdAt": "2026-11-28T09:13:22.065Z"
+      },
+      {
+        "id": "4980222d-e8ab-4a8b-a176-a3a373a893ad",
+        "userId": "642b6161-9d9c-46cd-9190-3f2bae1c3aa1",
+        "action": "STAFF_CREATED",
+        "ipAddress": "192.168.65.1",
+        "user_agent_prefix": "node",
+        "details": "{\"targetUserId\":\"49728c03-d2ef-4bed-9c89-99b3b4354764\",\"staffId\":\"M000012\",\"roles\":[\"MESERO\"]}",
+        "createdAt": "2026-11-28T09:13:21.895Z"
+      },
+      {
+        "id": "892157c4-a1e3-4211-99c2-2077ca1987d2",
+        "userId": "642b6161-9d9c-46cd-9190-3f2bae1c3aa1",
+        "action": "STAFF_DELETED",
+        "ipAddress": "192.168.65.1",
+        "user_agent_prefix": "node",
+        "details": "{\"targetUserId\":\"345f3430-4d54-4c2d-8acf-0d7ab84f0d8e\",\"staffId\":\"M000012\"}",
+        "createdAt": "2026-11-28T09:13:21.549Z"
+      },
+      {
+        "id": "f3a903c1-2a2a-48b1-9191-541ee631fe0d",
+        "userId": "642b6161-9d9c-46cd-9190-3f2bae1c3aa1",
+        "action": "STAFF_CREATED",
+        "ipAddress": "192.168.65.1",
+        "user_agent_prefix": "node",
+        "details": "{\"targetUserId\":\"345f3430-4d54-4c2d-8acf-0d7ab84f0d8e\",\"staffId\":\"M000012\",\"roles\":[\"MESERO\"]}",
+        "createdAt": "2026-11-28T09:13:21.527Z"
+      },
+      {
+        "id": "906bbe73-55e4-4080-b8bd-33d9271f9638",
+        "userId": "0e316dfd-a442-4825-b605-a2d4b18cfb8b",
+        "action": "LOGIN_FAILED",
+        "ipAddress": "192.168.65.1",
+        "user_agent_prefix": "node",
+        "details": "{\"identifier\":\"M000006\"}",
+        "createdAt": "2026-11-28T09:13:21.149Z"
+      },
+      {
+        "id": "191c6475-aafd-4659-a76f-80fe8d7b8c97",
+        "userId": "0e316dfd-a442-4825-b605-a2d4b18cfb8b",
+        "action": "LOGIN_FAILED",
+        "ipAddress": "192.168.65.1",
+        "user_agent_prefix": "node",
+        "details": "{\"identifier\":\"M000006\"}",
+        "createdAt": "2026-11-28T09:13:20.642Z"
+      },
+      {
+        "id": "156ebf89-9e6e-471e-b1f8-ff7c0346e90c",
+        "userId": "0e316dfd-a442-4825-b605-a2d4b18cfb8b",
+        "action": "LOGIN_FAILED",
+        "ipAddress": "192.168.65.1",
+        "user_agent_prefix": "node",
+        "details": "{\"identifier\":\"M000006\"}",
+        "createdAt": "2026-11-28T09:13:20.137Z"
+      }
+    ]
+  },
+  "usersBreakdown": [
+    {
+      "userType": "ADMIN",
+      "passwordStatus": "ACTIVE",
+      "isActive": true,
+      "total": 1
+    },
+    {
+      "userType": "STAFF",
+      "passwordStatus": "ACTIVE",
+      "isActive": false,
+      "total": 1
+    },
+    {
+      "userType": "STAFF",
+      "passwordStatus": "ACTIVE",
+      "isActive": true,
+      "total": 7
+    },
+    {
+      "userType": "STAFF",
+      "passwordStatus": "TEMPORARY",
+      "isActive": true,
+      "total": 2
+    }
+  ],
+  "roles": [
+    {
+      "code": "ADMINISTRADOR",
+      "name": "Administrador General",
+      "isSystemRole": true,
+      "isAssignable": false,
+      "permission_count": 1
+    },
+    {
+      "code": "ALMACENISTA",
+      "name": "Almacenista / Bodega",
+      "isSystemRole": true,
+      "isAssignable": true,
+      "permission_count": 9
+    },
+    {
+      "code": "CAJERO",
+      "name": "Cajero / Facturación",
+      "isSystemRole": true,
+      "isAssignable": true,
+      "permission_count": 2
+    },
+    {
+      "code": "CHEF_MASTER",
+      "name": "Chef / Cocina",
+      "isSystemRole": true,
+      "isAssignable": true,
+      "permission_count": 8
+    },
+    {
+      "code": "COCINERO",
+      "name": "Cocinero (Línea KDS)",
+      "isSystemRole": true,
+      "isAssignable": true,
+      "permission_count": 5
+    },
+    {
+      "code": "GESTOR_MENU",
+      "name": "Gestor de Menú",
+      "isSystemRole": true,
+      "isAssignable": true,
+      "permission_count": 13
+    },
+    {
+      "code": "HOST",
+      "name": "Host / Recepción",
+      "isSystemRole": true,
+      "isAssignable": true,
+      "permission_count": 16
+    },
+    {
+      "code": "MESERO",
+      "name": "Mesero / Órdenes",
+      "isSystemRole": true,
+      "isAssignable": true,
+      "permission_count": 17
+    },
+    {
+      "code": "ROL_ENCARGADO_OP",
+      "name": "Encargado Operativo",
+      "isSystemRole": false,
+      "isAssignable": true,
+      "permission_count": 3
+    }
+  ],
+  "checks": [
+    {
+      "id": "SQL-01-MIGRATIONS",
+      "description": "Migraciones TypeORM ejecutadas sobre esquema public vacío",
+      "passed": true,
+      "observed": {
+        "tables": [
+          "audit_logs",
+          "migrations",
+          "refresh_tokens",
+          "roles",
+          "staff_profiles",
+          "user_roles",
+          "users"
+        ],
+        "migrations": [
+          {
+            "id": 1,
+            "timestamp": "1762900000000",
+            "name": "InitialSchema1762900000000"
+          },
+          {
+            "id": 2,
+            "timestamp": "1762900000001",
+            "name": "SessionVersionAndHashedTempPasswords1762900000001"
+          }
+        ]
+      }
+    },
+    {
+      "id": "SQL-02-BCRYPT-2B-12",
+      "description": "100% de hashes en tabla users utilizan bcrypt $2b$12$ (NFR-AUTH-SEC-001)",
+      "passed": true,
+      "observed": {
+        "total_users": 11,
+        "valid_bcrypt_2b_12": 11,
+        "invalid_or_legacy_hashes": 0
+      }
+    },
+    {
+      "id": "SQL-03-REFRESH-SHA256",
+      "description": "100% de refresh_tokens persistidos como hash SHA-256 hex de 64 caracteres (sin texto claro)",
+      "passed": true,
+      "observed": {
+        "total_refresh_tokens": 23,
+        "valid_sha256_hashes": 23,
+        "non_sha256_tokens": 0,
+        "revoked_tokens": 9,
+        "active_tokens": 14
+      }
+    },
+    {
+      "id": "SQL-04-AUDIT-LOGS-CONTEXT",
+      "description": "Registros en audit_logs contienen ipAddress y userAgent no nulos (CP-AUTH-21 / NFR-AUTH-AUD-001)",
+      "passed": true,
+      "observed": {
+        "summary": {
+          "total_audit_logs": 74,
+          "with_non_null_ip": 74,
+          "with_non_null_user_agent": 74,
+          "missing_network_context": 0
+        },
+        "byAction": [
+          {
+            "action": "LOGIN_SUCCESS",
+            "total": 20
+          },
+          {
+            "action": "STAFF_CREATED",
+            "total": 16
+          },
+          {
+            "action": "PASSWORD_CHANGED",
+            "total": 12
+          },
+          {
+            "action": "LOGIN_FAILED",
+            "total": 6
+          },
+          {
+            "action": "STAFF_DELETED",
+            "total": 6
+          },
+          {
+            "action": "STAFF_STATUS_CHANGED",
+            "total": 3
+          },
+          {
+            "action": "ROLE_CREATED",
+            "total": 2
+          },
+          {
+            "action": "STAFF_ROLES_UPDATED",
+            "total": 2
+          },
+          {
+            "action": "PASSWORD_RESET_BY_ADMIN",
+            "total": 1
+          },
+          {
+            "action": "PASSWORD_RESET_REQUESTED",
+            "total": 1
+          },
+          {
+            "action": "PROFILE_UPDATED",
+            "total": 1
+          },
+          {
+            "action": "ROLE_DELETED",
+            "total": 1
+          },
+          {
+            "action": "ROLE_UPDATED",
+            "total": 1
+          },
+          {
+            "action": "SETUP_ADMIN",
+            "total": 1
+          },
+          {
+            "action": "STAFF_UPDATED",
+            "total": 1
+          }
+        ]
+      }
+    }
+  ],
+  "overallPassed": true
+}

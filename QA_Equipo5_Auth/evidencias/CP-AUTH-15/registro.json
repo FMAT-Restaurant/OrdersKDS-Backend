@@ -1,0 +1,104 @@
+{
+  "casoId": "CP-AUTH-15",
+  "titulo": "Publicación de eventos CloudEvents en RabbitMQ (restaurant.staff.events) y H-AUTH-B01/B04",
+  "requisitos": [
+    "REQ-AUTH-016",
+    "REQ-AUTH-017",
+    "NFR-AUTH-AVAIL-002"
+  ],
+  "ejecutadoEnUtc": "2026-11-28T03:13:30.038Z",
+  "commits": {
+    "Auth-Backend": {
+      "commit": "a3844c97c7cc151c169369546a32f2054cfe6ed8",
+      "branch": "main"
+    },
+    "Auth-Frontend": {
+      "commit": "330f16d236e8bbd101761da0ac57f609711255a0",
+      "branch": "main"
+    },
+    "Auth-Documentation": {
+      "commit": "8b1fc349de850f87e59618516fb9bfaef559c47c",
+      "branch": "main"
+    },
+    "OrdersKDS-Backend-QA": {
+      "commit": "7a728c2ce94785acf683bd3afadb9653fe008e0f"
+    }
+  },
+  "estadoGlobal": "FALLA_PARCIAL",
+  "resumenVerificaciones": {
+    "total": 4,
+    "pasan": 2,
+    "fallan": 2
+  },
+  "verificaciones": [
+    {
+      "id": "RMQ-EXCHANGE-01",
+      "origen": "rabbitmq-live",
+      "nombre": "Exchange durable restaurant.staff.events (topic) activo en RabbitMQ real",
+      "estado": "PASA",
+      "esperado": "topic durable=true",
+      "observado": {
+        "name": "restaurant.staff.events",
+        "type": "topic",
+        "durable": true,
+        "auto_delete": false
+      }
+    },
+    {
+      "id": "RMQ-EVENT-CREATE-DELETE",
+      "origen": "rabbitmq-live",
+      "nombre": "Eventos reales capturados en cola temporal al crear/cambiar estado/roles/eliminar staff",
+      "estado": "PASA",
+      "esperado": ">= 1 evento por operación",
+      "observado": {
+        "createStaffStatus": 201,
+        "eventsAfterCreateCount": 1,
+        "patchStaffStatus": 200,
+        "eventsAfterPatchStaffCount": 0,
+        "putRolesStatus": 200,
+        "eventsAfterPutRolesCount": 1,
+        "patchStatusHttp": 200,
+        "eventsAfterPatchStatusCount": 1,
+        "deleteStatus": 200,
+        "eventsAfterDeleteCount": 1
+      }
+    },
+    {
+      "id": "RMQ-H-AUTH-B01",
+      "origen": "rabbitmq-live",
+      "nombre": "H-AUTH-B01: PATCH /api/v1/staff/:id cambiando roles e isActive emite evento RabbitMQ",
+      "estado": "FALLA",
+      "esperado": "Evento emitido al actualizar roles/isActive vía PATCH /staff/:id",
+      "observado": {
+        "descripcion": "PATCH /api/v1/staff/:id cambiando roles e isActive emite evento RabbitMQ",
+        "corregido": false,
+        "estado": "ABIERTO",
+        "eventosEmitidosEnPatchStaff": 0
+      }
+    },
+    {
+      "id": "RMQ-H-AUTH-B04",
+      "origen": "rabbitmq-live",
+      "nombre": "H-AUTH-B04: CloudEvent data incluye permissions y roleLabel conforme a architecture.md",
+      "estado": "FALLA",
+      "esperado": "Claves permissions y roleLabel presentes en payload.data",
+      "observado": {
+        "descripcion": "CloudEvent data incluye permissions y roleLabel conforme a architecture.md",
+        "corregido": false,
+        "estado": "ABIERTO",
+        "clavesObservadasEnData": [
+          "userId",
+          "staffId",
+          "firstName",
+          "lastName",
+          "roles",
+          "isActive"
+        ]
+      }
+    }
+  ],
+  "nota": null,
+  "evidenciaAdicional": {
+    "rabbitmqEventsPath": "evidencias/CP-AUTH-15/rabbitmq_events.json"
+  }
+}

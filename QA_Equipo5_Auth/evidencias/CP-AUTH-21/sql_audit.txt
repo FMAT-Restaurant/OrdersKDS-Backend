@@ -1,0 +1,9 @@
+=== AUDITORIA SQL DIRECTA (fmat_auth) @ 2026-11-28T03:13:30.099Z ===
+Tablas: audit_logs, migrations, refresh_tokens, roles, staff_profiles, user_roles, users
+Migraciones: [{"id":1,"timestamp":"1762900000000","name":"InitialSchema1762900000000"},{"id":2,"timestamp":"1762900000001","name":"SessionVersionAndHashedTempPasswords1762900000001"}]
+Hashes bcrypt ($2b$12$): {"total_users":11,"valid_bcrypt_2b_12":11,"invalid_or_legacy_hashes":0}
+Refresh Tokens (SHA-256): {"total_refresh_tokens":23,"valid_sha256_hashes":23,"non_sha256_tokens":0,"revoked_tokens":9,"active_tokens":14}
+Audit Logs resumen: {"total_audit_logs":74,"with_non_null_ip":74,"with_non_null_user_agent":74,"missing_network_context":0}
+Audit Logs por accion: [{"action":"LOGIN_SUCCESS","total":20},{"action":"STAFF_CREATED","total":16},{"action":"PASSWORD_CHANGED","total":12},{"action":"LOGIN_FAILED","total":6},{"action":"STAFF_DELETED","total":6},{"action":"STAFF_STATUS_CHANGED","total":3},{"action":"ROLE_CREATED","total":2},{"action":"STAFF_ROLES_UPDATED","total":2},{"action":"PASSWORD_RESET_BY_ADMIN","total":1},{"action":"PASSWORD_RESET_REQUESTED","total":1},{"action":"PROFILE_UPDATED","total":1},{"action":"ROLE_DELETED","total":1},{"action":"ROLE_UPDATED","total":1},{"action":"SETUP_ADMIN","total":1},{"action":"STAFF_UPDATED","total":1}]
+Usuarios por estado: [{"userType":"ADMIN","passwordStatus":"ACTIVE","isActive":true,"total":1},{"userType":"STAFF","passwordStatus":"ACTIVE","isActive":false,"total":1},{"userType":"STAFF","passwordStatus":"ACTIVE","isActive":true,"total":7},{"userType":"STAFF","passwordStatus":"TEMPORARY","isActive":true,"total":2}]
+Checks passed: 4/4

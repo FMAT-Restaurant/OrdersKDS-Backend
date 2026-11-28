@@ -1,0 +1,25 @@
+{
+  "name": "qa-equipo5-auth-i3",
+  "version": "1.0.0",
+  "description": "Arnés reproducible Iteración 3 (FMAT-REST-EQ5-STP-EQ6-v1.0) para auditoría de Auth-Backend, PostgreSQL 16 y RabbitMQ",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "seed": "node scripts/seed_qa_auth.mjs",
+    "newman": "newman run postman/auth_qa_e5.postman_collection.json -e postman/auth_local_docker.postman_environment.json -r cli,htmlextra,json --reporter-htmlextra-export evidencias/newman-report.html --reporter-json-export evidencias/newman-report.json",
+    "bdd": "cucumber-js --config cucumber.mjs",
+    "security": "node scripts/run_security_and_contracts.mjs",
+    "sql-audit": "node scripts/verify_db_audit.mjs",
+    "sonar-audit": "node scripts/collect_static_sonar_audit.mjs",
+    "all": "./ejecutar_i3.sh"
+  },
+  "dependencies": {
+    "@cucumber/cucumber": "^11.3.0",
+    "ajv": "^8.17.1",
+    "amqplib": "^0.10.9",
+    "jsonwebtoken": "^9.0.2",
+    "newman": "^6.2.1",
+    "newman-reporter-htmlextra": "^1.23.1",
+    "pg": "^8.16.0"
+  }
+}

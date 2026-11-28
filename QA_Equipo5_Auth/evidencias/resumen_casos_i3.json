@@ -1,0 +1,131 @@
+{
+  "generatedAtUtc": "2026-11-28T03:13:30.038Z",
+  "cases": [
+    {
+      "casoId": "CP-AUTH-01",
+      "estadoGlobal": "PASA",
+      "pasan": 3,
+      "fallan": 0,
+      "total": 3
+    },
+    {
+      "casoId": "CP-AUTH-02",
+      "estadoGlobal": "PASA",
+      "pasan": 5,
+      "fallan": 0,
+      "total": 5
+    },
+    {
+      "casoId": "CP-AUTH-03",
+      "estadoGlobal": "PASA",
+      "pasan": 5,
+      "fallan": 0,
+      "total": 5
+    },
+    {
+      "casoId": "CP-AUTH-04",
+      "estadoGlobal": "PASA",
+      "pasan": 3,
+      "fallan": 0,
+      "total": 3
+    },
+    {
+      "casoId": "CP-AUTH-05",
+      "estadoGlobal": "PASA",
+      "pasan": 7,
+      "fallan": 0,
+      "total": 7
+    },
+    {
+      "casoId": "CP-AUTH-06",
+      "estadoGlobal": "PASA",
+      "pasan": 6,
+      "fallan": 0,
+      "total": 6
+    },
+    {
+      "casoId": "CP-AUTH-07",
+      "estadoGlobal": "FALLA_PARCIAL",
+      "pasan": 10,
+      "fallan": 2,
+      "total": 12
+    },
+    {
+      "casoId": "CP-AUTH-08",
+      "estadoGlobal": "PASA",
+      "pasan": 11,
+      "fallan": 0,
+      "total": 11
+    },
+    {
+      "casoId": "CP-AUTH-09",
+      "estadoGlobal": "PASA",
+      "pasan": 1,
+      "fallan": 0,
+      "total": 1
+    },
+    {
+      "casoId": "CP-AUTH-10",
+      "estadoGlobal": "FALLA_PARCIAL",
+      "pasan": 9,
+      "fallan": 1,
+      "total": 10
+    },
+    {
+      "casoId": "CP-AUTH-11",
+      "estadoGlobal": "FALLA_PARCIAL",
+      "pasan": 2,
+      "fallan": 1,
+      "total": 3
+    },
+    {
+      "casoId": "CP-AUTH-12",
+      "estadoGlobal": "PASA",
+      "pasan": 1,
+      "fallan": 0,
+      "total": 1
+    },
+    {
+      "casoId": "CP-AUTH-13",
+      "estadoGlobal": "PASA",
+      "pasan": 1,
+      "fallan": 0,
+      "total": 1
+    },
+    {
+      "casoId": "CP-AUTH-14",
+      "estadoGlobal": "PASA",
+      "pasan": 3,
+      "fallan": 0,
+      "total": 3
+    },
+    {
+      "casoId": "CP-AUTH-15",
+      "estadoGlobal": "FALLA_PARCIAL",
+      "pasan": 2,
+      "fallan": 2,
+      "total": 4
+    },
+    {
+      "casoId": "CP-AUTH-17",
+      "estadoGlobal": "PASA",
+      "pasan": 3,
+      "fallan": 0,
+      "total": 3
+    },
+    {
+      "casoId": "CP-AUTH-18",
+      "estadoGlobal": "PASA",
+      "pasan": 4,
+      "fallan": 0,
+      "total": 4
+    },
+    {
+      "casoId": "CP-AUTH-21",
+      "estadoGlobal": "FALLA_PARCIAL",
+      "pasan": 6,
+      "fallan": 1,
+      "total": 7
+    }
+  ]
+}

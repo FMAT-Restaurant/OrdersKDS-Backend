@@ -1,0 +1,117 @@
+{
+  "casoId": "CP-AUTH-05",
+  "titulo": "Integridad PBAC: rechazo roles vacío, bloqueo anti-escalación, SQLi y Mass Assignment",
+  "requisitos": [
+    "REQ-AUTH-004",
+    "REQ-AUTH-006",
+    "INV-AUTH-003",
+    "INV-AUTH-005"
+  ],
+  "ejecutadoEnUtc": "2026-11-28T03:13:30.037Z",
+  "commits": {
+    "Auth-Backend": {
+      "commit": "a3844c97c7cc151c169369546a32f2054cfe6ed8",
+      "branch": "main"
+    },
+    "Auth-Frontend": {
+      "commit": "330f16d236e8bbd101761da0ac57f609711255a0",
+      "branch": "main"
+    },
+    "Auth-Documentation": {
+      "commit": "8b1fc349de850f87e59618516fb9bfaef559c47c",
+      "branch": "main"
+    },
+    "OrdersKDS-Backend-QA": {
+      "commit": "7a728c2ce94785acf683bd3afadb9653fe008e0f"
+    }
+  },
+  "estadoGlobal": "PASA",
+  "resumenVerificaciones": {
+    "total": 7,
+    "pasan": 7,
+    "fallan": 0
+  },
+  "verificaciones": [
+    {
+      "id": "NEWMAN-1",
+      "origen": "newman",
+      "nombre": "CP-AUTH-05: POST /roles con permissions: [] -> 400",
+      "estado": "PASA",
+      "statusCode": 400,
+      "tiempoMs": 4,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-2",
+      "origen": "newman",
+      "nombre": "CP-AUTH-05: POST /roles anti-escalacion con * -> 400",
+      "estado": "PASA",
+      "statusCode": 400,
+      "tiempoMs": 5,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-3",
+      "origen": "newman",
+      "nombre": "CP-AUTH-05: POST /staff con roles: [] -> 400",
+      "estado": "PASA",
+      "statusCode": 400,
+      "tiempoMs": 5,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-4",
+      "origen": "newman",
+      "nombre": "CP-AUTH-05: POST /staff anti-escalacion ADMINISTRADOR -> 400",
+      "estado": "PASA",
+      "statusCode": 400,
+      "tiempoMs": 5,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-5",
+      "origen": "newman",
+      "nombre": "CP-AUTH-05: PUT /staff/:id/roles anti-escalacion ADMINISTRADOR -> 400",
+      "estado": "PASA",
+      "statusCode": 400,
+      "tiempoMs": 4,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "ABUSE-MASS-ASSIGNMENT-01",
+      "origen": "security-abuse",
+      "nombre": "Mass Assignment en POST /api/v1/staff no sobreescribe userType/passwordStatus/isActive/tokenVersion/staffId",
+      "estado": "PASA",
+      "esperado": "Rechazo o saneamiento estricto sin escalación",
+      "observado": {
+        "httpStatus": 201,
+        "persistedRow": {
+          "userType": "STAFF",
+          "passwordStatus": "TEMPORARY",
+          "isActive": true,
+          "tokenVersion": 0,
+          "staffId": "M000012"
+        }
+      }
+    },
+    {
+      "id": "ABUSE-SQLI-01",
+      "origen": "security-abuse",
+      "nombre": "Payloads SQLi en login (401) y filtros GET /staff (sin 500 ni fuga de esquema SQL)",
+      "estado": "PASA",
+      "esperado": "Rechazo o saneamiento estricto sin escalación",
+      "observado": {
+        "loginStatus": 401,
+        "filterStatus": 200,
+        "filterTotalReturned": null
+      }
+    }
+  ],
+  "nota": null,
+  "evidenciaAdicional": {}
+}

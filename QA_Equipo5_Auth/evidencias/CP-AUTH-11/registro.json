@@ -1,0 +1,77 @@
+{
+  "casoId": "CP-AUTH-11",
+  "titulo": "Rotación de RefreshToken, rechazo de replay attack e incremento de tokenVersion (tv)",
+  "requisitos": [
+    "REQ-AUTH-011",
+    "BR-AUTH-013",
+    "NFR-AUTH-SEC-002"
+  ],
+  "ejecutadoEnUtc": "2026-11-28T03:13:30.037Z",
+  "commits": {
+    "Auth-Backend": {
+      "commit": "a3844c97c7cc151c169369546a32f2054cfe6ed8",
+      "branch": "main"
+    },
+    "Auth-Frontend": {
+      "commit": "330f16d236e8bbd101761da0ac57f609711255a0",
+      "branch": "main"
+    },
+    "Auth-Documentation": {
+      "commit": "8b1fc349de850f87e59618516fb9bfaef559c47c",
+      "branch": "main"
+    },
+    "OrdersKDS-Backend-QA": {
+      "commit": "7a728c2ce94785acf683bd3afadb9653fe008e0f"
+    }
+  },
+  "estadoGlobal": "FALLA_PARCIAL",
+  "resumenVerificaciones": {
+    "total": 3,
+    "pasan": 2,
+    "fallan": 1
+  },
+  "verificaciones": [
+    {
+      "id": "NEWMAN-1",
+      "origen": "newman",
+      "nombre": "CP-AUTH-11: POST /api/v1/auth/refresh rota token",
+      "estado": "PASA",
+      "statusCode": 200,
+      "tiempoMs": 7,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-2",
+      "origen": "newman",
+      "nombre": "CP-AUTH-11: Replay attack con RefreshToken previo -> 401",
+      "estado": "PASA",
+      "statusCode": 401,
+      "tiempoMs": 3,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "REPLAY-TV-01",
+      "origen": "security-abuse",
+      "nombre": "Replay con RefreshToken rotado responde 401 e incrementa tokenVersion (tv) en usuario",
+      "estado": "FALLA",
+      "esperado": "replayStatus=401 y tv incremented en replay",
+      "observado": {
+        "initialTv": 1,
+        "rotatedTv": 1,
+        "replayStatus": 401,
+        "replayBody": {
+          "message": "Refresh token inválido o expirado",
+          "error": "Unauthorized",
+          "statusCode": 401
+        },
+        "dbTokenVersionAfterReplay": 1,
+        "tvIncrementedOnReplay": false,
+        "rotatedAccessTokenStatusAfterReplay": 200
+      }
+    }
+  ],
+  "nota": null,
+  "evidenciaAdicional": {}
+}

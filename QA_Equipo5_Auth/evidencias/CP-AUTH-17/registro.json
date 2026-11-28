@@ -1,0 +1,67 @@
+{
+  "casoId": "CP-AUTH-17",
+  "titulo": "Solicitud homogénea request-password-reset y reset administrativo -> TEMPORARY",
+  "requisitos": [
+    "REQ-AUTH-017",
+    "BR-AUTH-014",
+    "BR-AUTH-016"
+  ],
+  "ejecutadoEnUtc": "2026-11-28T03:13:30.038Z",
+  "commits": {
+    "Auth-Backend": {
+      "commit": "a3844c97c7cc151c169369546a32f2054cfe6ed8",
+      "branch": "main"
+    },
+    "Auth-Frontend": {
+      "commit": "330f16d236e8bbd101761da0ac57f609711255a0",
+      "branch": "main"
+    },
+    "Auth-Documentation": {
+      "commit": "8b1fc349de850f87e59618516fb9bfaef559c47c",
+      "branch": "main"
+    },
+    "OrdersKDS-Backend-QA": {
+      "commit": "7a728c2ce94785acf683bd3afadb9653fe008e0f"
+    }
+  },
+  "estadoGlobal": "PASA",
+  "resumenVerificaciones": {
+    "total": 3,
+    "pasan": 3,
+    "fallan": 0
+  },
+  "verificaciones": [
+    {
+      "id": "NEWMAN-1",
+      "origen": "newman",
+      "nombre": "CP-AUTH-17: request-password-reset cuenta valida vs inexistente (homogeneo)",
+      "estado": "PASA",
+      "statusCode": 200,
+      "tiempoMs": 5,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-2",
+      "origen": "newman",
+      "nombre": "CP-AUTH-17: request-password-reset inexistente -> mensaje identico",
+      "estado": "PASA",
+      "statusCode": 200,
+      "tiempoMs": 3,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-3",
+      "origen": "newman",
+      "nombre": "CP-AUTH-17: POST /staff/:id/reset-password por ADMIN -> TEMPORARY",
+      "estado": "PASA",
+      "statusCode": 200,
+      "tiempoMs": 175,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    }
+  ],
+  "nota": null,
+  "evidenciaAdicional": {}
+}

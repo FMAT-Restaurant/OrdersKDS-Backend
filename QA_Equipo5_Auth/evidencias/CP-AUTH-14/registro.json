@@ -1,0 +1,76 @@
+{
+  "casoId": "CP-AUTH-14",
+  "titulo": "Desactivación de personal e invalidación inmediata de AccessToken (tv)",
+  "requisitos": [
+    "REQ-AUTH-015",
+    "BR-AUTH-015",
+    "INV-AUTH-007"
+  ],
+  "ejecutadoEnUtc": "2026-11-28T03:13:30.038Z",
+  "commits": {
+    "Auth-Backend": {
+      "commit": "a3844c97c7cc151c169369546a32f2054cfe6ed8",
+      "branch": "main"
+    },
+    "Auth-Frontend": {
+      "commit": "330f16d236e8bbd101761da0ac57f609711255a0",
+      "branch": "main"
+    },
+    "Auth-Documentation": {
+      "commit": "8b1fc349de850f87e59618516fb9bfaef559c47c",
+      "branch": "main"
+    },
+    "OrdersKDS-Backend-QA": {
+      "commit": "7a728c2ce94785acf683bd3afadb9653fe008e0f"
+    }
+  },
+  "estadoGlobal": "PASA",
+  "resumenVerificaciones": {
+    "total": 3,
+    "pasan": 3,
+    "fallan": 0
+  },
+  "verificaciones": [
+    {
+      "id": "NEWMAN-1",
+      "origen": "newman",
+      "nombre": "CP-AUTH-14: Desactivar colaborador #2 -> 200",
+      "estado": "PASA",
+      "statusCode": 200,
+      "tiempoMs": 8,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "NEWMAN-2",
+      "origen": "newman",
+      "nombre": "CP-AUTH-14: AccessToken previo queda revocado inmediatamente -> 401",
+      "estado": "PASA",
+      "statusCode": 401,
+      "tiempoMs": 4,
+      "assertionsTotal": 2,
+      "assertionsFallidas": []
+    },
+    {
+      "id": "REVOKE-DELETE-01",
+      "origen": "security-abuse",
+      "nombre": "AccessToken previo queda revocado inmediatamente tras DELETE /api/v1/staff/:id -> 401",
+      "estado": "PASA",
+      "esperado": "200 antes de DELETE -> 200 DELETE /staff/:id -> 401 en GET /auth/me inmediato",
+      "observado": {
+        "staffId": "M000012",
+        "meBeforeDeleteStatus": 200,
+        "deleteStatus": 200,
+        "meAfterDeleteStatus": 401,
+        "meAfterDeleteBody": {
+          "message": "La sesión ya no es válida",
+          "error": "Unauthorized",
+          "statusCode": 401
+        },
+        "passed": true
+      }
+    }
+  ],
+  "nota": null,
+  "evidenciaAdicional": {}
+}

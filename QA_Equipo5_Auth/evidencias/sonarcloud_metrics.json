@@ -1,0 +1,1345 @@
+{
+  "collectedAtUtc": "2026-11-28T03:13:36.817Z",
+  "source": "https://sonarcloud.io/api",
+  "projects": {
+    "Auth-Backend": {
+      "projectKey": "FMAT-Restaurant_Auth-Backend",
+      "qualityGate": {
+        "status": "OK",
+        "conditions": [
+          {
+            "status": "OK",
+            "metricKey": "new_reliability_rating",
+            "comparator": "GT",
+            "periodIndex": 1,
+            "errorThreshold": "1",
+            "actualValue": "1"
+          },
+          {
+            "status": "OK",
+            "metricKey": "new_security_rating",
+            "comparator": "GT",
+            "periodIndex": 1,
+            "errorThreshold": "1",
+            "actualValue": "1"
+          },
+          {
+            "status": "OK",
+            "metricKey": "new_maintainability_rating",
+            "comparator": "GT",
+            "periodIndex": 1,
+            "errorThreshold": "1",
+            "actualValue": "1"
+          },
+          {
+            "status": "OK",
+            "metricKey": "new_coverage",
+            "comparator": "LT",
+            "periodIndex": 1,
+            "errorThreshold": "80",
+            "actualValue": "94.8"
+          },
+          {
+            "status": "OK",
+            "metricKey": "new_duplicated_lines_density",
+            "comparator": "GT",
+            "periodIndex": 1,
+            "errorThreshold": "3",
+            "actualValue": "0.0"
+          },
+          {
+            "status": "OK",
+            "metricKey": "new_security_hotspots_reviewed",
+            "comparator": "LT",
+            "periodIndex": 1,
+            "errorThreshold": "100",
+            "actualValue": "100.0"
+          }
+        ],
+        "periods": [
+          {
+            "index": 1,
+            "mode": "previous_version",
+            "date": "2026-10-17T16:05:43+0000",
+            "parameter": "not provided"
+          }
+        ],
+        "ignoredConditions": false
+      },
+      "measures": {
+        "coverage": "95.4",
+        "reliability_rating": "1.0",
+        "reliability_rating_letter": "A",
+        "complexity": "461",
+        "duplicated_lines_density": "0.0",
+        "code_smells": "9",
+        "security_rating": "1.0",
+        "security_rating_letter": "A",
+        "sqale_debt_ratio": "0.0",
+        "security_hotspots": "0",
+        "sqale_index": "40",
+        "sqale_rating": "1.0",
+        "sqale_rating_letter": "A",
+        "bugs": "0",
+        "branch_coverage": "90.8",
+        "cognitive_complexity": "237",
+        "ncloc": "2879",
+        "vulnerabilities": "0",
+        "line_coverage": "97.3"
+      },
+      "filesOverFileCc10": [
+        {
+          "path": "src/staff/staff.service.ts",
+          "ncloc": 428,
+          "functions": 36,
+          "complexity": 101,
+          "cognitive_complexity": 44,
+          "avg_cc_per_function": 2.81,
+          "coverage": 94.9,
+          "code_smells": 1
+        },
+        {
+          "path": "src/auth/auth.service.ts",
+          "ncloc": 470,
+          "functions": 23,
+          "complexity": 89,
+          "cognitive_complexity": 71,
+          "avg_cc_per_function": 3.87,
+          "coverage": 97.1,
+          "code_smells": 4
+        },
+        {
+          "path": "src/roles/roles.service.ts",
+          "ncloc": 326,
+          "functions": 14,
+          "complexity": 34,
+          "cognitive_complexity": 21,
+          "avg_cc_per_function": 2.43,
+          "coverage": 96,
+          "code_smells": 3
+        },
+        {
+          "path": "src/common/security/security.config.ts",
+          "ncloc": 81,
+          "functions": 10,
+          "complexity": 30,
+          "cognitive_complexity": 13,
+          "avg_cc_per_function": 3,
+          "coverage": 98.4,
+          "code_smells": 0
+        },
+        {
+          "path": "src/auth/auth.controller.ts",
+          "ncloc": 192,
+          "functions": 16,
+          "complexity": 29,
+          "cognitive_complexity": 14,
+          "avg_cc_per_function": 1.81,
+          "coverage": 100,
+          "code_smells": 0
+        },
+        {
+          "path": "src/common/validation/password.validation.ts",
+          "ncloc": 84,
+          "functions": 7,
+          "complexity": 22,
+          "cognitive_complexity": 13,
+          "avg_cc_per_function": 3.14,
+          "coverage": 98.2,
+          "code_smells": 0
+        },
+        {
+          "path": "src/events/events.service.ts",
+          "ncloc": 122,
+          "functions": 14,
+          "complexity": 21,
+          "cognitive_complexity": 12,
+          "avg_cc_per_function": 1.5,
+          "coverage": 98.6,
+          "code_smells": 1
+        },
+        {
+          "path": "src/staff/staff.controller.ts",
+          "ncloc": 96,
+          "functions": 10,
+          "complexity": 15,
+          "cognitive_complexity": 8,
+          "avg_cc_per_function": 1.5,
+          "coverage": 100,
+          "code_smells": 0
+        },
+        {
+          "path": "src/common/guards/roles.guard.ts",
+          "ncloc": 49,
+          "functions": 4,
+          "complexity": 15,
+          "cognitive_complexity": 11,
+          "avg_cc_per_function": 3.75,
+          "coverage": 97.7,
+          "code_smells": 0
+        },
+        {
+          "path": "src/common/audit/request-context.ts",
+          "ncloc": 43,
+          "functions": 5,
+          "complexity": 13,
+          "cognitive_complexity": 6,
+          "avg_cc_per_function": 2.6,
+          "coverage": 97.2,
+          "code_smells": 0
+        },
+        {
+          "path": "src/common/security/rate-limit.config.ts",
+          "ncloc": 35,
+          "functions": 6,
+          "complexity": 13,
+          "cognitive_complexity": 5,
+          "avg_cc_per_function": 2.17,
+          "coverage": 96.4,
+          "code_smells": 0
+        },
+        {
+          "path": "src/auth/strategies/jwt.strategy.ts",
+          "ncloc": 58,
+          "functions": 4,
+          "complexity": 12,
+          "cognitive_complexity": 5,
+          "avg_cc_per_function": 3,
+          "coverage": 97.2,
+          "code_smells": 0
+        }
+      ],
+      "filesOverAvgFuncCc10": [],
+      "topComplexFiles": [
+        {
+          "path": "src/staff/staff.service.ts",
+          "ncloc": 428,
+          "functions": 36,
+          "complexity": 101,
+          "cognitive_complexity": 44,
+          "avg_cc_per_function": 2.81,
+          "coverage": 94.9,
+          "code_smells": 1
+        },
+        {
+          "path": "src/auth/auth.service.ts",
+          "ncloc": 470,
+          "functions": 23,
+          "complexity": 89,
+          "cognitive_complexity": 71,
+          "avg_cc_per_function": 3.87,
+          "coverage": 97.1,
+          "code_smells": 4
+        },
+        {
+          "path": "src/roles/roles.service.ts",
+          "ncloc": 326,
+          "functions": 14,
+          "complexity": 34,
+          "cognitive_complexity": 21,
+          "avg_cc_per_function": 2.43,
+          "coverage": 96,
+          "code_smells": 3
+        },
+        {
+          "path": "src/common/security/security.config.ts",
+          "ncloc": 81,
+          "functions": 10,
+          "complexity": 30,
+          "cognitive_complexity": 13,
+          "avg_cc_per_function": 3,
+          "coverage": 98.4,
+          "code_smells": 0
+        },
+        {
+          "path": "src/auth/auth.controller.ts",
+          "ncloc": 192,
+          "functions": 16,
+          "complexity": 29,
+          "cognitive_complexity": 14,
+          "avg_cc_per_function": 1.81,
+          "coverage": 100,
+          "code_smells": 0
+        },
+        {
+          "path": "src/common/validation/password.validation.ts",
+          "ncloc": 84,
+          "functions": 7,
+          "complexity": 22,
+          "cognitive_complexity": 13,
+          "avg_cc_per_function": 3.14,
+          "coverage": 98.2,
+          "code_smells": 0
+        },
+        {
+          "path": "src/events/events.service.ts",
+          "ncloc": 122,
+          "functions": 14,
+          "complexity": 21,
+          "cognitive_complexity": 12,
+          "avg_cc_per_function": 1.5,
+          "coverage": 98.6,
+          "code_smells": 1
+        },
+        {
+          "path": "src/staff/staff.controller.ts",
+          "ncloc": 96,
+          "functions": 10,
+          "complexity": 15,
+          "cognitive_complexity": 8,
+          "avg_cc_per_function": 1.5,
+          "coverage": 100,
+          "code_smells": 0
+        },
+        {
+          "path": "src/common/guards/roles.guard.ts",
+          "ncloc": 49,
+          "functions": 4,
+          "complexity": 15,
+          "cognitive_complexity": 11,
+          "avg_cc_per_function": 3.75,
+          "coverage": 97.7,
+          "code_smells": 0
+        },
+        {
+          "path": "src/common/audit/request-context.ts",
+          "ncloc": 43,
+          "functions": 5,
+          "complexity": 13,
+          "cognitive_complexity": 6,
+          "avg_cc_per_function": 2.6,
+          "coverage": 97.2,
+          "code_smells": 0
+        },
+        {
+          "path": "src/common/security/rate-limit.config.ts",
+          "ncloc": 35,
+          "functions": 6,
+          "complexity": 13,
+          "cognitive_complexity": 5,
+          "avg_cc_per_function": 2.17,
+          "coverage": 96.4,
+          "code_smells": 0
+        },
+        {
+          "path": "src/auth/strategies/jwt.strategy.ts",
+          "ncloc": 58,
+          "functions": 4,
+          "complexity": 12,
+          "cognitive_complexity": 5,
+          "avg_cc_per_function": 3,
+          "coverage": 97.2,
+          "code_smells": 0
+        },
+        {
+          "path": "src/roles/roles.controller.ts",
+          "ncloc": 39,
+          "functions": 7,
+          "complexity": 7,
+          "cognitive_complexity": 0,
+          "avg_cc_per_function": 1,
+          "coverage": 100,
+          "code_smells": 0
+        },
+        {
+          "path": "src/database/database.module.ts",
+          "ncloc": 60,
+          "functions": 3,
+          "complexity": 6,
+          "cognitive_complexity": 2,
+          "avg_cc_per_function": 2,
+          "coverage": null,
+          "code_smells": 0
+        },
+        {
+          "path": "src/common/filters/database-exception.filter.ts",
+          "ncloc": 33,
+          "functions": 1,
+          "complexity": 6,
+          "cognitive_complexity": 1,
+          "avg_cc_per_function": 6,
+          "coverage": 100,
+          "code_smells": 0
+        },
+        {
+          "path": "src/common/config/env.validation.ts",
+          "ncloc": 26,
+          "functions": 2,
+          "complexity": 6,
+          "cognitive_complexity": 3,
+          "avg_cc_per_function": 3,
+          "coverage": 100,
+          "code_smells": 0
+        },
+        {
+          "path": "src/database/entities/user.entity.ts",
+          "ncloc": 59,
+          "functions": 5,
+          "complexity": 5,
+          "cognitive_complexity": 0,
+          "avg_cc_per_function": 1,
+          "coverage": null,
+          "code_smells": 0
+        },
+        {
+          "path": "src/roles/catalog/permissions-catalog.ts",
+          "ncloc": 33,
+          "functions": 4,
+          "complexity": 4,
+          "cognitive_complexity": 0,
+          "avg_cc_per_function": 1,
+          "coverage": 100,
+          "code_smells": 0
+        },
+        {
+          "path": "src/common/constants/views.constant.ts",
+          "ncloc": 30,
+          "functions": 1,
+          "complexity": 4,
+          "cognitive_complexity": 3,
+          "avg_cc_per_function": 4,
+          "coverage": 100,
+          "code_smells": 0
+        },
+        {
+          "path": "src/app.service.ts",
+          "ncloc": 28,
+          "functions": 3,
+          "complexity": 4,
+          "cognitive_complexity": 1,
+          "avg_cc_per_function": 1.33,
+          "coverage": 100,
+          "code_smells": 0
+        }
+      ],
+      "allFilesCount": 55,
+      "openIssuesTotal": 9,
+      "openIssuesSample": [
+        {
+          "issueId": "AaIHF-FvZoDwFCuM6iUi",
+          "rule": "typescript:S3863",
+          "severity": "MINOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Backend:src/auth/auth.service.ts",
+          "line": 28,
+          "message": "'../common/constants/security.constant' imported multiple times."
+        },
+        {
+          "issueId": "AaIHF-FvZoDwFCuM6iUj",
+          "rule": "typescript:S3863",
+          "severity": "MINOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Backend:src/auth/auth.service.ts",
+          "line": 29,
+          "message": "'../common/constants/security.constant' imported multiple times."
+        },
+        {
+          "issueId": "AaIHF-F5ZoDwFCuM6iUk",
+          "rule": "typescript:S6551",
+          "severity": "MINOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Backend:src/events/events.service.ts",
+          "line": 9,
+          "message": "'e' will use Object's default stringification format ('[object Object]') when stringified."
+        },
+        {
+          "issueId": "AaHjaPQqN6cM84pIl3Ce",
+          "rule": "typescript:S3776",
+          "severity": "CRITICAL",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Backend:src/auth/auth.service.ts",
+          "line": 512,
+          "message": "Refactor this function to reduce its Cognitive Complexity from 18 to the 15 allowed."
+        },
+        {
+          "issueId": "AaFgRpXJrcOazOQXEeZs",
+          "rule": "typescript:S6582",
+          "severity": "MINOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Backend:src/auth/auth.service.ts",
+          "line": 487,
+          "message": "Prefer using an optional chain expression instead, as it's more concise and easier to read."
+        },
+        {
+          "issueId": "AaFKnRA5W1pCEb9gA2xT",
+          "rule": "typescript:S9382",
+          "severity": "MINOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Backend:src/roles/roles.service.ts",
+          "line": 200,
+          "message": "Unexpected `await` inside a loop."
+        },
+        {
+          "issueId": "AaFKnRA5W1pCEb9gA2xU",
+          "rule": "typescript:S9382",
+          "severity": "MINOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Backend:src/roles/roles.service.ts",
+          "line": 203,
+          "message": "Unexpected `await` inside a loop."
+        },
+        {
+          "issueId": "AaFKnRA5W1pCEb9gA2xV",
+          "rule": "typescript:S9382",
+          "severity": "MINOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Backend:src/roles/roles.service.ts",
+          "line": 207,
+          "message": "Unexpected `await` inside a loop."
+        },
+        {
+          "issueId": "AaFKnQ-dW1pCEb9gA2xS",
+          "rule": "typescript:S9382",
+          "severity": "MINOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Backend:src/staff/staff.service.ts",
+          "line": 545,
+          "message": "Unexpected `await` inside a loop."
+        }
+      ]
+    },
+    "Auth-Frontend": {
+      "projectKey": "FMAT-Restaurant_Auth-Frontend",
+      "qualityGate": {
+        "status": "OK",
+        "conditions": [
+          {
+            "status": "OK",
+            "metricKey": "new_reliability_rating",
+            "comparator": "GT",
+            "periodIndex": 1,
+            "errorThreshold": "1",
+            "actualValue": "1"
+          },
+          {
+            "status": "OK",
+            "metricKey": "new_security_rating",
+            "comparator": "GT",
+            "periodIndex": 1,
+            "errorThreshold": "1",
+            "actualValue": "1"
+          },
+          {
+            "status": "OK",
+            "metricKey": "new_maintainability_rating",
+            "comparator": "GT",
+            "periodIndex": 1,
+            "errorThreshold": "1",
+            "actualValue": "1"
+          },
+          {
+            "status": "OK",
+            "metricKey": "new_coverage",
+            "comparator": "LT",
+            "periodIndex": 1,
+            "errorThreshold": "80",
+            "actualValue": "86.4"
+          },
+          {
+            "status": "OK",
+            "metricKey": "new_duplicated_lines_density",
+            "comparator": "GT",
+            "periodIndex": 1,
+            "errorThreshold": "3",
+            "actualValue": "1.3"
+          },
+          {
+            "status": "OK",
+            "metricKey": "new_security_hotspots_reviewed",
+            "comparator": "LT",
+            "periodIndex": 1,
+            "errorThreshold": "100",
+            "actualValue": "100.0"
+          }
+        ],
+        "periods": [
+          {
+            "index": 1,
+            "mode": "previous_version",
+            "date": "2026-10-17T16:05:41+0000",
+            "parameter": "not provided"
+          }
+        ],
+        "ignoredConditions": false
+      },
+      "measures": {
+        "coverage": "83.5",
+        "reliability_rating": "1.0",
+        "reliability_rating_letter": "A",
+        "complexity": "1114",
+        "duplicated_lines_density": "1.0",
+        "code_smells": "33",
+        "security_rating": "1.0",
+        "security_rating_letter": "A",
+        "sqale_debt_ratio": "0.1",
+        "security_hotspots": "0",
+        "sqale_index": "185",
+        "sqale_rating": "1.0",
+        "sqale_rating_letter": "A",
+        "bugs": "0",
+        "branch_coverage": "78.8",
+        "cognitive_complexity": "697",
+        "ncloc": "7903",
+        "vulnerabilities": "0",
+        "line_coverage": "87.3"
+      },
+      "filesOverFileCc10": [
+        {
+          "path": "src/services/authApi.ts",
+          "ncloc": 715,
+          "functions": 49,
+          "complexity": 159,
+          "cognitive_complexity": 95,
+          "avg_cc_per_function": 3.24,
+          "coverage": 88.3,
+          "code_smells": 2
+        },
+        {
+          "path": "src/components/admin/StaffManagementView.tsx",
+          "ncloc": 766,
+          "functions": 52,
+          "complexity": 117,
+          "cognitive_complexity": 113,
+          "avg_cc_per_function": 2.25,
+          "coverage": 77.3,
+          "code_smells": 5
+        },
+        {
+          "path": "src/components/admin/RolesManagementView.tsx",
+          "ncloc": 618,
+          "functions": 45,
+          "complexity": 95,
+          "cognitive_complexity": 73,
+          "avg_cc_per_function": 2.11,
+          "coverage": 85.4,
+          "code_smells": 2
+        },
+        {
+          "path": "src/components/admin/StaffDetailDrawer.tsx",
+          "ncloc": 566,
+          "functions": 26,
+          "complexity": 67,
+          "cognitive_complexity": 40,
+          "avg_cc_per_function": 2.58,
+          "coverage": 86.9,
+          "code_smells": 3
+        },
+        {
+          "path": "src/components/auth/LoginForm.tsx",
+          "ncloc": 427,
+          "functions": 18,
+          "complexity": 64,
+          "cognitive_complexity": 50,
+          "avg_cc_per_function": 3.56,
+          "coverage": 80.3,
+          "code_smells": 4
+        },
+        {
+          "path": "src/components/profile/ProfileSettingsView.tsx",
+          "ncloc": 479,
+          "functions": 20,
+          "complexity": 59,
+          "cognitive_complexity": 27,
+          "avg_cc_per_function": 2.95,
+          "coverage": 53.4,
+          "code_smells": 3
+        },
+        {
+          "path": "src/App.tsx",
+          "ncloc": 287,
+          "functions": 23,
+          "complexity": 57,
+          "cognitive_complexity": 24,
+          "avg_cc_per_function": 2.48,
+          "coverage": 73.9,
+          "code_smells": 2
+        },
+        {
+          "path": "src/components/admin/RoleDetailDrawer.tsx",
+          "ncloc": 350,
+          "functions": 20,
+          "complexity": 51,
+          "cognitive_complexity": 28,
+          "avg_cc_per_function": 2.55,
+          "coverage": 68.9,
+          "code_smells": 1
+        },
+        {
+          "path": "src/services/authStorage.ts",
+          "ncloc": 126,
+          "functions": 18,
+          "complexity": 50,
+          "cognitive_complexity": 26,
+          "avg_cc_per_function": 2.78,
+          "coverage": 100,
+          "code_smells": 0
+        },
+        {
+          "path": "src/components/layout/Sidebar.tsx",
+          "ncloc": 366,
+          "functions": 13,
+          "complexity": 39,
+          "cognitive_complexity": 24,
+          "avg_cc_per_function": 3,
+          "coverage": 75.7,
+          "code_smells": 0
+        },
+        {
+          "path": "src/components/admin/PermissionsCatalogPicker.tsx",
+          "ncloc": 306,
+          "functions": 19,
+          "complexity": 36,
+          "cognitive_complexity": 23,
+          "avg_cc_per_function": 1.89,
+          "coverage": 79.2,
+          "code_smells": 0
+        },
+        {
+          "path": "src/components/ui/Icons.tsx",
+          "ncloc": 215,
+          "functions": 29,
+          "complexity": 29,
+          "cognitive_complexity": 0,
+          "avg_cc_per_function": 1,
+          "coverage": null,
+          "code_smells": 0
+        },
+        {
+          "path": "src/services/sessionSync.ts",
+          "ncloc": 84,
+          "functions": 14,
+          "complexity": 29,
+          "cognitive_complexity": 22,
+          "avg_cc_per_function": 2.07,
+          "coverage": 96.3,
+          "code_smells": 0
+        },
+        {
+          "path": "src/components/ui/Input.tsx",
+          "ncloc": 149,
+          "functions": 4,
+          "complexity": 28,
+          "cognitive_complexity": 20,
+          "avg_cc_per_function": 7,
+          "coverage": 97.5,
+          "code_smells": 5
+        },
+        {
+          "path": "src/components/auth/SetupAdminForm.tsx",
+          "ncloc": 299,
+          "functions": 7,
+          "complexity": 27,
+          "cognitive_complexity": 17,
+          "avg_cc_per_function": 3.86,
+          "coverage": 84.1,
+          "code_smells": 0
+        },
+        {
+          "path": "src/components/dashboard/DashboardHomeView.tsx",
+          "ncloc": 253,
+          "functions": 13,
+          "complexity": 27,
+          "cognitive_complexity": 3,
+          "avg_cc_per_function": 2.08,
+          "coverage": 100,
+          "code_smells": 1
+        },
+        {
+          "path": "src/components/ui/Button.tsx",
+          "ncloc": 134,
+          "functions": 3,
+          "complexity": 26,
+          "cognitive_complexity": 25,
+          "avg_cc_per_function": 8.67,
+          "coverage": 97.5,
+          "code_smells": 0
+        },
+        {
+          "path": "src/components/layout/ModulePlaceholderView.tsx",
+          "ncloc": 271,
+          "functions": 16,
+          "complexity": 24,
+          "cognitive_complexity": 7,
+          "avg_cc_per_function": 1.5,
+          "coverage": null,
+          "code_smells": 1
+        },
+        {
+          "path": "src/components/ui/Tabs.tsx",
+          "ncloc": 100,
+          "functions": 6,
+          "complexity": 21,
+          "cognitive_complexity": 22,
+          "avg_cc_per_function": 3.5,
+          "coverage": 93.2,
+          "code_smells": 0
+        },
+        {
+          "path": "src/components/auth/ChangePasswordModal.tsx",
+          "ncloc": 169,
+          "functions": 6,
+          "complexity": 20,
+          "cognitive_complexity": 11,
+          "avg_cc_per_function": 3.33,
+          "coverage": 84.3,
+          "code_smells": 0
+        },
+        {
+          "path": "src/utils/passwordValidation.ts",
+          "ncloc": 62,
+          "functions": 2,
+          "complexity": 18,
+          "cognitive_complexity": 17,
+          "avg_cc_per_function": 9,
+          "coverage": 100,
+          "code_smells": 0
+        },
+        {
+          "path": "src/components/ui/Modal.tsx",
+          "ncloc": 156,
+          "functions": 6,
+          "complexity": 16,
+          "cognitive_complexity": 6,
+          "avg_cc_per_function": 2.67,
+          "coverage": 95.2,
+          "code_smells": 1
+        },
+        {
+          "path": "src/components/auth/AuthCard.tsx",
+          "ncloc": 138,
+          "functions": 10,
+          "complexity": 11,
+          "cognitive_complexity": 2,
+          "avg_cc_per_function": 1.1,
+          "coverage": 76.9,
+          "code_smells": 0
+        },
+        {
+          "path": "src/components/admin/ServiceFilterButton.tsx",
+          "ncloc": 67,
+          "functions": 1,
+          "complexity": 11,
+          "cognitive_complexity": 9,
+          "avg_cc_per_function": 11,
+          "coverage": 100,
+          "code_smells": 0
+        }
+      ],
+      "filesOverAvgFuncCc10": [
+        {
+          "path": "src/components/admin/ServiceFilterButton.tsx",
+          "ncloc": 67,
+          "functions": 1,
+          "complexity": 11,
+          "cognitive_complexity": 9,
+          "avg_cc_per_function": 11,
+          "coverage": 100,
+          "code_smells": 0
+        }
+      ],
+      "topComplexFiles": [
+        {
+          "path": "src/services/authApi.ts",
+          "ncloc": 715,
+          "functions": 49,
+          "complexity": 159,
+          "cognitive_complexity": 95,
+          "avg_cc_per_function": 3.24,
+          "coverage": 88.3,
+          "code_smells": 2
+        },
+        {
+          "path": "src/components/admin/StaffManagementView.tsx",
+          "ncloc": 766,
+          "functions": 52,
+          "complexity": 117,
+          "cognitive_complexity": 113,
+          "avg_cc_per_function": 2.25,
+          "coverage": 77.3,
+          "code_smells": 5
+        },
+        {
+          "path": "src/components/admin/RolesManagementView.tsx",
+          "ncloc": 618,
+          "functions": 45,
+          "complexity": 95,
+          "cognitive_complexity": 73,
+          "avg_cc_per_function": 2.11,
+          "coverage": 85.4,
+          "code_smells": 2
+        },
+        {
+          "path": "src/components/admin/StaffDetailDrawer.tsx",
+          "ncloc": 566,
+          "functions": 26,
+          "complexity": 67,
+          "cognitive_complexity": 40,
+          "avg_cc_per_function": 2.58,
+          "coverage": 86.9,
+          "code_smells": 3
+        },
+        {
+          "path": "src/components/auth/LoginForm.tsx",
+          "ncloc": 427,
+          "functions": 18,
+          "complexity": 64,
+          "cognitive_complexity": 50,
+          "avg_cc_per_function": 3.56,
+          "coverage": 80.3,
+          "code_smells": 4
+        },
+        {
+          "path": "src/components/profile/ProfileSettingsView.tsx",
+          "ncloc": 479,
+          "functions": 20,
+          "complexity": 59,
+          "cognitive_complexity": 27,
+          "avg_cc_per_function": 2.95,
+          "coverage": 53.4,
+          "code_smells": 3
+        },
+        {
+          "path": "src/App.tsx",
+          "ncloc": 287,
+          "functions": 23,
+          "complexity": 57,
+          "cognitive_complexity": 24,
+          "avg_cc_per_function": 2.48,
+          "coverage": 73.9,
+          "code_smells": 2
+        },
+        {
+          "path": "src/components/admin/RoleDetailDrawer.tsx",
+          "ncloc": 350,
+          "functions": 20,
+          "complexity": 51,
+          "cognitive_complexity": 28,
+          "avg_cc_per_function": 2.55,
+          "coverage": 68.9,
+          "code_smells": 1
+        },
+        {
+          "path": "src/services/authStorage.ts",
+          "ncloc": 126,
+          "functions": 18,
+          "complexity": 50,
+          "cognitive_complexity": 26,
+          "avg_cc_per_function": 2.78,
+          "coverage": 100,
+          "code_smells": 0
+        },
+        {
+          "path": "src/components/layout/Sidebar.tsx",
+          "ncloc": 366,
+          "functions": 13,
+          "complexity": 39,
+          "cognitive_complexity": 24,
+          "avg_cc_per_function": 3,
+          "coverage": 75.7,
+          "code_smells": 0
+        },
+        {
+          "path": "src/components/admin/PermissionsCatalogPicker.tsx",
+          "ncloc": 306,
+          "functions": 19,
+          "complexity": 36,
+          "cognitive_complexity": 23,
+          "avg_cc_per_function": 1.89,
+          "coverage": 79.2,
+          "code_smells": 0
+        },
+        {
+          "path": "src/components/ui/Icons.tsx",
+          "ncloc": 215,
+          "functions": 29,
+          "complexity": 29,
+          "cognitive_complexity": 0,
+          "avg_cc_per_function": 1,
+          "coverage": null,
+          "code_smells": 0
+        },
+        {
+          "path": "src/services/sessionSync.ts",
+          "ncloc": 84,
+          "functions": 14,
+          "complexity": 29,
+          "cognitive_complexity": 22,
+          "avg_cc_per_function": 2.07,
+          "coverage": 96.3,
+          "code_smells": 0
+        },
+        {
+          "path": "src/components/ui/Input.tsx",
+          "ncloc": 149,
+          "functions": 4,
+          "complexity": 28,
+          "cognitive_complexity": 20,
+          "avg_cc_per_function": 7,
+          "coverage": 97.5,
+          "code_smells": 5
+        },
+        {
+          "path": "src/components/auth/SetupAdminForm.tsx",
+          "ncloc": 299,
+          "functions": 7,
+          "complexity": 27,
+          "cognitive_complexity": 17,
+          "avg_cc_per_function": 3.86,
+          "coverage": 84.1,
+          "code_smells": 0
+        },
+        {
+          "path": "src/components/dashboard/DashboardHomeView.tsx",
+          "ncloc": 253,
+          "functions": 13,
+          "complexity": 27,
+          "cognitive_complexity": 3,
+          "avg_cc_per_function": 2.08,
+          "coverage": 100,
+          "code_smells": 1
+        },
+        {
+          "path": "src/components/ui/Button.tsx",
+          "ncloc": 134,
+          "functions": 3,
+          "complexity": 26,
+          "cognitive_complexity": 25,
+          "avg_cc_per_function": 8.67,
+          "coverage": 97.5,
+          "code_smells": 0
+        },
+        {
+          "path": "src/components/layout/ModulePlaceholderView.tsx",
+          "ncloc": 271,
+          "functions": 16,
+          "complexity": 24,
+          "cognitive_complexity": 7,
+          "avg_cc_per_function": 1.5,
+          "coverage": null,
+          "code_smells": 1
+        },
+        {
+          "path": "src/components/ui/Tabs.tsx",
+          "ncloc": 100,
+          "functions": 6,
+          "complexity": 21,
+          "cognitive_complexity": 22,
+          "avg_cc_per_function": 3.5,
+          "coverage": 93.2,
+          "code_smells": 0
+        },
+        {
+          "path": "src/components/auth/ChangePasswordModal.tsx",
+          "ncloc": 169,
+          "functions": 6,
+          "complexity": 20,
+          "cognitive_complexity": 11,
+          "avg_cc_per_function": 3.33,
+          "coverage": 84.3,
+          "code_smells": 0
+        }
+      ],
+      "allFilesCount": 34,
+      "openIssuesTotal": 33,
+      "openIssuesSample": [
+        {
+          "issueId": "AaIHbFPd4pJmRLXHZilP",
+          "rule": "typescript:S6606",
+          "severity": "MINOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/services/authApi.ts",
+          "line": 390,
+          "message": "Prefer using nullish coalescing operator (`??=`) instead of an assignment expression, as it is simpler to read."
+        },
+        {
+          "issueId": "AaIHbFP-4pJmRLXHZilQ",
+          "rule": "typescript:S5906",
+          "severity": "MINOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/services/authStorage.test.ts",
+          "line": 37,
+          "message": "Prefer \"expect(localStorage).toHaveLength(0)\" over this generic assertion for better reporting; it works on any object with a numeric length property."
+        },
+        {
+          "issueId": "AaIHaOp2NZsPvRkYhAU9",
+          "rule": "typescript:S6819",
+          "severity": "MAJOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/admin/RolesManagementView.tsx",
+          "line": 598,
+          "message": "Use <details>, <fieldset>, <optgroup>, or <address> instead of the \"group\" role to ensure accessibility across all devices."
+        },
+        {
+          "issueId": "AaIHaOqrNZsPvRkYhAU_",
+          "rule": "typescript:S6819",
+          "severity": "MAJOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/admin/StaffDetailDrawer.tsx",
+          "line": 441,
+          "message": "Use <details>, <fieldset>, <optgroup>, or <address> instead of the \"group\" role to ensure accessibility across all devices."
+        },
+        {
+          "issueId": "AaIHaOqWNZsPvRkYhAU-",
+          "rule": "typescript:S6819",
+          "severity": "MAJOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/admin/StaffManagementView.tsx",
+          "line": 374,
+          "message": "Use <details>, <fieldset>, <optgroup>, or <address> instead of the \"group\" role to ensure accessibility across all devices."
+        },
+        {
+          "issueId": "AaIHaOorNZsPvRkYhAU8",
+          "rule": "typescript:S6819",
+          "severity": "MAJOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/ui/Modal.tsx",
+          "line": 81,
+          "message": "Use <dialog> instead of the \"dialog\" role to ensure accessibility across all devices."
+        },
+        {
+          "issueId": "AaIG57zGZoDwFCuM37np",
+          "rule": "typescript:S3776",
+          "severity": "CRITICAL",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/auth/LoginForm.tsx",
+          "line": 57,
+          "message": "Refactor this function to reduce its Cognitive Complexity from 16 to the 15 allowed."
+        },
+        {
+          "issueId": "AaHqVJLPY1AVmUEcT3kL",
+          "rule": "typescript:S3358",
+          "severity": "MAJOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/admin/RoleDetailDrawer.tsx",
+          "line": 269,
+          "message": "Extract this nested ternary operation into an independent statement."
+        },
+        {
+          "issueId": "AaHqVJKHY1AVmUEcT3kK",
+          "rule": "typescript:S6582",
+          "severity": "MINOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/admin/RolesManagementView.tsx",
+          "line": 86,
+          "message": "Prefer using an optional chain expression instead, as it's more concise and easier to read."
+        },
+        {
+          "issueId": "AaHqWOBrZCBOdTHqFMD9",
+          "rule": "typescript:S3358",
+          "severity": "MAJOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/dashboard/DashboardHomeView.tsx",
+          "line": 45,
+          "message": "Extract this nested ternary operation into an independent statement."
+        },
+        {
+          "issueId": "AaF-KAiXPXn2e6EuLu20",
+          "rule": "typescript:S3776",
+          "severity": "CRITICAL",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/auth/LoginForm.tsx",
+          "line": 14,
+          "message": "Refactor this function to reduce its Cognitive Complexity from 16 to the 15 allowed."
+        },
+        {
+          "issueId": "AaFgSzowWbAeMVCzOTy7",
+          "rule": "typescript:S6819",
+          "severity": "MAJOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/auth/LoginForm.tsx",
+          "line": 278,
+          "message": "Use <output> instead of the \"status\" role to ensure accessibility across all devices."
+        },
+        {
+          "issueId": "AaFgSzowWbAeMVCzOTy8",
+          "rule": "typescript:S6819",
+          "severity": "MAJOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/auth/LoginForm.tsx",
+          "line": 370,
+          "message": "Use <output> instead of the \"status\" role to ensure accessibility across all devices."
+        },
+        {
+          "issueId": "AaFfnk3Dbz5MmR-9FsGz",
+          "rule": "typescript:S3735",
+          "severity": "CRITICAL",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/layout/ModulePlaceholderView.tsx",
+          "line": 134,
+          "message": "Remove this use of the \"void\" operator."
+        },
+        {
+          "issueId": "AaFKoBFrRfHCON15YYGS",
+          "rule": "typescript:S3776",
+          "severity": "CRITICAL",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/admin/StaffManagementView.tsx",
+          "line": 90,
+          "message": "Refactor this function to reduce its Cognitive Complexity from 27 to the 15 allowed."
+        },
+        {
+          "issueId": "AaFKoBFrRfHCON15YYGQ",
+          "rule": "typescript:S3776",
+          "severity": "CRITICAL",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/admin/StaffManagementView.tsx",
+          "line": 14,
+          "message": "Refactor this function to reduce its Cognitive Complexity from 16 to the 15 allowed."
+        },
+        {
+          "issueId": "AaFKoBF2RfHCON15YYGX",
+          "rule": "typescript:S3776",
+          "severity": "CRITICAL",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/admin/StaffDetailDrawer.tsx",
+          "line": 23,
+          "message": "Refactor this function to reduce its Cognitive Complexity from 19 to the 15 allowed."
+        },
+        {
+          "issueId": "AaFKoBF2RfHCON15YYGY",
+          "rule": "typescript:S3358",
+          "severity": "MAJOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/admin/StaffDetailDrawer.tsx",
+          "line": 68,
+          "message": "Extract this nested ternary operation into an independent statement."
+        },
+        {
+          "issueId": "AaFKoBFrRfHCON15YYGU",
+          "rule": "typescript:S3358",
+          "severity": "MAJOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/admin/StaffManagementView.tsx",
+          "line": 540,
+          "message": "Extract this nested ternary operation into an independent statement."
+        },
+        {
+          "issueId": "AaFKoBDMRfHCON15YYGF",
+          "rule": "typescript:S6819",
+          "severity": "MAJOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/ui/Drawer.tsx",
+          "line": 76,
+          "message": "Use <dialog> instead of the \"dialog\" role to ensure accessibility across all devices."
+        },
+        {
+          "issueId": "AaFKoBGERfHCON15YYGd",
+          "rule": "typescript:S6582",
+          "severity": "MINOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/profile/ProfileSettingsView.tsx",
+          "line": 59,
+          "message": "Prefer using an optional chain expression instead, as it's more concise and easier to read."
+        },
+        {
+          "issueId": "AaFKoBGERfHCON15YYGe",
+          "rule": "typescript:S6582",
+          "severity": "MINOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/profile/ProfileSettingsView.tsx",
+          "line": 60,
+          "message": "Prefer using an optional chain expression instead, as it's more concise and easier to read."
+        },
+        {
+          "issueId": "AaFKoBG1RfHCON15YYGm",
+          "rule": "typescript:S7761",
+          "severity": "MAJOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/App.tsx",
+          "line": 168,
+          "message": "Prefer `.dataset` over `setAttribute(…)`."
+        },
+        {
+          "issueId": "AaFKoBFURfHCON15YYGI",
+          "rule": "typescript:S3776",
+          "severity": "CRITICAL",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/ui/Input.tsx",
+          "line": 26,
+          "message": "Refactor this function to reduce its Cognitive Complexity from 20 to the 15 allowed."
+        },
+        {
+          "issueId": "AaFKoBGRRfHCON15YYGg",
+          "rule": "typescript:S6606",
+          "severity": "MINOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/services/authApi.ts",
+          "line": 195,
+          "message": "Prefer using nullish coalescing operator (`??=`) instead of an assignment expression, as it is simpler to read."
+        },
+        {
+          "issueId": "AaFKoBG1RfHCON15YYGl",
+          "rule": "typescript:S7761",
+          "severity": "MAJOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/App.tsx",
+          "line": 39,
+          "message": "Prefer `.dataset` over `setAttribute(…)`."
+        },
+        {
+          "issueId": "AaFKoBGERfHCON15YYGf",
+          "rule": "typescript:S7761",
+          "severity": "MAJOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/profile/ProfileSettingsView.tsx",
+          "line": 118,
+          "message": "Prefer `.dataset` over `setAttribute(…)`."
+        },
+        {
+          "issueId": "AaFKoBFrRfHCON15YYGP",
+          "rule": "typescript:S6767",
+          "severity": "MINOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/admin/StaffManagementView.tsx",
+          "line": 11,
+          "message": "'onLogout' PropType is defined but prop is never used"
+        },
+        {
+          "issueId": "AaFKoBFURfHCON15YYGJ",
+          "rule": "typescript:S3358",
+          "severity": "MAJOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/ui/Input.tsx",
+          "line": 31,
+          "message": "Extract this nested ternary operation into an independent statement."
+        },
+        {
+          "issueId": "AaFKoBFURfHCON15YYGK",
+          "rule": "typescript:S3358",
+          "severity": "MAJOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/ui/Input.tsx",
+          "line": 61,
+          "message": "Extract this nested ternary operation into an independent statement."
+        },
+        {
+          "issueId": "AaFKoBFURfHCON15YYGL",
+          "rule": "typescript:S3358",
+          "severity": "MAJOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/ui/Input.tsx",
+          "line": 62,
+          "message": "Extract this nested ternary operation into an independent statement."
+        },
+        {
+          "issueId": "AaFKoBFURfHCON15YYGM",
+          "rule": "typescript:S3358",
+          "severity": "MAJOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/components/ui/Input.tsx",
+          "line": 146,
+          "message": "Extract this nested ternary operation into an independent statement."
+        },
+        {
+          "issueId": "AaFw48I57GRUxAPzdIGp",
+          "rule": "css:S9449",
+          "severity": "MINOR",
+          "type": "CODE_SMELL",
+          "component": "FMAT-Restaurant_Auth-Frontend:src/index.css",
+          "line": 101,
+          "message": "Specify which properties should transition so future style changes do not animate unexpectedly."
+        }
+      ]
+    }
+  }
+}
